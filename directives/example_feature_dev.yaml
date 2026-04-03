@@ -1,0 +1,60 @@
+name: "Standard Web Feature Development"
+version: "1.0.0"
+description: "From natural language requirement to tested PR"
+
+governance:
+  max_depth: 2
+  default_step_timeout: 300s
+  require_approval_on:
+    - "deployment"
+    - "budget_increase"
+
+roles:
+  product_manager:
+    instruction: "Analyze user request and produce a PRD."
+    tools: ["web_search", "file_writer"]
+  architect:
+    instruction: "Design the system based on requirement.md."
+    tools: ["file_reader"]
+  engineer:
+    instruction: "Write the code according to api_spec.json."
+    tools: ["python_interpreter", "shell_cmd"]
+
+workflow:
+  initial_state: "Discovery"
+  states:
+    Discovery:
+      role: product_manager
+      instruction: "Analyze user request and produce a PRD. Output requirement.md."
+      output_artifacts:
+        - name: "requirement.md"
+      transitions:
+        - if_exists: "requirement.md"
+          next_state: "Architecture"
+
+    Architecture:
+      role: architect
+      instruction: "Design the system based on requirement.md. Output api_spec.json."
+      input_artifacts:
+        include: ["requirement.md"]
+      output_artifacts:
+        - name: "api_spec.json"
+      transitions:
+        - if_exists: "api_spec.json"
+          next_state: "Implementation"
+
+    Implementation:
+      role: engineer
+      instruction: "Write the code according to api_spec.json. Output main.py."
+      input_artifacts:
+        include: ["api_spec.json"]
+      breakpoint_after: true
+      output_artifacts:
+        - name: "main.py"
+      transitions:
+        - if_exists: "main.py"
+          next_state: "Completed"
+
+    Completed:
+      type: "end"
+      message: "Feature developed and ready for review."

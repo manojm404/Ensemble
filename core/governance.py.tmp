@@ -1,0 +1,50 @@
+                print(f"Generation attempt 1 failed ({e}). Retrying...")
+                return await try_generate(attempt + 2)
+            else:
+                raise HTTPException(status_code=500, detail=f"Failed to generate valid SOP: {str(e)}")
+
+    result = await try_generate()
+    return result
+
+@app.post("/sop/validate")
+async def validate_sop(request: Request):
+    """Validate an SOP YAML string against the Ensemble schema."""
+    try:
+        data = await request.json()
+        yaml_str = data.get("yaml")
+        if not yaml_str:
+            return {"valid": False, "errors": ["No YAML content provided"]}
+            
+        sop = yaml.safe_load(yaml_str)
+        errors = []
+        
+        # Basic field validation
+        if not sop.get("name"): errors.append("Missing 'name' field")
+        if not sop.get("states"): errors.append("Missing 'states' block")
+        
+        if sop.get("states"):
+            for state_name, state_config in sop["states"].items():
+                if not state_config.get("role"):
+                    errors.append(f"State '{state_name}' is missing a 'role'")
+                if not state_config.get("instruction"):
+                    errors.append(f"State '{state_name}' is missing an 'instruction'")
+        
+        return {
+            "valid": len(errors) == 0,
+            "errors": errors
+        }
+    except Exception as e:
+        return {"valid": False, "errors": [f"YAML Parse Error: {str(e)}"]}
+
+# --- FastAPI WebSocket Endpoint ---
+
+@app.websocket("/ws/{company_id}")
+async def websocket_endpoint(websocket: WebSocket, company_id: str):
+    await ws_manager.connect(websocket, company_id)
+    try:
+        while True:
+            # Keep connection alive; can also receive control signals here
+            data = await websocket.receive_text()
+            # Handle incoming commands from UI if needed
+    except WebSocketDisconnect:
+        await ws_manager.disconnect(websocket, company_id)

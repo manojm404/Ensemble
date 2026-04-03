@@ -1,0 +1,28 @@
+name: Visual SOP Export
+description: Generated from Ensemble Studio Canvas
+states:
+  design_logic:
+    role: software_architect
+    instruction: Design the logic for a simple Python function to calculate the factorial of a number. Decide between an iterative or recursive approach and define how to handle edge cases like 0 and negative inputs.
+    tools: []
+    transitions:
+      - to: implement_function
+        condition: task_complete
+  implement_function:
+    role: backend_architect
+    instruction: Based on the design provided, write the Python code for the factorial function. Ensure the code is efficient, well-structured, and includes basic docstrings.
+    tools: []
+    transitions:
+      - to: code_explanation
+        condition: task_complete
+  code_explanation:
+    role: default_agent
+    instruction: Take the written Python code and provide a comprehensive line-by-line explanation of every step to ensure a beginner can understand how the factorial is computed.
+    tools: []
+    transitions:
+      - to: end
+        condition: task_complete
+  end:
+    role: System
+    instruction: Process complete.
+    transitions: []

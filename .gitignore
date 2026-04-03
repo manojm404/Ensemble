@@ -1,0 +1,50 @@
+# --- ENSEMBLE GITIGNORE (V1.5 Milestone) ---
+
+# Sensitive Configuration
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Python Environments & Artifacts
+venv/
+.venv/
+env/
+ENV/
+build/
+dist/
+*.py[cod]
+*$py.class
+__pycache__/
+
+# Node.js & UI
+ui/node_modules/
+ui/dist/
+ui/src-tauri/target/
+ui/src-tauri/binaries/
+.next/
+out/
+.npm
+.yarn-error.log
+
+# Ensemble Runtime Data (CAS & Governance)
+data/
+*.db
+*.sqlite3
+history/
+saved_states/
+
+# Logs & Temporary Files
+*.log
+/tmp/
+temp/
+.DS_Store
+Thumbs.db
+
+# IDE & Tooling
+.vscode/
+.idea/
+.gemini/
+.antigravity/
+.ipynb_checkpoints/

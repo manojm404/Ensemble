@@ -1,0 +1,18 @@
+name: "Direct Chat Proxy"
+description: "A single-state SOP for direct human-agent interaction via the Ensemble UI."
+
+states:
+  Synthesis:
+    role: "Assistant"
+    instruction: |
+      You are the Ensemble Corporate Assistant.
+      The user will provide a high-level goal or a simple question.
+      Help them directly or suggest a more complex SOP if needed.
+    transitions:
+      - to: "end"
+        condition: "task_complete"
+
+  end:
+    type: "end"
+    role: "System"
+    instruction: "Task finalized."

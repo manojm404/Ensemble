@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+python-dotenv
+httpx
+PyYAML
+requests
+pydantic
+tiktoken
+sentence-transformers
+numpy
+websockets
+markdown
+jinja2
+python-multipart
+# metagpt (Required for specific actions in core/actions/)
+metagpt
