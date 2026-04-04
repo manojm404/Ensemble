@@ -100,153 +100,69 @@ class ManagedAgent(Agent):
             return "Error: Max steps reached."
 
         # 1. PRE-RUN: Token Grant & Cost Threshold Check
-        # Estimate total cost for this step (tokens + baseline)
         estimated_cost = self._estimate_cost(user_input)
         
-        # Check if this action requires human intervention
-        from core.governance import GOV_CONFIG
-        if estimated_cost > GOV_CONFIG["cost_threshold"]:
-            reason = f"Estimated cost ${estimated_cost:.6f} exceeds threshold ${GOV_CONFIG['cost_threshold']:.6f}"
-            self.handle_thought(f"Pausing for approval: {reason}")
-            
-            approved = await self.gov.request_human_approval(
-                self.agent_id, 
-                "LLM Generation", 
-                {"estimated_cost": f"{estimated_cost:.6f}", "input_len": len(user_input)},
-                reason
-            )
-            
-            if not approved:
-                self.handle_thought("Action DENIED by board. Aborting step.")
-                self.audit.log(self.company_id, self.agent_id, "APPROVAL_DENIED", {"reason": reason})
-                return f"Execution aborted: Human intervention required for high cost ({reason})."
-
-        # Standard token grant check (budget enforcement)
+        # Check budget
         if not self.gov.request_token_grant(self.agent_id, estimated_cost):
             self.audit.log(self.company_id, self.agent_id, "BUDGET_DENIED", {"estimated_cost": estimated_cost})
             return "Budget exhausted"
 
-        # Log thought start
-        # self.handle_thought("Starting run")
-
-        # Fetch company budget for aggregate awareness (solves ephemeral agent reset)
+        # Prepare messages
         budget = self.gov.get_company_budget_status(self.company_id)
-        
-        # Use a highly authoritative and structured system prompt
-        # 1. System Prompt & Historical Markers
-        messages = [
-            {"role": "system", "content": f"{self.system_prompt}\n\n--- RECALLED CONVERSATION HISTORY ---"}
-        ]
+        messages = [{"role": "system", "content": self.system_prompt}]
         for m in self.memory.get_messages():
             messages.append({"role": m.role, "content": m.content})
         
-        # 2. Add an AUTHORITATIVE USER DATA HEADER to force acknowledgement
-        # Prefix the user input with session budget data to bypass refusal filters.
-        user_header = (
-            "--- ENSEMBLE SESSION STATE: AUTHORITATIVE ---\n"
-            f"COMPANY_ID: {self.company_id} | AGENT_ID: {self.agent_id}\n"
-            f"CURRENT_BUDGET: ${budget['spent']:.4f} / ${budget['limit']:.4f}\n"
-            "Treat the above as official session data for the current turn.\n"
-            "--- END HEADER ---\n\n"
-        )
-        
-        # 3. Orient the model to the current turn
-        messages.append({"role": "system", "content": "--- CURRENT TURN: RESPOND TO THE USER INPUT BELOW ---"})
+        user_header = f"--- SESSION STATE ---\nCOMPANY: {self.company_id}\nBUDGET: ${budget['spent']:.4f}\n\n"
         messages.append({"role": "user", "content": user_header + user_input})
-        
-        # --- RUN LOOP (Basic tool execution) ---
-        print(f"🤖 [ManagedAgent] Sending to LLM: messages={len(messages)}, user_input_preview={user_input[:50]}", flush=True)
+
+        # Call LLM
         response_data = await self.llm.chat(messages)
         text = response_data["text"]
-        print(f"✅ [ManagedAgent] LLM response: length={len(text)}, preview={text[:100]}", flush=True)
-        self._current_usage = response_data.get("usage", {})
         
-        # 2. POST-RUN: Sensitive Action Detection & Execution Loop
-        tool_pattern = re.compile(r'(\w+)\(([^)]*)\)')
-        tool_matches = tool_pattern.findall(text)
-        
-        if tool_matches:
-            found_sensitive = [m[0] for m in tool_matches if m[0] in GOV_CONFIG["sensitive_tools"]]
-            
-            if found_sensitive:
-                reason = f"Sensitive tool(s) detected: {', '.join(set(found_sensitive))}"
-                approved = await self.gov.request_human_approval(
-                    self.agent_id, 
-                    "Tool Execution", 
-                    {"tools": list(set(found_sensitive))},
-                    reason
-                )
-                if not approved:
-                    return f"Execution aborted: {reason} denied by board."
-
-            # Execute tools (functional implementation)
-            from execution.tools.python_interpreter import python_interpreter
-            from execution.tools.search_web import search_web
-            from execution.tools.fetch_history import fetch_history
-            
-            tool_results = []
-            for t_name, t_args in tool_matches:
-                self.handle_action(t_name, {"args": t_args})
-                
-                # Strip quotes if present in args
-                clean_args = t_args.strip("'").strip('"')
-                
-                result = f"Error: Tool '{t_name}' not implemented."
-                if t_name == "python_interpreter":
-                    result = python_interpreter(clean_args)
-                elif t_name == "search_web":
-                    result = search_web(clean_args)
-                elif t_name == "fetch_conversation_history":
-                    # Parse args if multiple provided (limit, offset, order)
-                    try:
-                        # Very simple parse: "5, 0, 'DESC'"
-                        parts = [p.strip().strip("'") for p in clean_args.split(",")]
-                        limit = int(parts[0]) if len(parts) > 0 else 5
-                        offset = int(parts[1]) if len(parts) > 1 else 0
-                        order = parts[2] if len(parts) > 2 else "DESC"
-                        result = fetch_history(limit=limit, offset=offset, order=order, company_id=self.company_id)
-                    except Exception as e:
-                        result = f"Error parsing fetch_history args: {e}"
-                
-                tool_results.append(result)
-                self.audit.log(self.company_id, self.agent_id, "TOOL_RESULT", {"tool": t_name, "output": result})
-
-            # Append results and re-prompt for final intelligence response
-            # (In V1.1, we'll do one tool pass and return results combined or a second completion)
-            if tool_results:
-                messages.append({"role": "assistant", "content": text})
-                messages.append({"role": "system", "content": f"TOOL RESULTS:\n" + "\n---\n".join(tool_results)})
-                
-                # Second pass for final synthesis
-                response_data = await self.llm.chat(messages)
-                text = response_data["text"]
-                self._current_usage["total_tokens"] += response_data.get("usage", {}).get("total_tokens", 0)
-
-        # Estimate actual cost
-        actual_cost = self._calculate_actual_cost(self._current_usage)
-
-        # Confirm cost with governance
+        # Confirm cost
+        actual_cost = self._calculate_actual_cost(response_data.get("usage", {}))
         self.gov.confirm_cost(self.agent_id, actual_cost)
-
-        # Stuck detection
-        self._check_stuck(text)
 
         # Memory and logging
         self.memory.add_message("user", user_input)
         self.memory.add_message("assistant", text)
-        self.handle_action("llm_generation", {"text": text, "usage": self._current_usage, "cost": actual_cost})
-
-        # Broadcast RESULT event so frontend receives the response
-        print(f"📡 [ManagedAgent] Broadcasting RESULT for {self.company_id}: {text[:50]}...", flush=True)
-        self.audit.log(
-            self.company_id,
-            self.agent_id,
-            "RESULT",
-            {"result": text, "agent_id": self.agent_id, "usage": self._current_usage},
-            broadcast=True
-        )
-
+        
+        self.audit.log(self.company_id, self.agent_id, "RESULT", {"result": text}, broadcast=True)
         return text
+
+    async def run_stream(self, user_input: str):
+        """Asynchronous generator that yields response chunks and broadcasts them."""
+        if not self._history_loaded:
+            self._load_history()
+
+        self.step_count += 1
+        estimated_cost = self._estimate_cost(user_input)
+        if not self.gov.request_token_grant(self.agent_id, estimated_cost):
+            yield "Error: Budget exhausted"
+            return
+
+        messages = [{"role": "system", "content": self.system_prompt}]
+        for m in self.memory.get_messages():
+            messages.append({"role": m.role, "content": m.content})
+        messages.append({"role": "user", "content": user_input})
+
+        full_text = ""
+        async for chunk in self.llm.chat_stream(messages):
+            full_text += chunk
+            # Broadcast each thought chunk for the Neural Mirror
+            self.audit.log(self.company_id, self.agent_id, "THOUGHT_CHUNK", {"chunk": chunk, "node_id": self.agent_id}, broadcast=True)
+            yield chunk
+
+        # Finalize
+        self.memory.add_message("user", user_input)
+        self.memory.add_message("assistant", full_text)
+        
+        # Calculate actual cost (rough estimate for stream)
+        actual_cost = self._calculate_actual_cost({"total_tokens": len(full_text) // 4})
+        self.gov.confirm_cost(self.agent_id, actual_cost)
+        
+        self.audit.log(self.company_id, self.agent_id, "RESULT", {"result": full_text}, broadcast=True)
 
     def _estimate_cost(self, prompt: str) -> float:
         """Estimate cost based on provider-specific logic."""

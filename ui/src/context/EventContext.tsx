@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 
 export interface EnsembleEvent {
   id: string;
-  type: 'THOUGHT' | 'ACTION' | 'RESULT' | 'PENDING_APPROVAL' | 'GOVERNANCE_TIMEOUT' | 'FAILURE' | 'audit_event';
+  type: 'THOUGHT' | 'ACTION' | 'RESULT' | 'PENDING_APPROVAL' | 'GOVERNANCE_TIMEOUT' | 'FAILURE' | 'THOUGHT_CHUNK' | 'audit_event';
   timestamp: string;
   agent_id?: string;
   data: any;

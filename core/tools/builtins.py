@@ -1,31 +1,77 @@
 """
 core/tools/builtins.py
-Built-in tools for Ensemble agents, decorated for registration.
+Built-in tools for Ensemble agents, secured via DockerExecutor and SecurityGovernor.
 """
 import os
-import subprocess
-import requests
-from typing import str
+import logging
+from typing import Dict, Any
 from core.tool_decorator import tool
+from core.docker_executor import docker_executor, DOCKER_AVAILABLE
+from core.security_policy import security_governor
 
-WORKSPACE_DIR = "data/workspace/"
-
-@tool
-def web_search(query: str) -> str:
-    """Uses DuckDuckGo API to search the web for information."""
-    # Simple GET to duckduckgo for information retrieval
-    try:
-        response = requests.get(f"https://api.duckduckgo.com/?q={query}&format=json")
-        response.raise_for_status()
-        data = response.json()
-        return data.get("AbstractText", "No search results found.")
-    except Exception as e:
-        return f"Web search error: {e}"
+WORKSPACE_DIR = os.path.abspath("data/workspace/")
 
 @tool
-def file_writer(path: str, content: str) -> str:
-    """Writes content to a file in the workspace directory."""
+def python_interpreter(code: str, agent_id: str = "default_agent") -> str:
+    """Runs Python code in a hardened Docker container."""
+    if not security_governor.eval_permission(agent_id, "python_interpreter", code):
+        return "Error: Permission Denied by SecurityGovernor."
+
+    if DOCKER_AVAILABLE:
+        logging.info(f"�� Executing Python for {agent_id} in Docker...")
+        result = docker_executor.run_container(
+            image="python:3.10-slim",
+            command=f"python3 -c \"{code}\""
+        )
+        if result["status"] == "success":
+            return result["output"]
+        else:
+            return f"Docker Error: {result.get('message', result.get('output'))}"
+    else:
+        # Fallback to subprocess with DANGER log
+        logging.warning(f"⚠️ DANGER: Scaling back to UNPROTECTED subprocess for {agent_id}")
+        import subprocess
+        try:
+            res = subprocess.run(["python3", "-c", code], capture_output=True, text=True, timeout=10)
+            return res.stdout if res.returncode == 0 else f"Subprocess Error: {res.stderr}"
+        except Exception as e:
+            return f"Subprocess Fatal: {e}"
+
+@tool
+def shell_cmd(command: str, agent_id: str = "default_agent") -> str:
+    """Runs shell commands in a hardened Docker container."""
+    if not security_governor.eval_permission(agent_id, "shell_cmd", command):
+        return "Error: Permission Denied by SecurityGovernor."
+
+    if DOCKER_AVAILABLE:
+        logging.info(f"🐳 Executing Shell for {agent_id} in Docker...")
+        result = docker_executor.run_container(
+            image="alpine:latest",
+            command=f"sh -c \"{command}\""
+        )
+        if result["status"] == "success":
+            return result["output"]
+        else:
+            return f"Docker Error: {result.get('message', result.get('output'))}"
+    else:
+        logging.warning(f"⚠️ DANGER: Scaling back to UNPROTECTED shell for {agent_id}")
+        import subprocess
+        try:
+            res = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10, cwd=WORKSPACE_DIR)
+            return res.stdout if res.returncode == 0 else f"Subprocess Error: {res.stderr}"
+        except Exception as e:
+            return f"Subprocess Fatal: {e}"
+
+@tool
+def file_writer(path: str, content: str, agent_id: str = "default_agent") -> str:
+    """Writes content to a file, subject to path-based security."""
+    if not security_governor.eval_permission(agent_id, "file_writer", path):
+        return "Error: Permission Denied by SecurityGovernor."
+        
     full_path = os.path.join(WORKSPACE_DIR, path)
+    if not full_path.startswith(WORKSPACE_DIR):
+        return "Error: Path Traversal Detected. Access Denied."
+
     os.makedirs(os.path.dirname(full_path), exist_ok=True)
     try:
         with open(full_path, "w") as f:
@@ -33,54 +79,3 @@ def file_writer(path: str, content: str) -> str:
         return f"Successfully wrote to {path}"
     except Exception as e:
         return f"File write error: {e}"
-
-@tool
-def file_reader(path: str) -> str:
-    """Reads content from a file in the workspace directory."""
-    full_path = os.path.join(WORKSPACE_DIR, path)
-    if not os.path.exists(full_path):
-        return f"File {path} does not exist."
-    try:
-        with open(full_path, "r") as f:
-            return f.read()
-    except Exception as e:
-        return f"File read error: {e}"
-
-@tool
-def python_interpreter(code: str) -> str:
-    """Runs Python code in a subprocess with a timeout."""
-    try:
-        # Avoid destructive file operations and network (minimal safety)
-        result = subprocess.run(
-            ["python3", "-c", code],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
-    except subprocess.TimeoutExpired:
-        return "Error: Python execution timed out."
-    except Exception as e:
-        return f"Execution error: {e}"
-
-@tool
-def shell_cmd(command: str) -> str:
-    """Runs restricted shell commands in a workspace directory."""
-    whitelist = ["ls", "cat", "echo", "mkdir"]
-    base_cmd = command.split()[0] if command.split() else ""
-    
-    if base_cmd not in whitelist:
-        return f"Error: Command '{base_cmd}' is NOT in the whitelist ({whitelist})."
-    
-    try:
-        result = subprocess.run(
-            command,
-            cwd=WORKSPACE_DIR,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
-    except Exception as e:
-        return f"Shell error: {e}"

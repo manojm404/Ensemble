@@ -11,6 +11,40 @@ class LLMProvider:
     def __init__(self, provider: str = None, model: str = None, base_url: str = None, api_key: str = None):
         self.reinitialize(provider, model, base_url, api_key)
 
+    @staticmethod
+    def get_supported_models() -> List[Dict[str, Any]]:
+        """Returns the official registry of supported models for v3."""
+        return [
+            {
+                "id": "gemini-2.5-flash",
+                "name": "Gemini 2.5 Flash",
+                "provider": "gemini",
+                "cost_per_1k_tokens": 0.0001,
+                "capabilities": ["tools", "vision", "high_context"]
+            },
+            {
+                "id": "gemini-2.0-flash",
+                "name": "Gemini 2.0 Flash",
+                "provider": "gemini",
+                "cost_per_1k_tokens": 0.0001,
+                "capabilities": ["tools", "vision"]
+            },
+            {
+                "id": "llama-3.2-3b",
+                "name": "Llama 3.2 (3B)",
+                "provider": "ollama",
+                "cost_per_1k_tokens": 0.0,
+                "capabilities": ["local", "fast"]
+            },
+            {
+                "id": "deepseek-v3",
+                "name": "DeepSeek V3",
+                "provider": "openai",
+                "cost_per_1k_tokens": 0.0002,
+                "capabilities": ["reasoning", "coding"]
+            }
+        ]
+
     def reinitialize(self, provider: str = None, model: str = None, base_url: str = None, api_key: str = None):
         """Reload configuration from environment or provided overrides."""
         from dotenv import load_dotenv
@@ -29,6 +63,17 @@ class LLMProvider:
             return await self._chat_gemini(messages, **kwargs)
         elif self.provider in ["ollama", "openai", "local"]:
             return await self._chat_openai_compatible(messages, **kwargs)
+        else:
+            raise ValueError(f"Unsupported provider: {self.provider}")
+
+    async def chat_stream(self, messages: List[Dict[str, str]], **kwargs):
+        """Streaming chat completion. Yields text chunks."""
+        if self.provider == "gemini":
+            async for chunk in self._chat_gemini_stream(messages, **kwargs):
+                yield chunk
+        elif self.provider in ["ollama", "openai", "local"]:
+            async for chunk in self._chat_openai_compatible_stream(messages, **kwargs):
+                yield chunk
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
 
@@ -159,6 +204,52 @@ class LLMProvider:
                 # Log actual error to console for debugging
                 print(f"❌ [LLMProvider v1.1.3] Gemini API Error: {str(e)}", flush=True)
                 return {"text": f"Error calling Gemini [v1.1.3]: {str(e)}", "usage": {}}
+    async def _chat_gemini_stream(self, messages: List[Dict[str, str]], **kwargs):
+        """Stream chunks from Gemini."""
+        headers = {"Content-Type": "application/json", "x-goog-api-key": self.api_key}
+        refined = self._prepare_messages(messages)
+        contents = []
+        system_instruction = None
+        for m in refined:
+            if m["role"] == "system":
+                system_instruction = (system_instruction + "\n" + m["content"]) if system_instruction else m["content"]
+            else:
+                contents.append({"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]})
+        
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:streamGenerateContent?alt=sse"
+        payload = {"contents": contents}
+        if system_instruction: payload["system_instruction"] = {"parts": [{"text": system_instruction}]}
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as response:
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        try:
+                            data = json.loads(line[6:])
+                            text = data["candidates"][0]["content"]["parts"][0]["text"]
+                            yield text
+                        except:
+                            pass
+
+    async def _chat_openai_compatible_stream(self, messages: List[Dict[str, str]], **kwargs):
+        """Stream chunks from OpenAI-compatible provider."""
+        headers = {"Content-Type": "application/json"}
+        if self.api_key: headers["Authorization"] = f"Bearer {self.api_key}"
+        refined = self._prepare_messages(messages)
+        payload = {"model": self.model, "messages": refined, "stream": True}
+        url = self.base_url.rstrip("/") + "/chat/completions"
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as response:
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        if line[6:] == "[DONE]": break
+                        try:
+                            data = json.loads(line[6:])
+                            text = data["choices"][0]["delta"].get("content", "")
+                            if text: yield text
+                        except:
+                            pass
 
     async def _chat_openai_compatible(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
         """Call Ollama / LM Studio using OpenAI-style JSON."""

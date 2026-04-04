@@ -11,11 +11,12 @@ from dataclasses import dataclass
 class Skill:
     name: str
     description: str
-    prompt_text: str
-    tools: List[str]
+    prompt_text: str = ""
+    tools: List[str] = None
     emoji: str = "🤖"
     color: str = "#6366f1"
     vibe: str = "Professional"
+    category: str = "General"
 
 # Mapping abstract tools in agency-agents to Ensemble's concrete tools
 TOOL_MAPPING = {
@@ -63,14 +64,21 @@ class SkillRegistry:
                 
                 mapped_tools = [TOOL_MAPPING.get(t, t) for t in raw_tools]
 
+                # Derived category from filepath (e.g., engineering-backend.md)
+                basename = os.path.basename(filepath)
+                category = "General"
+                if "-" in basename:
+                    category = basename.split("-")[0].capitalize()
+
                 skill = Skill(
                     name=metadata.get("name", "Unknown Agent"),
                     description=metadata.get("description", ""),
                     prompt_text=prompt_text,
-                    tools=mapped_tools,
+                    tools=mapped_tools or [],
                     emoji=metadata.get("emoji", "🤖"),
                     color=metadata.get("color", "#6366f1"),
-                    vibe=metadata.get("vibe", "Professional")
+                    vibe=metadata.get("vibe", "Professional"),
+                    category=category
                 )
                 
                 # Key by name (slugified or simple)
@@ -92,7 +100,8 @@ class SkillRegistry:
                 "name": skill.name,
                 "description": skill.description,
                 "emoji": skill.emoji,
-                "color": skill.color
+                "color": skill.color,
+                "category": getattr(skill, "category", "General")
             }
             for skill_id, skill in self.skills.items()
         ]

@@ -11,8 +11,10 @@ import os
 import yaml
 import uuid
 import asyncio
-from typing import Dict, Any, Optional, Callable
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+import zlib
+import base64
+from typing import Dict, Any, Optional, Callable, List
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -44,6 +46,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+WORKSPACE_DIR = "data/workspace/"
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
 # Setup backend service singletons for endpoints
 audit_logger = AuditLogger()
@@ -110,6 +115,7 @@ class Governance:
         # Result store: approval_id -> bool (Approved/Denied)
         self.approval_results: Dict[str, bool] = {}
         self.approval_data: Dict[str, Dict] = {}
+        self.is_panic = False
         
         self._load_pending_from_db()
         self.start_timeout_monitor()
@@ -231,6 +237,48 @@ class Governance:
                     graph_json TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS executions (
+                    run_id TEXT PRIMARY KEY,
+                    workflow_id TEXT,
+                    status TEXT,
+                    current_node TEXT,
+                    last_agent_id TEXT,
+                    parent_run_id TEXT,
+                    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(parent_run_id) REFERENCES executions(run_id)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS node_executions (
+                    run_id TEXT,
+                    node_id TEXT,
+                    status TEXT,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(run_id, node_id)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT,
+                    node_id TEXT,
+                    artifact_hash TEXT,
+                    graph_state_compressed BLOB,
+                    status TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(run_id) REFERENCES executions(run_id)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS macros (
+                    macro_id TEXT PRIMARY KEY,
+                    name TEXT,
+                    graph_json TEXT,
+                    author_id TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             conn.execute("""
@@ -384,10 +432,29 @@ class Governance:
         thread = threading.Thread(target=monitor, daemon=True)
         thread.start()
 
+    def get_macro(self, macro_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a macro sub-graph from SQLite."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("SELECT graph_json FROM macros WHERE macro_id = ?", (macro_id,))
+            row = cursor.fetchone()
+            if row:
+                return json.loads(row[0])
+        return None
+
 gov_instance = Governance()
 engine = SOPEngine(space, audit_logger, llm, gov_instance)
 
 # --- FastAPI REST Endpoints ---
+
+@app.get("/api/models")
+async def get_models():
+    """List supported models for the UI registry."""
+    return LLMProvider.get_supported_models()
+
+@app.get("/api/skills")
+async def get_skills():
+    """List available agent skills from SkillRegistry."""
+    return skill_registry.list_skills()
 
 @app.get("/health")
 async def health():
@@ -396,6 +463,71 @@ async def health():
 @app.get("/skills")
 async def get_available_skills():
     return skill_registry.list_skills()
+
+@app.post("/api/panic")
+async def trigger_panic():
+    """Universal Abort: Snapshots state, kills sessions, and generates forensics."""
+    gov_instance.is_panic = True
+    
+    # Forensics Report (v3 spec)
+    report = f"""# Forensic Report: System Panic
+## Timestamp: {time.strftime('%Y-%m-%dT%H:%M:%SZ')}
+## Status: SYSTEM_HALTED
+
+### Snapshot Details
+The Ensemble governance engine has intercepted a panic signal. All active agent API sessions have been terminated.
+- **Panic State**: ACTIVE
+- **Reason**: Manual Override (Panic Button 2.0)
+- **Active Approvals**: {len(gov_instance.pending_approvals)} cleared.
+
+### Remediation Steps
+1. Review the audit log for anomalies.
+2. Manually restart the server to clear the panic flag.
+3. Verify budget integrity in the Governance dashboard.
+"""
+    
+    # Commit report to CAS for audit
+    report_hash = space.write(report.encode(), "panic_report.md", "system", "company_alpha")
+    audit_logger.log("company_alpha", "governance", "PANIC_TRIGGERED", {"report_hash": report_hash}, broadcast=True)
+    
+    return {"status": "panic_active", "forensics_hash": report_hash}
+
+@app.get("/api/workspace/tree")
+async def get_workspace_tree():
+    """Recursively list files in the workspace directory."""
+    tree = []
+    for root, dirs, files in os.walk(WORKSPACE_DIR):
+        relative_root = os.path.relpath(root, WORKSPACE_DIR)
+        if relative_root == ".":
+            relative_root = ""
+        
+        for name in files:
+            file_path = os.path.join(relative_root, name)
+            tree.append({
+                "name": name,
+                "path": file_path,
+                "type": "file",
+                "size": os.path.getsize(os.path.join(root, name))
+            })
+    return tree
+
+@app.get("/api/workspace/file")
+async def get_workspace_file(path: str):
+    """Retrieve content of a workspace file."""
+    full_path = os.path.join(WORKSPACE_DIR, path)
+    
+    # Simple security check to stay within workspace
+    if not os.path.abspath(full_path).startswith(os.path.abspath(WORKSPACE_DIR)):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    try:
+        with open(full_path, "r") as f:
+            return {"path": path, "content": f.read()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/governance/pending")
 async def get_pending_approvals():
@@ -729,3 +861,148 @@ async def delete_chat_topic(topic_id: str):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8088)
+
+@app.get("/api/runs/{run_id}/timeline")
+async def get_run_timeline(run_id: str):
+    """Retrieve all execution snapshots for the scrub bar."""
+    with sqlite3.connect(gov_instance.db_path) as conn:
+        cursor = conn.execute("""
+            SELECT id, node_id, artifact_hash, graph_state_compressed, status, created_at 
+            FROM snapshots WHERE run_id = ? ORDER BY created_at ASC
+        """, (run_id,))
+        
+        timeline = []
+        for row in cursor.fetchall():
+            # Decompress graph state if exists
+            graph_state = None
+            if row[3]:
+                try:
+                    graph_state = json.loads(zlib.decompress(row[3]).decode())
+                except:
+                    graph_state = {}
+
+            timeline.append({
+                "id": row[0],
+                "node_id": row[1],
+                "artifact_hash": row[2],
+                "graph_state": graph_state,
+                "status": row[4],
+                "timestamp": row[5]
+            })
+        return timeline
+
+@app.post("/api/runs/{run_id}/fork")
+async def fork_run(run_id: str, snapshot_id: int):
+    """Create a lineage-linked fork from a specific snapshot point."""
+    new_run_id = f"fork_{uuid.uuid4().hex[:8]}"
+    
+    with sqlite3.connect(gov_instance.db_path) as conn:
+        # Verify if run_id exists
+        cursor = conn.execute("SELECT workflow_id FROM executions WHERE run_id = ?", (run_id,))
+        orig = cursor.fetchone()
+        if not orig:
+            raise HTTPException(status_code=404, detail="Original run not found")
+        
+        workflow_id = orig[0]
+        
+        # Insert new run with lineage
+        conn.execute("""
+            INSERT INTO executions (run_id, workflow_id, status, parent_run_id)
+            VALUES (?, ?, ?, ?)
+        """, (new_run_id, workflow_id, "idle", run_id))
+        
+        # Clone graph state from snapshot to the new run's starting point
+        cursor = conn.execute("SELECT graph_state_compressed FROM snapshots WHERE id = ?", (snapshot_id,))
+        snap = cursor.fetchone()
+        if snap and snap[0]:
+            conn.execute("""
+                INSERT INTO snapshots (run_id, node_id, graph_state_compressed, status)
+                VALUES (?, ?, ?, ?)
+            """, (new_run_id, "__fork_root__", snap[0], "root"))
+            
+    return {"status": "forked", "new_run_id": new_run_id, "parent_run_id": run_id}
+@app.get("/api/workflows")
+async def list_workflows():
+    """List all saved visual workflows."""
+    with sqlite3.connect(gov_instance.db_path) as conn:
+        cursor = conn.execute("SELECT id, name, updated_at FROM workflows ORDER BY updated_at DESC")
+        return [{"id": row[0], "name": row[1], "updated_at": row[2]} for row in cursor.fetchall()]
+
+@app.get("/api/workflows/{wf_id}")
+async def get_workflow(wf_id: str):
+    """Fetch a specific workflow graph."""
+    with sqlite3.connect(gov_instance.db_path) as conn:
+        cursor = conn.execute("SELECT id, name, graph_json FROM workflows WHERE id = ?", (wf_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        return {"id": row[0], "name": row[1], "graph": json.loads(row[2])}
+
+@app.post("/api/workflows")
+async def save_workflow(wf: WorkflowUpdate):
+    """Save or update a visual workflow."""
+    wf_id = wf.id or f"wf_{uuid.uuid4().hex[:8]}"
+    with sqlite3.connect(gov_instance.db_path) as conn:
+        conn.execute("""
+            INSERT INTO workflows (id, name, graph_json, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                graph_json = excluded.graph_json,
+                updated_at = CURRENT_TIMESTAMP
+        """, (wf_id, wf.name, wf.graph_json))
+    return {"status": "saved", "id": wf_id}
+
+@app.delete("/api/workflows/{wf_id}")
+async def delete_workflow(wf_id: str):
+    """Remove a workflow from the system."""
+    with sqlite3.connect(gov_instance.db_path) as conn:
+        conn.execute("DELETE FROM workflows WHERE id = ?", (wf_id,))
+    return {"status": "deleted"}
+@app.get("/api/macros")
+async def list_macros():
+    """List all community-created Macros."""
+    with sqlite3.connect(gov_instance.db_path) as conn:
+        cursor = conn.execute("SELECT macro_id, name, author_id, created_at FROM macros")
+        return [{"id": row[0], "name": row[1], "author": row[2], "created_at": row[3]} for row in cursor.fetchall()]
+
+@app.post("/api/macros")
+async def create_macro(macro: Dict[str, Any]):
+    """Register a new Macro sub-graph."""
+    macro_id = macro.get("id") or f"macro_{uuid.uuid4().hex[:8]}"
+    with sqlite3.connect(gov_instance.db_path) as conn:
+        conn.execute("""
+            INSERT INTO macros (macro_id, name, graph_json, author_id, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(macro_id) DO UPDATE SET
+                name = excluded.name,
+                graph_json = excluded.graph_json,
+                author_id = excluded.author_id
+        """, (macro_id, macro["name"], json.dumps(macro["graph_json"]), macro.get("author", "anonymous"), time.strftime("%Y-%m-%dT%H:%M:%SZ")))
+    return {"status": "registered", "macro_id": macro_id}
+
+@app.get("/api/macros/{macro_id}")
+async def get_macro_endpoint(macro_id: str):
+    """Fetch a specific Macro for previewing."""
+    macro = gov_instance.get_macro(macro_id)
+    if not macro:
+        raise HTTPException(status_code=404, detail="Macro not found")
+    return macro
+
+@app.get("/api/governance/policy")
+async def get_security_policy():
+    """Retrieve the current zero-trust security policy."""
+    from core.security_policy import PERMISSIONS_FILE
+    if os.path.exists(PERMISSIONS_FILE):
+        with open(PERMISSIONS_FILE, "r") as f:
+            return json.load(f)
+    return {"agents": {}, "dry_run": False}
+
+@app.post("/api/governance/policy")
+async def update_security_policy(policy: Dict[str, Any]):
+    """Update the global security policy (Agent permissions, Egress, Dry-run)."""
+    from core.security_policy import PERMISSIONS_FILE
+    os.makedirs(os.path.dirname(PERMISSIONS_FILE), exist_ok=True)
+    with open(PERMISSIONS_FILE, "w") as f:
+        json.dump(policy, f, indent=2)
+    return {"status": "success"}

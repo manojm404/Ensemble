@@ -1,20 +1,20 @@
 """
 core/tools/registry.py
-Central registry for Ensemble tools.
+Global registry for tools.
 """
 from typing import Dict, Any, Callable
-from core.tool_decorator import REGISTERED_TOOLS
 
-TOOL_REGISTRY = REGISTERED_TOOLS
+class ToolRegistry:
+    def __init__(self):
+        self.tools: Dict[str, Callable] = {}
 
-def register_tool(name: str, func: Callable):
-    """Registers a new tool in the central registry."""
-    TOOL_REGISTRY[name] = func
+    def register(self, name: str, func: Callable):
+        self.tools[name] = func
 
-def get_tool(name: str) -> Optional[Callable]:
-    """Retrieves a tool function by name."""
-    return TOOL_REGISTRY.get(name)
+    def get_tool(self, name: str) -> Callable:
+        return self.tools.get(name)
 
-def list_tools() -> Dict[str, Any]:
-    """Returns all registered tool names and their schemas."""
-    return {name: getattr(t, "_schema", {}) for name, t in TOOL_REGISTRY.items()}
+    def list_tools(self) -> Dict[str, Any]:
+        return {name: getattr(func, "_schema", {}) for name, func in self.tools.items()}
+
+tool_registry = ToolRegistry()

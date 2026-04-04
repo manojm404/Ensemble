@@ -1,23 +1,16 @@
 name: Visual SOP Export
 description: Generated from Ensemble Studio Canvas
 states:
-  design_logic:
-    role: software_architect
-    instruction: Design the logic for a simple Python function to calculate the factorial of a number. Decide between an iterative or recursive approach and define how to handle edge cases like 0 and negative inputs.
+  design_portfolio_card_description:
+    role: content_creator
+    instruction: 'As a designer, write a short, detailed description of a modern portfolio card for a fictional AI artist named ''Nova''. The description must include: a profile image placeholder, Nova''s name, title (''AI Artist & Creative Technologist''), a two-sentence bio, social media icons (Twitter, GitHub, LinkedIn), and a ''View Work'' button. Describe the card''s aesthetic as a dark glassmorphic style with neon blue/purple accents, rounded corners, and a subtle grid background. Focus purely on the visual and structural description; do not include any code.'
     tools: []
     transitions:
-      - to: implement_function
+      - to: develop_portfolio_card_webpage
         condition: task_complete
-  implement_function:
-    role: backend_architect
-    instruction: Based on the design provided, write the Python code for the factorial function. Ensure the code is efficient, well-structured, and includes basic docstrings.
-    tools: []
-    transitions:
-      - to: code_explanation
-        condition: task_complete
-  code_explanation:
+  develop_portfolio_card_webpage:
     role: default_agent
-    instruction: Take the written Python code and provide a comprehensive line-by-line explanation of every step to ensure a beginner can understand how the factorial is computed.
+    instruction: As a developer, based *exactly* on the design description provided by Agent 1, write the complete HTML/CSS/JS code for the personal portfolio card webpage. The page must be fully responsive, include hover effects for the 'View Work' button and social icons, and embed the 'Space Grotesk' Google Font. The final output must be a single, self-contained HTML file that is ready to run in any browser and beautifully displays the portfolio card.
     tools: []
     transitions:
       - to: end

@@ -5,46 +5,66 @@ import {
   Background,
   Controls,
   Connection,
-  Edge,
-  useNodesState,
-  useEdgesState,
   addEdge as rfAddEdge,
   useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
+import { useYjsSync } from '../../hooks/useYjsSync';
+import { PresenceOverlay } from './PresenceOverlay';
+
 import { StateNode } from './nodes/StateNode';
+import { ApprovalNode } from './nodes/ApprovalNode';
+import { SwitchNode } from './nodes/SwitchNode';
 import { PropertyEditor } from './PropertyEditor.tsx';
+import { ViewerPane } from './ViewerPane.tsx';
+import { AgentLibrary } from './AgentLibrary.tsx';
+import { TimeMachineControl } from './TimeMachineControl.tsx';
 import { toSopYaml } from '../../utils/toSopYaml';
-import { Plus, Zap, CheckCircle, Wand2, Loader2, Save, Search, FolderOpen, X } from 'lucide-react';
+import { Zap, CheckCircle, Wand2, Loader2, Save, Search, FolderOpen, X, MonitorPlay, History, Brain, RefreshCw, ShoppingCart, Package, ShieldCheck } from 'lucide-react';
+import { MacroMarketplace } from './MacroMarketplace';
+import { PermissionEditor } from './PermissionEditor';
 
 const nodeTypes = {
   stateNode: StateNode as any,
+  approvalNode: ApprovalNode as any,
+  switchNode: SwitchNode as any,
+  macroNode: StateNode as any, // Visual identical for now, logic differs in engine
 };
 
-const initialNodes = [
-  {
-    id: '1',
-    type: 'stateNode',
-    data: { label: 'Discovery', role: 'CEO', instruction: 'Analyze requirements', tools: [] },
-    position: { x: 250, y: 5 },
-  },
-];
-
-const initialEdges: Edge[] = [];
+// Initial nodes and edges are no longer used as state is managed by Yjs
 
 export function BlockBuilder() {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [workflowId, setWorkflowId] = useState<string | null>(null);
+  
+  const { 
+    nodes, 
+    edges, 
+    onNodesChange, 
+    onEdgesChange, 
+    users, 
+    updateCursor,
+    setNodes,
+    setEdges,
+    resyncFromSource
+  } = useYjsSync(workflowId);
+
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [magicPrompt, setMagicPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   
-  const [workflowId, setWorkflowId] = useState<string | null>(null);
   const [workflowName, setWorkflowName] = useState('New Workflow');
   const [showBrowser, setShowBrowser] = useState(false);
   const [savedWorkflows, setSavedWorkflows] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Tactical Viewer State
+  const [runId, setRunId] = useState<string | null>(null);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const [showTimeMachine, setShowTimeMachine] = useState(false);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(true);
+  const [isMarketplaceOpen, setIsMarketplaceOpen] = useState(false);
+  const [isGovernanceOpen, setIsGovernanceOpen] = useState(false);
 
   const { fitView } = useReactFlow();
 
@@ -57,15 +77,24 @@ export function BlockBuilder() {
     setSelectedNodeId(node.id);
   }, []);
 
-  const addNode = () => {
+  const addNode = (type: 'stateNode' | 'approvalNode' | 'switchNode' = 'stateNode', skill?: any) => {
     const id = `${nodes.length + 1}`;
     const newNode = {
       id,
-      type: 'stateNode',
-      data: { label: `State ${id}`, role: 'Unassigned', instruction: '', tools: [] },
-      position: { x: Math.random() * 400, y: Math.random() * 400 },
+      type,
+      data: { 
+        label: skill ? skill.name : `${type === 'stateNode' ? 'State' : type === 'approvalNode' ? 'Gate' : 'Branch'} ${id}`, 
+        role: skill ? skill.name : (type === 'stateNode' ? 'Unassigned' : 'System'), 
+        instruction: skill ? skill.prompt_text : '', 
+        tools: skill ? skill.tools : [],
+        condition: type === 'switchNode' ? 'If output contains "ERROR" -> case1' : '',
+        emoji: skill ? skill.emoji : undefined,
+        color: skill ? skill.color : undefined
+      },
+      position: { x: 400, y: 100 },
     };
     setNodes((nds) => nds.concat(newNode));
+    setTimeout(() => fitView({ duration: 800 }), 100);
   };
 
   const updateNodeData = (nodeId: string, newData: any) => {
@@ -123,6 +152,80 @@ export function BlockBuilder() {
     if (showBrowser) fetchWorkflows();
   }, [showBrowser, searchQuery]);
 
+  const handleCollapseToMacro = async () => {
+    const selectedNodes = nodes.filter(n => n.selected);
+    if (selectedNodes.length === 0) {
+      alert("Please select the nodes you want to collapse into a macro.");
+      return;
+    }
+
+    const macroName = prompt("Enter Macro Name:", "New Macro");
+    if (!macroName) return;
+
+    // 1. Extract sub-graph (nodes + connecting edges)
+    const nodeIds = new Set(selectedNodes.map(n => n.id));
+    const selectedEdges = edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
+
+    // 2. Normalize coordinates (Set top-left node as 0,0)
+    const minX = Math.min(...selectedNodes.map(n => n.position.x));
+    const minY = Math.min(...selectedNodes.map(n => n.position.y));
+
+    const normalizedNodes = selectedNodes.map(n => ({
+      ...n,
+      position: { x: n.position.x - minX, y: n.position.y - minY }
+    }));
+
+    // 3. Register Macro in Backend
+    try {
+      const res = await fetch('http://localhost:8088/api/macros', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: macroName,
+          graph_json: { nodes: normalizedNodes, edges: selectedEdges },
+          author: 'developer'
+        })
+      });
+      const data = await res.json();
+      
+      if (data.status === 'registered') {
+        const macroId = data.macro_id;
+        
+        // 4. Replace selected nodes with a single Macro Node
+        const newNode = {
+          id: `macro_${Math.random().toString(36).substr(2, 6)}`,
+          type: 'macroNode',
+          position: { x: minX, y: minY },
+          data: { 
+            label: macroName.toUpperCase(), 
+            macro_id: macroId,
+            version: 'latest'
+          }
+        };
+
+        setNodes(nds => nds.filter(n => !n.selected).concat(newNode));
+        setEdges(eds => eds.filter(e => !nodeIds.has(e.source) || !nodeIds.has(e.target)));
+        
+        alert(`Macro '${macroName}' created and integrated! 📦`);
+      }
+    } catch (e) {
+      alert(`Macro creation failed: ${e}`);
+    }
+  };
+
+  const handleResync = async () => {
+    if (!workflowId) return;
+    try {
+      const res = await fetch(`http://localhost:8088/workflows/${workflowId}`);
+      const wf = await res.json();
+      const graph = JSON.parse(wf.graph_json);
+      resyncFromSource(graph.nodes, graph.edges);
+      alert("Canvas re-synced from source of truth! 🔄");
+    } catch (e) {
+      alert(`Resync failed: ${e}`);
+    }
+  };
+
   const loadWorkflow = (wf: any) => {
     try {
       const graph = JSON.parse(wf.graph_json);
@@ -135,6 +238,22 @@ export function BlockBuilder() {
     } catch (e) {
       alert(`Load failed: ${e}`);
     }
+  };
+
+  const handleInstallMacro = (macro: any) => {
+    const newNode = {
+      id: `macro_${Math.random().toString(36).substr(2, 6)}`,
+      type: 'macroNode',
+      position: { x: 400, y: 100 },
+      data: { 
+        label: macro.name.toUpperCase(), 
+        macro_id: macro.id,
+        version: 'latest'
+      }
+    };
+    setNodes(nds => nds.concat(newNode));
+    setIsMarketplaceOpen(false);
+    setTimeout(() => fitView({ duration: 800 }), 100);
   };
 
   const handleValidate = async () => {
@@ -229,7 +348,9 @@ export function BlockBuilder() {
         body: JSON.stringify({ sop_path: 'directives/visual_run_temp.yaml', yaml: yamlStr })
       });
       const runResult = await runRes.json();
-      alert(`SOP Execution Started 🚀 (Run ID: ${runResult.run_id})\n\nSwitch to the CHAT tab to see the agent network's neural process in real-time.`);
+      setRunId(runResult.run_id);
+      setIsViewerOpen(true);
+      // alert(`SOP Execution Started 🚀 (Run ID: ${runResult.run_id})\n\nSwitch to the CHAT tab to see the agent network's neural process in real-time.`);
     } catch (e) {
       alert(`Execution error: ${e}`);
     }
@@ -245,19 +366,62 @@ export function BlockBuilder() {
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeClick={onNodeClick}
+          onMouseMove={(e) => updateCursor(e.clientX, e.clientY)}
           nodeTypes={nodeTypes}
           fitView
           colorMode="dark"
         >
+          <PresenceOverlay users={users} />
+          <MacroMarketplace 
+            isOpen={isMarketplaceOpen} 
+            onToggle={() => setIsMarketplaceOpen(false)}
+            onInstallMacro={handleInstallMacro}
+          />
+          <PermissionEditor 
+            isOpen={isGovernanceOpen}
+            onClose={() => setIsGovernanceOpen(false)}
+          />
           <Background color="#333" />
           <Controls />
           <Panel position="top-left" className="flex flex-col gap-2">
             <div className="flex gap-2">
               <button 
-                onClick={addNode}
+                onClick={() => setIsLibraryOpen(!isLibraryOpen)}
+                className={`px-4 py-2 ${isLibraryOpen ? 'bg-blue-600 text-white' : 'bg-[#2d2d2d] text-gray-200 border border-gray-700'} rounded-md flex items-center gap-2 shadow-lg font-bold text-xs transition-all`}
+              >
+                <Brain size={16} /> AGENTS
+              </button>
+              <button 
+                onClick={handleCollapseToMacro}
+                className="px-4 py-2 bg-[#7c3aed] hover:bg-[#6d28d9] text-white border border-purple-900 rounded-md flex items-center gap-2 shadow-lg font-bold text-xs"
+                title="Collapse Selection to Macro"
+              >
+                <MonitorPlay size={16} /> COLLAPSE
+              </button>
+              <button 
+                onClick={() => setIsMarketplaceOpen(!isMarketplaceOpen)}
+                className={`px-4 py-2 ${isMarketplaceOpen ? 'bg-purple-600 text-white' : 'bg-[#2d2d2d] text-gray-200 border border-gray-700'} rounded-md flex items-center gap-2 shadow-lg font-bold text-xs transition-all`}
+                title="Macro Marketplace"
+              >
+                <ShoppingCart size={16} /> MARKETPLACE
+              </button>
+              <button 
+                onClick={() => setIsGovernanceOpen(true)}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md flex items-center gap-2 shadow-lg font-bold text-xs"
               >
-                <Plus size={16} /> ADD STATE
+                <ShieldCheck size={16} /> GOVERNANCE
+              </button>
+              <button 
+                onClick={() => addNode('switchNode')}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md flex items-center gap-2 shadow-lg font-bold text-xs"
+              >
+                <Zap size={16} /> ADD SWITCH
+              </button>
+              <button 
+                onClick={() => addNode('approvalNode')}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-md flex items-center gap-2 shadow-lg font-bold text-xs"
+              >
+                <CheckCircle size={16} /> ADD GATE
               </button>
               <button 
                 onClick={() => setShowBrowser(true)}
@@ -274,6 +438,13 @@ export function BlockBuilder() {
                 <Save size={16} /> SAVE
               </button>
               <button 
+                onClick={handleResync}
+                className="px-4 py-2 bg-[#dc2626] hover:bg-red-700 text-white border border-red-900 rounded-md flex items-center gap-2 shadow-lg font-bold text-xs"
+                title="Force Re-sync (Emergency)"
+              >
+                <RefreshCw size={16} /> RESYNC
+              </button>
+              <button 
                 onClick={handleValidate}
                 className="px-4 py-2 bg-[#2d2d2d] hover:bg-[#3d3d3d] text-gray-200 border border-gray-700 rounded-md flex items-center gap-2 shadow-lg font-bold text-xs"
               >
@@ -285,6 +456,23 @@ export function BlockBuilder() {
               >
                 <Zap size={16} /> BUILD & RUN
               </button>
+              <button 
+                onClick={() => setIsViewerOpen(!isViewerOpen)}
+                className={`px-4 py-2 ${isViewerOpen ? 'bg-blue-600 text-white' : 'bg-[#2d2d2d] text-gray-200 border border-gray-700'} rounded-md flex items-center gap-2 shadow-lg font-bold text-xs transition-all`}
+                title="Tactical Workspace Viewer"
+              >
+                <MonitorPlay size={16} /> VIEW
+              </button>
+
+              {runId && (
+                <button 
+                  onClick={() => setShowTimeMachine(!showTimeMachine)}
+                  className={`px-4 py-2 ${showTimeMachine ? 'bg-blue-600 text-white' : 'bg-[#2d2d2d] text-gray-200 border border-gray-700'} rounded-md flex items-center gap-2 shadow-lg font-bold text-xs transition-all`}
+                  title="Temporal Observation"
+                >
+                  <History size={16} /> TIME MACHINE
+                </button>
+              )}
             </div>
             
             <div className="flex gap-1 mt-2 bg-[#2d2d2d] p-1 rounded-lg border border-gray-700 shadow-xl w-[400px]">
@@ -359,11 +547,30 @@ export function BlockBuilder() {
         </ReactFlow>
       </div>
 
+      <AgentLibrary 
+        isOpen={isLibraryOpen} 
+        onToggle={() => setIsLibraryOpen(false)} 
+        onAddAgent={(skill) => addNode('stateNode', skill)} 
+      />
+
       {selectedNode && (
         <PropertyEditor 
           node={selectedNode} 
           onUpdate={(data: any) => updateNodeData(selectedNode.id, data)}
           onClose={() => setSelectedNodeId(null)}
+        />
+      )}
+
+      <ViewerPane 
+        runId={runId || ""} 
+        isOpen={isViewerOpen} 
+        onClose={() => setIsViewerOpen(false)} 
+      />
+
+      {runId && showTimeMachine && (
+        <TimeMachineControl 
+          runId={runId}
+          onClose={() => setShowTimeMachine(false)}
         />
       )}
     </div>

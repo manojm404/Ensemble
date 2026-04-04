@@ -1,0 +1,9 @@
+The webpage begins with a captivating dark gradient background, transitioning smoothly from a deep indigo at the top to a rich purple at the bottom, providing a calm yet modern canvas. All interactive elements and text pop with vibrant neon pastel colors like electric pink, glowing turquoise, sunny yellow, and lime green.
+
+At the very center of the screen, a large, rounded rectangular card acts as the prominent letter display. This card has a sleek, glassmorphic effect, appearing semi-transparent with a subtle frosted blur, allowing the dark gradient background to subtly show through. Inside this central display, the current letter is shown in an extra-large, playful yet clearly readable font, glowing with one of the vibrant neon pastel colors.
+
+Directly below the central letter display, the screen features a neatly organized grid of 26 smaller, equally rounded glassmorphic cards, each representing a letter from A to Z. Each card is a clickable button, displaying a single uppercase letter in a bright neon pastel color that stands out against its frosted, semi-transparent background. The letters are arranged in an intuitive grid, making them easy for children to navigate.
+
+To the bottom right of the letter grid, a standalone, rounded glassmorphic button labeled 'Next' provides sequential navigation. This button also features a vibrant neon pastel color for its text and outline.
+
+When a child clicks on any of the A-Z letter buttons, the corresponding letter instantly appears within the large central display. This appearance is accompanied by a fun, brief animation – for instance, the new letter might playfully 'pop' into place with a subtle bounce, or gently fade in with a sparkling effect, before settling brightly in its prominent position. All text across the page, from the large central letter to the smaller button labels, uses a consistent playful, yet incredibly clear and easy-to-read font, perfect for young learners.
