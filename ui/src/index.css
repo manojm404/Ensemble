@@ -1,60 +1,126 @@
-:root {
-  /* Ensemble Tactical Dark Mode Palette */
-  --bg-deep: #050505;
-  --bg-panel: #0d0d0d;
-  --bg-card: #141414;
-  --bg-hover: rgba(255, 255, 255, 0.05);
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-  --accent-blue: #3b82f6;
-  --accent-purple: #8b5cf6;
-  --accent-amber: #f59e0b;
-  --accent-emerald: #10b981;
-  --accent-rose: #f43f5e;
+@layer base {
+  :root {
+    --background: 0 0% 98%;
+    --foreground: 220 20% 12%;
 
-  --border-subtle: rgba(255, 255, 255, 0.05);
-  --border-focus: rgba(59, 130, 246, 0.4);
+    --card: 0 0% 100%;
+    --card-foreground: 220 20% 12%;
 
-  --text-main: #e2e8f0;
-  --text-dim: #94a3b8;
-  --text-mute: #475569;
-  --text-black: #ffffff;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 20% 12%;
 
-  /* Glassmorphism */
-  --glass-bg: rgba(13, 13, 13, 0.8);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-blur: blur(12px);
+    --primary: 195 90% 42%;
+    --primary-foreground: 0 0% 100%;
 
-  /* Shadows */
-  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-  --shadow-blue: 0 0 20px rgba(59, 130, 246, 0.15);
+    --secondary: 220 14% 92%;
+    --secondary-foreground: 220 14% 30%;
+
+    --muted: 220 14% 94%;
+    --muted-foreground: 215 15% 45%;
+
+    --accent: 195 90% 42%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 14% 88%;
+    --input: 220 14% 85%;
+    --ring: 195 90% 42%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 0 0% 97%;
+    --sidebar-foreground: 215 15% 45%;
+    --sidebar-primary: 195 90% 42%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 94%;
+    --sidebar-accent-foreground: 220 20% 12%;
+    --sidebar-border: 220 14% 88%;
+    --sidebar-ring: 195 90% 42%;
+
+    --surface-elevated: 220 14% 94%;
+    --glow-primary: 195 90% 50%;
+    --badge-green: 155 70% 45%;
+    --badge-orange: 30 85% 55%;
+    --badge-purple: 270 60% 60%;
+    --badge-blue: 210 80% 55%;
+    --badge-red: 0 70% 55%;
+  }
+
+  .dark {
+    --background: 220 20% 7%;
+    --foreground: 210 20% 92%;
+    --card: 220 16% 11%;
+    --card-foreground: 210 20% 92%;
+    --popover: 220 16% 11%;
+    --popover-foreground: 210 20% 92%;
+    --primary: 195 90% 50%;
+    --primary-foreground: 220 20% 7%;
+    --secondary: 220 14% 16%;
+    --secondary-foreground: 210 20% 85%;
+    --muted: 220 14% 14%;
+    --muted-foreground: 215 15% 55%;
+    --accent: 195 90% 50%;
+    --accent-foreground: 220 20% 7%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 20% 92%;
+    --border: 220 14% 16%;
+    --input: 220 14% 18%;
+    --ring: 195 90% 50%;
+    --sidebar-background: 220 18% 9%;
+    --sidebar-foreground: 215 15% 55%;
+    --sidebar-primary: 195 90% 50%;
+    --sidebar-primary-foreground: 220 20% 7%;
+    --sidebar-accent: 220 14% 14%;
+    --sidebar-accent-foreground: 210 20% 92%;
+    --sidebar-border: 220 14% 16%;
+    --sidebar-ring: 195 90% 50%;
+    --surface-elevated: 220 14% 14%;
+    --glow-primary: 195 90% 50%;
+    --badge-green: 155 70% 45%;
+    --badge-orange: 30 85% 55%;
+    --badge-purple: 270 60% 60%;
+    --badge-blue: 210 80% 55%;
+    --badge-red: 0 70% 55%;
+  }
 }
 
-.glass-panel {
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply dark;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
 }
 
-.text-gradient-blue {
-  background: linear-gradient(135deg, #60a5fa, #3b82f6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
+@layer utilities {
+  .glass {
+    @apply bg-card/80 backdrop-blur-xl border border-border/50;
+  }
 
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
-}
+  .glow-primary {
+    box-shadow: 0 0 20px hsla(195, 90%, 50%, 0.15), 0 0 40px hsla(195, 90%, 50%, 0.05);
+  }
 
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
+  .glow-primary-strong {
+    box-shadow: 0 0 20px hsla(195, 90%, 50%, 0.3), 0 0 60px hsla(195, 90%, 50%, 0.1);
+  }
 
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--border-subtle);
-  border-radius: 10px;
-}
+  .text-gradient-primary {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(195, 90%, 50%), hsl(210, 80%, 55%));
+  }
 
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: var(--text-mute);
 }

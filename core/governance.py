@@ -14,19 +14,27 @@ import asyncio
 import zlib
 import base64
 from typing import Dict, Any, Optional, Callable, List
+from datetime import datetime
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
+import shutil
+from fastapi.staticfiles import StaticFiles
+from fastapi import UploadFile, File
 
 load_dotenv()
 
 from core.ws_manager import ws_manager
 from core.audit import AuditLogger
+from core.skill_registry import skill_registry
 from core.engine import SOPEngine
 from core.ensemble_space import EnsembleSpace
 from core.llm_provider import LLMProvider
 from core.skill_registry import skill_registry
+from core.dag_engine import DAGWorkflowEngine
+# Ensure adapters are initialized
+import core.adapters
 
 # Load Governance Config from .env (V1 with defaults)
 GOV_CONFIG = {
@@ -60,6 +68,39 @@ sop_runs: Dict[str, Dict[str, Any]] = {}
 
 # Global LLM instance for generation (Premium Model)
 llm = LLMProvider(provider="gemini", model="gemini-2.5-flash")
+
+# Ensure workspace directory exists for uploads
+WORKSPACE_DIR = os.getenv("WORKSPACE_DIR", "data/workspace")
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
+
+# Mount the workspace directory for static asset previews (images/files)
+app.mount("/api/assets", StaticFiles(directory=WORKSPACE_DIR), name="workspace_assets")
+
+@app.post("/api/upload")
+async def upload_file_endpoint(file: UploadFile = File(...)):
+    """Ingest documents/images from UI into the agentic workspace."""
+    try:
+        file_id = f"{int(time.time())}_{file.filename}"
+        file_path = os.path.join(WORKSPACE_DIR, file.filename)
+        
+        # Save file to disk
+        # We use shutil for fast buffered copying to the persistent storage
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        print(f"📁 [Upload API] Saved: {file.filename} -> {file_path}")
+        
+        return {
+            "id": file_id,
+            "name": file.filename,
+            "url": f"/api/assets/{file.filename}",
+            "type": file.content_type,
+            "path": file_path,
+            "size": os.path.getsize(file_path)
+        }
+    except Exception as e:
+        print(f"❌ [Upload API] Failure: {str(e)}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 class GenerateRequest(BaseModel):
     prompt: str
@@ -301,6 +342,19 @@ class Governance:
                     FOREIGN KEY(topic_id) REFERENCES chat_topics(id)
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS custom_agents (
+                    id TEXT PRIMARY KEY,
+                    name TEXT,
+                    emoji TEXT DEFAULT '🤖',
+                    description TEXT,
+                    instruction TEXT,
+                    category TEXT DEFAULT 'General',
+                    model TEXT DEFAULT 'gemini-2.5-flash',
+                    temperature REAL DEFAULT 0.7,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
     def request_token_grant(self, agent_id: str, estimated_cost: float) -> bool:
         """Check if an agent has enough budget."""
@@ -453,8 +507,80 @@ async def get_models():
 
 @app.get("/api/skills")
 async def get_skills():
-    """List available agent skills from SkillRegistry."""
-    return skill_registry.list_skills()
+    """List all agents (File-based + DB-persisted)."""
+    # 1. Get discovery agents from folders
+    discovery = skill_registry.list_skills()
+    
+    # 2. Get custom agents from database
+    custom = []
+    with sqlite3.connect(gov_instance.db_path) as conn:
+        cursor = conn.execute("SELECT id, name, emoji, description, instruction, category, model, temperature FROM custom_agents")
+        for r in cursor.fetchall():
+            custom.append({
+                "id": r[0],
+                "name": r[1],
+                "emoji": r[2],
+                "description": r[3],
+                "instruction": r[4],
+                "category": r[5],
+                "model": r[6],
+                "temperature": r[7],
+                "source": "custom"
+            })
+    
+    return discovery + custom
+
+@app.post("/api/agents")
+async def create_custom_agent(req: Dict[str, Any]):
+    """Persistently save a custom agent definition as a .md file."""
+    name = req.get("name", "Unnamed Agent")
+    category = req.get("category", "General")
+    safe_name = name.lower().replace(" ", "_").replace("-", "_")
+    
+    # Path: data/agents/custom/{category}/{safe_name}.md
+    custom_path = os.path.join("data/agents/custom", category.lower())
+    os.makedirs(custom_path, exist_ok=True)
+    file_path = os.path.join(custom_path, f"{safe_name}.md")
+    
+    yaml_header = {
+        "name": name,
+        "emoji": req.get("emoji", "🤖"),
+        "category": category,
+        "description": req.get("description", ""),
+        "model": req.get("model", "gemini-2.5-flash"),
+        "temperature": req.get("temperature", 0.7),
+        "tools": req.get("tools", ["search_web", "read_url"])
+    }
+    
+    content = f"---\n{yaml.dump(yaml_header)}---\n\n{req.get('instruction', '')}"
+    
+    with open(file_path, "w", encoding='utf-8') as f:
+        f.write(content)
+        
+    # Re-sync registry to pick up the new file
+    skill_registry.sync_all()
+    return {"status": "success", "path": file_path}
+
+@app.post("/api/registry/import")
+async def import_external_repo(data: Dict[str, str]):
+    """Clones an external GitHub repo into the integrations folder."""
+    repo_url = data.get("url")
+    if not repo_url:
+        raise HTTPException(status_code=400, detail="Missing repository URL")
+    
+    repo_name = repo_url.split("/")[-1].replace(".git", "")
+    target_path = os.path.join("integrations", repo_name)
+    
+    if os.path.exists(target_path):
+        raise HTTPException(status_code=400, detail="Repository already integrated")
+        
+    import subprocess
+    try:
+        subprocess.run(["git", "clone", repo_url, target_path], check=True)
+        count = skill_registry.sync_all()
+        return {"status": "success", "repo": repo_name, "total_agents": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Git Clone Failed: {str(e)}")
 
 @app.get("/health")
 async def health():
@@ -485,12 +611,60 @@ The Ensemble governance engine has intercepted a panic signal. All active agent 
 2. Manually restart the server to clear the panic flag.
 3. Verify budget integrity in the Governance dashboard.
 """
+
+@app.post("/api/chat/generate")
+async def generate_chat_response_endpoint(req: Dict[str, Any]):
+    """Bridge for UI chat requests to the central LLM controller."""
+    messages = req.get("messages", [])
+    model = req.get("model")
+    provider = req.get("provider")
+    agent_id = req.get("agent_id")
     
-    # Commit report to CAS for audit
-    report_hash = space.write(report.encode(), "panic_report.md", "system", "company_alpha")
-    audit_logger.log("company_alpha", "governance", "PANIC_TRIGGERED", {"report_hash": report_hash}, broadcast=True)
+    # 🪪 Persona Resolution:
+    # We fetch the specialist's high-fidelity name to ensure identity sovereignty.
+    agent_name = "Ensemble specialist"
+    system_instruction = None
     
-    return {"status": "panic_active", "forensics_hash": report_hash}
+    if agent_id:
+        skill = skill_registry.get_skill(agent_id)
+        if skill:
+            agent_name = f"{skill['name']} (Agent)"
+            system_instruction = f"Your specific mandate is: {skill['description']}."
+
+    if system_instruction:
+        # We prepend the specific mandate, but LLMProvider will handle the professional guardrails 
+        # using the agent_name we pass below.
+        if messages and messages[0].get("role") == "system":
+            messages[0]["content"] = f"{system_instruction}\n\n{messages[0]['content']}"
+        else:
+            messages.insert(0, {"role": "system", "content": system_instruction})
+
+    try:
+        # Pass the resolved agent_name to the LLM provider for professional prompt template formatting.
+        response = await llm.chat(messages, model=model, provider=provider, agent_name=agent_name)
+        return response
+    except Exception as e:
+        print(f"❌ [Chat API] Failure: {str(e)}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.delete("/api/registry/agents/{agent_id}")
+async def delete_agent(agent_id: str):
+    """Hard delete a custom or external agent from the system."""
+    try:
+        success = skill_registry.delete_skill(agent_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Agent not found or path invalid.")
+        return {"status": "deleted", "agent_id": agent_id}
+    except Exception as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+@app.post("/api/registry/agents/{agent_id}/fork")
+async def fork_agent_endpoint(agent_id: str):
+    """Clones a native agent into the custom folder."""
+    path = skill_registry.fork_skill(agent_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Original agent not found.")
+    return {"status": "forked", "path": path}
 
 @app.get("/api/workspace/tree")
 async def get_workspace_tree():
@@ -528,6 +702,54 @@ async def get_workspace_file(path: str):
             return {"path": path, "content": f.read()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/workspace/preview")
+async def get_workspace_preview():
+    """Returns the generated preview.html as a raw HTML Response for the UI iframe."""
+    from fastapi.responses import HTMLResponse
+    preview_path = os.path.join(WORKSPACE_DIR, "preview.html")
+    if not os.path.exists(preview_path):
+        return HTMLResponse(content="<div style='color:#666;text-align:center;padding:40px;font-family:sans-serif;'>No web deliverable generated for this run. Check the 'Files' tab for Word/Excel/PDF artifacts.</div>")
+    
+    with open(preview_path, "r") as f:
+        return HTMLResponse(content=f.read())
+
+@app.get("/api/workflows/{run_id}/artifacts")
+async def get_workflow_artifacts(run_id: str):
+    """List artifacts generated for a specific run."""
+    # For now, we list everything in the sandbox. In the future, we filter by run_id
+    tree = []
+    if os.path.exists(WORKSPACE_DIR):
+        for name in os.listdir(WORKSPACE_DIR):
+            if name.startswith("."): continue
+            p = os.path.join(WORKSPACE_DIR, name)
+            if os.path.isfile(p):
+                tree.append({
+                    "name": name,
+                    "path": name,
+                    "type": os.path.splitext(name)[1][1:] or "file",
+                    "size": os.path.getsize(p)
+                })
+    return tree
+
+@app.get("/api/workspace/download")
+async def download_workspace_file(path: str):
+    """Securely download a file from the workspace sandbox."""
+    from fastapi.responses import FileResponse
+    import mimetypes
+    
+    full_path = os.path.abspath(os.path.join(WORKSPACE_DIR, path))
+    sandbox_path = os.path.abspath(WORKSPACE_DIR)
+    
+    # Path traversal protection
+    if not full_path.startswith(sandbox_path):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    mime_type, _ = mimetypes.guess_type(full_path)
+    return FileResponse(full_path, media_type=mime_type or "application/octet-stream", filename=os.path.basename(full_path))
 
 @app.get("/governance/pending")
 async def get_pending_approvals():
@@ -619,6 +841,68 @@ async def login(request: Request):
 
 @app.get("/audit/events")
 async def get_audit_events(company_id: str = "company_alpha", limit: int = 50, offset: int = 0):
+    def delete_skill(self, agent_id: str):
+        """Hard delete a custom or external agent."""
+        skill = self.skills.get(agent_id)
+        if not skill: return False
+        
+        if skill["source"] == "Native":
+            raise Exception("Cannot delete Sovereign Native Core agents.")
+            
+        path = skill.get("filepath")
+        if not path: return False
+        
+        import shutil
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
+            
+        self.sync_all()
+        return True
+
+    def fork_skill(self, agent_id: str):
+        """Clones a native agent into the custom folder for modification."""
+        skill = self.skills.get(agent_id)
+        if not skill: return None
+        
+        # Determine paths
+        category = skill.get("category", "General").lower()
+        name = skill.get("name", "forked_agent").lower().replace(" ", "_")
+        target_path = os.path.join(self.custom_dir, category)
+        os.makedirs(target_path, exist_ok=True)
+        
+        target_file = os.path.join(target_path, f"{name}_fork.md")
+        
+        # Write to disk
+        import yaml
+        yaml_header = {
+            "name": f"{skill['name']} (Fork)",
+            "emoji": skill["emoji"],
+            "category": skill["category"],
+            "description": skill["description"],
+            "forked_from": agent_id
+        }
+        
+        content = f"---\n{yaml.dump(yaml_header)}---\n\n{skill.get('prompt_text', '')}"
+        with open(target_file, "w", encoding='utf-8') as f:
+            f.write(content)
+            
+        self.sync_all()
+        return target_file
+
+    def get_skill(self, name: str):
+        return self.skills.get(name)
+
+    def list_skills(self):
+        return [
+            {
+                "id": k, "name": v["name"], "description": v["description"],
+                "emoji": v["emoji"], "color": v["color"], "category": v["category"],
+                "source": v["source"], "enabled": v["enabled"], "is_native": v["source"] == "Native"
+            }
+            for k, v in self.skills.items()
+        ]
     with sqlite3.connect(audit_logger.db_path) as conn:
         cursor = conn.execute("""
             SELECT id, timestamp, agent_id, action_type, details_json, cost_usd 
@@ -1006,3 +1290,191 @@ async def update_security_policy(policy: Dict[str, Any]):
     with open(PERMISSIONS_FILE, "w") as f:
         json.dump(policy, f, indent=2)
     return {"status": "success"}
+
+# --- Workflow Execution Registry ---
+
+@app.post("/api/workflows/run")
+async def run_workflow(request: Request):
+    """
+    Executes a multi-agent DAG workflow from the canvas.
+    Bridges the ReactFlow graph to the Ensemble DAG Engine.
+    """
+    try:
+        data = await request.json()
+        workflow_id = data.get("id") or str(uuid.uuid4())
+        nodes = data.get("nodes", [])
+        edges = data.get("edges", [])
+        initial_input = data.get("initialInput", "")
+
+        if not nodes:
+            raise HTTPException(status_code=400, detail="Workflow canvas is empty")
+
+        print(f"🚀 [Workflow Execution] Starting run {workflow_id} with {len(nodes)} agents...", flush=True)
+
+        # Initialize and Run the DAG Engine with global singletons
+        engine = DAGWorkflowEngine(
+            space=space,
+            audit=audit_logger,
+            llm=llm,
+            gov=gov_instance
+        )
+        
+        # Structure the graph data for the engine
+        graph_json = {"nodes": nodes, "edges": edges}
+        
+        # Execute the workflow
+        result = await engine.execute_workflow(
+            workflow_id=workflow_id,
+            graph_json=graph_json,
+            initial_input=initial_input,
+            company_id="ensemble_prod"
+        )
+
+        if result.get("status") == "failed":
+            raise Exception(f"Workflow failed at node: {result.get('failed_node')}")
+
+        run_id = result.get("run_id")
+
+        # Structure the results for the frontend step tracker
+        with sqlite3.connect(gov_instance.db_path) as conn:
+            cursor = conn.execute("SELECT node_id, status FROM node_executions WHERE run_id = ?", (run_id,))
+            steps_meta = {row[0]: row[1] for row in cursor.fetchall()}
+
+        final_steps = []
+        for node in nodes:
+            node_id = node["id"]
+            agent_name = node.get("data", {}).get("label", "Agent")
+            
+            # Fetch output from CAS
+            output = "Execution complete."
+            artifact_name = f"{node_id}_output"
+            if space.exists(artifact_name):
+                output = space.read(artifact_name).decode("utf-8", errors="ignore")
+
+            final_steps.append({
+                "id": node_id,
+                "agent_name": agent_name,
+                "status": steps_meta.get(node_id, "completed"),
+                "output": output,
+                "duration": 2
+            })
+
+        return {
+            "status": "success",
+            "workflowId": workflow_id,
+            "run_id": run_id,
+            "steps": final_steps,
+            "completedAt": datetime.now().isoformat()
+        }
+    except Exception as e:
+        print(f"❌ [Workflow Execution] ERROR: {str(e)}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/workflows/generate")
+async def generate_workflow_api(request: Request):
+    """
+    AI-driven workflow generation from natural language prompt.
+    Uses the Architect agent to design the multi-agent graph.
+    """
+    try:
+        data = await request.json()
+        prompt = data.get("prompt", "")
+        if not prompt:
+            raise HTTPException(status_code=400, detail="No prompt provided")
+
+        print(f"🪄 [Workflow Generation] Designing DAG for: {prompt[:50]}...", flush=True)
+        
+        # Get available skills to help the architect select agents
+        all_skills = skill_registry.list_skills()
+        skills_context = "\n".join([f"- {s['id']}: {s['description']}" for s in all_skills])
+
+        system_prompt = f"""
+You are the Ensemble Workflow Architect. Convert the user's requirement into a professional multi-agent DAG.
+
+AVAILABLE AGENTS:
+{skills_context}
+
+OUTPUT RULES:
+- Return ONLY strict JSON. No markdown fences.
+- Create 3-5 nodes representing a logical automated mission.
+- 'data.role' MUST match an Agent ID from the list above.
+- 'data.model' should be 'gemini-2.5-flash'.
+- Position nodes logically in a pipeline (node 1 at x:100, y:100, node 2 at x:400, y:100 etc).
+
+JSON SCHEMA:
+{{
+  "name": "Mission Title",
+  "nodes": [
+    {{ 
+      "id": "step1", 
+      "type": "agentNode", 
+      "position": {{ "x": 100, "y": 100 }},
+      "data": {{ 
+        "label": "Step Name", 
+        "role": "pm", 
+        "instruction": "Agent Mission",
+        "model": "gemini-2.5-flash",
+        "temperature": 0.7
+      }} 
+    }}
+  ],
+  "edges": [
+    {{ "id": "e1-2", "source": "step1", "target": "step2", "animated": true }}
+  ]
+}}
+"""
+        response = await llm.chat([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ])
+
+        # Extract and parse JSON
+        clean_text = response["text"].strip()
+        if "```json" in clean_text:
+            clean_text = clean_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in clean_text:
+            clean_text = clean_text.split("```")[1].split("```")[0].strip()
+        
+        return json.loads(clean_text)
+    except Exception as e:
+        print(f"❌ [Workflow Generation] ERROR: {str(e)}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/workflows/{workflow_id}/artifacts")
+async def get_workflow_artifacts_api(workflow_id: str):
+    """
+    Harvests physical files generated during the workflow run.
+    Checks the workspace for Excel, PDF, and Word documents.
+    """
+    artifacts = []
+    # Check for generated content in the current directory and specialized artifact folders
+    # In V3, robots write artifacts to the project root or specific data subfolders
+    search_paths = [".", "data/ensemble_space/artifacts"]
+    
+    for folder in search_paths:
+        if not os.path.exists(folder): continue
+        for f in os.listdir(folder):
+            if f.endswith((".xlsx", ".docx", ".pdf", ".csv", ".md")):
+                full_path = os.path.join(folder, f)
+                artifacts.append({
+                    "id": f,
+                    "name": f,
+                    "path": full_path,
+                    "type": f.split(".")[-1],
+                    "size": os.path.getsize(full_path),
+                    "created_at": datetime.fromtimestamp(os.path.getctime(full_path)).isoformat()
+                })
+    return sorted(artifacts, key=lambda x: x["created_at"], reverse=True)
+
+@app.get("/api/registry/sync")
+async def sync_registry():
+    """Triggers a 120-agent sync across Native, Custom, and External Integrations."""
+    count = skill_registry.sync_all()
+    return {"status": "success", "count": count, "agents": skill_registry.list_skills()}
+
+@app.patch("/api/registry/agents/{agent_id}/status")
+async def toggle_agent(agent_id: str, data: dict):
+    """Enables or disables a specific agent in the registry."""
+    enabled = data.get("enabled", True)
+    skill_registry.save_status(agent_id, enabled)
+    return {"status": "updated", "agent_id": agent_id, "enabled": enabled}

@@ -4,6 +4,7 @@ description: Expert AI/ML engineer specializing in machine learning model develo
 color: blue
 emoji: 🤖
 vibe: Turns ML models into production features that actually scale.
+capabilities: [llm_trend_analysis, ai_architecture, prompt_engineering, rag_implementation]
 ---
 
 # AI Engineer Agent

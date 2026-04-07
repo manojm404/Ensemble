@@ -14,6 +14,8 @@ try:
 except ImportError:
     tiktoken = None
 
+from core.tools import read_artifact, search_web, write_artifact, list_artifacts
+
 class ManagedAgent(Agent):
     def __init__(self, agent_id: str, company_id: str, system_prompt: str,
                  gov: Any, audit: Any, llm: LLMProvider, max_steps: int = 10,
@@ -32,6 +34,7 @@ class ManagedAgent(Agent):
         self._budget_remaining = 0.0 # Will be updated by governance
         self._current_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         self._history_loaded = False
+        self.tools = []
 
         # Apply specialization AFTER initialization so logging (audit) works
         if skill_name:
@@ -39,10 +42,63 @@ class ManagedAgent(Agent):
         else:
             self._apply_skill("default_agent")
 
+        # Initialize Functional Tools (The Toolbelt)
+        self.functional_tools = {
+            "read_artifact": read_artifact,
+            "search_web": search_web,
+            "write_artifact": write_artifact,
+            "list_artifacts": list_artifacts
+        }
+        
+        # Build the tool schemas for the LLM
+        self.tool_schemas = [
+            {
+                "name": "read_artifact",
+                "description": "Read the contents of a file (Excel, CSV, TXT, MD) from the workspace.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Name or path of the file to read."}
+                    },
+                    "required": ["path"]
+                }
+            },
+            {
+                "name": "search_web",
+                "description": "Search the web for real-time information, market data, or research.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "The search query."}
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
+                "name": "write_artifact",
+                "description": "Create or update a file in the workspace.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Name or path of the file to create."},
+                        "content": {"type": "string", "description": "Content to write to the file."}
+                    },
+                    "required": ["path", "content"]
+                }
+            },
+            {
+                "name": "list_artifacts",
+                "description": "List all files available in the current workspace.",
+                "parameters": {"type": "object", "properties": {}}
+            }
+        ]
+
     def _apply_skill(self, skill_name: str):
         """Prepend skill prompt and register tools."""
         skill = skill_registry.get_skill(skill_name)
         if skill:
+            # Store tools for LLM calls
+            self.tools = skill.tools or []
             # Prepend the specialized knowledge to the system prompt
             self.system_prompt = f"--- ROLE: {skill.name} ---\n{skill.prompt_text}\n\n--- CURRENT TASK ---\n{self.system_prompt}"
             # Log the specialization (Internal only, not broadcasted as thought)
@@ -114,22 +170,70 @@ class ManagedAgent(Agent):
             messages.append({"role": m.role, "content": m.content})
         
         user_header = f"--- SESSION STATE ---\nCOMPANY: {self.company_id}\nBUDGET: ${budget['spent']:.4f}\n\n"
+        # Only add the user input to memory once
+        if not any(m.role == "user" and user_input in m.content for m in self.memory.get_messages()):
+            self.memory.add_message("user", user_input)
+        
         messages.append({"role": "user", "content": user_header + user_input})
 
-        # Call LLM
-        response_data = await self.llm.chat(messages)
-        text = response_data["text"]
-        
-        # Confirm cost
-        actual_cost = self._calculate_actual_cost(response_data.get("usage", {}))
-        self.gov.confirm_cost(self.agent_id, actual_cost)
+        # --- EXECUTION LOOP (Multi-turn Tool Calling) ---
+        max_tool_turns = 10
+        current_turn = 0
+        final_text = ""
 
-        # Memory and logging
-        self.memory.add_message("user", user_input)
-        self.memory.add_message("assistant", text)
-        
-        self.audit.log(self.company_id, self.agent_id, "RESULT", {"result": text}, broadcast=True)
-        return text
+        while current_turn < max_tool_turns:
+            current_turn += 1
+            
+            # Call LLM with functional tools
+            response_data = await self.llm.chat(messages, tools=self.tool_schemas)
+            
+            # Track cost
+            actual_cost = self._calculate_actual_cost(response_data.get("usage", {}))
+            self.gov.confirm_cost(self.agent_id, actual_cost)
+            
+            # Extract content and function call
+            text = response_data.get("text", "")
+            func_call = response_data.get("functionCall")
+
+            if not func_call:
+                # No more tools to call, we are done
+                final_text = text
+                break
+            
+            # Handle tool call
+            tool_name = func_call["name"]
+            tool_args = func_call["args"]
+
+            # Log action
+            self.handle_thought(f"Executing tool: {tool_name} with args: {tool_args}")
+            self.audit.log(self.company_id, self.agent_id, "ACTION", {"tool": tool_name, "args": tool_args}, broadcast=True)
+
+            try:
+                # Execute the tool
+                if tool_name in self.functional_tools:
+                    tool_func = self.functional_tools[tool_name]
+                    # Note: These tools are synchronous in core.tools, so we call them normally
+                    result = tool_func(**tool_args)
+                else:
+                    result = f"Error: Tool {tool_name} not found."
+                
+                # Append tool result to messages for the next LLM turn
+                messages.append({"role": "assistant", "content": text, "functionCall": func_call})
+                messages.append({"role": "function", "name": tool_name, "content": str(result)})
+                
+                # Log the result
+                self.audit.log(self.company_id, self.agent_id, "TOOL_RESULT", {"tool": tool_name, "result": str(result)[:500]}, broadcast=True)
+                
+            except Exception as e:
+                error_msg = f"Error executing {tool_name}: {e}"
+                messages.append({"role": "assistant", "content": text, "functionCall": func_call})
+                messages.append({"role": "function", "name": tool_name, "content": error_msg})
+                self.handle_thought(f"Tool execution failed: {error_msg}")
+
+        # Final memory update
+        self.memory.add_message("assistant", final_text)
+        self.audit.log(self.company_id, self.agent_id, "RESULT", {"result": final_text}, broadcast=True)
+        return final_text
 
     async def run_stream(self, user_input: str):
         """Asynchronous generator that yields response chunks and broadcasts them."""
@@ -148,7 +252,7 @@ class ManagedAgent(Agent):
         messages.append({"role": "user", "content": user_input})
 
         full_text = ""
-        async for chunk in self.llm.chat_stream(messages):
+        async for chunk in self.llm.chat_stream(messages, tools=self.tools):
             full_text += chunk
             # Broadcast each thought chunk for the Neural Mirror
             self.audit.log(self.company_id, self.agent_id, "THOUGHT_CHUNK", {"chunk": chunk, "node_id": self.agent_id}, broadcast=True)

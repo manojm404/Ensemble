@@ -471,8 +471,12 @@ class DAGWorkflowEngine:
                     html_content = response.split("```html")[1].split("```")[0].strip()
                 elif "```" in response:
                     html_content = response.split("```")[1].split("```")[0].strip()
-                
-                self.space.write(html_content.encode(), "index.html", node_id, self.company_id)
+                # Save to data/workspace/preview.html for the UI to pick up
+                preview_path = os.path.join("data", "workspace", "preview.html")
+                os.makedirs(os.path.dirname(preview_path), exist_ok=True)
+                with open(preview_path, "w") as f:
+                    f.write(html_content)
+                print(f"🌐 [DAG Engine] Web deliverable saved to preview.html", flush=True)
 
             # Update node status
             self._update_node_status(run_id, node_id, "completed")

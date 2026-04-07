@@ -5,7 +5,8 @@ import time
 def test_mgx_generation():
     url = "http://localhost:8000/sop/generate"
     payload = {
-        "prompt": "Create a 2-step workflow for a news article: First, a researcher finds facts, then a writer drafts the article."
+        "prompt": "Create a 2-step workflow for a news article: First, a researcher finds facts, then a writer drafts the article.",
+        "agent_count": 2
     }
     
     print(f"🚀 Sending generation request to {url}...")
@@ -29,11 +30,17 @@ def test_mgx_generation():
         print(f"Found {len(data['nodes'])} nodes and {len(data['edges'])} edges.")
         
         for node in data['nodes']:
-            print(f"  - Node {node['id']}: {node['label']} (Role: {node['role']})")
-            required = ["id", "label", "role", "instruction"]
+            node_data = node.get('data', node)
+            print(f"  - Node {node['id']}: {node_data.get('label')} (Role: {node_data.get('role')})")
+            required = ["id", "type"]
             for field in required:
                 if field not in node:
                     print(f"    ❌ Missing required field: {field}")
+                    return False
+            required_data = ["label", "role", "instruction"]
+            for field in required_data:
+                if field not in node_data:
+                    print(f"    ❌ Missing required data field: {field}")
                     return False
         
         for edge in data['edges']:
