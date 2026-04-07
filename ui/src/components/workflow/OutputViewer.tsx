@@ -216,30 +216,13 @@ function FileExplorer({ files }: { files: OutputFile[] }) {
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-foreground">{selectedFile.path}</span>
                 {/* Copy file content to clipboard */}
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigator.clipboard.writeText(selectedFile.content || "")} disabled={selectedFile.path.match(/\.(xlsx|docx|pdf|png|jpg)$/i) !== null}>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigator.clipboard.writeText(selectedFile.content || "")}>
                   <Copy className="h-3 w-3" />
                 </Button>
               </div>
-              
-              {/* Smart Content Viewer: Detect binary files */}
-              {selectedFile.path.match(/\.(xlsx|docx|pdf)$/i) ? (
-                <div className="flex flex-col items-center justify-center p-12 bg-secondary/20 rounded-xl border border-dashed border-border/50 gap-4">
-                   <div className="h-16 w-16 bg-primary/10 rounded-full flex items-center justify-center">
-                     <FileText className="h-8 w-8 text-primary" />
-                   </div>
-                   <div className="text-center">
-                     <p className="text-sm font-semibold text-foreground">Binary Document</p>
-                     <p className="text-[11px] text-muted-foreground mt-1">This file type is best viewed in its native application.</p>
-                   </div>
-                   <Button size="sm" className="gap-2" onClick={() => window.open(`http://127.0.0.1:8089/api/workspace/download?path=${encodeURIComponent(selectedFile.path)}`, "_blank")}>
-                     <Download className="h-3.5 w-3.5" /> Download {selectedFile.name}
-                   </Button>
-                </div>
-              ) : (
-                <pre className="text-[11px] text-muted-foreground bg-secondary/30 rounded-lg p-3 border border-border/30 overflow-x-auto whitespace-pre-wrap">
-                  {selectedFile.content}
-                </pre>
-              )}
+              <pre className="text-[11px] text-muted-foreground bg-secondary/30 rounded-lg p-3 border border-border/30 overflow-x-auto whitespace-pre-wrap">
+                {selectedFile.content}
+              </pre>
             </div>
           ) : (
             <div className="flex items-center justify-center h-full text-xs text-muted-foreground p-8">

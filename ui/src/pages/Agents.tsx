@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Search, Plus, Bot, RefreshCw, Shield, FlaskConical, Settings2, Github, Globe, Sparkles, GitFork, Trash2, Moon } from "lucide-react";
+import { Search, Plus, Bot, RefreshCw, Shield, FlaskConical, Settings2, Github, Globe, Sparkles, GitFork, Trash2, Moon, BarChart3, Download } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { useInspector } from "@/components/layout/InspectorPanel";
 import { toast } from "sonner";
-import { getAgents, syncRegistry, toggleAgentStatus, importExternalRepo, deleteAgent, forkAgent, AgentSkill } from "@/lib/api";
+import { getAgents, syncRegistry, toggleAgentStatus, importExternalRepo, deleteAgent, forkAgent, getAgentStats, exportAgent, AgentSkill, AgentStats } from "@/lib/api";
 import { Switch } from "@/components/ui/switch";
 
 const categoryColors: Record<string, string> = {
@@ -30,6 +30,7 @@ const Agents = () => {
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
   const [agents, setAgents] = useState<AgentSkill[]>([]);
+  const [stats, setStats] = useState<AgentStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [importUrl, setImportUrl] = useState("");
@@ -42,7 +43,17 @@ const Agents = () => {
 
   useEffect(() => {
     loadAgents();
+    loadStats();
   }, []);
+
+  async function loadStats() {
+    try {
+        const s = await getAgentStats();
+        setStats(s);
+    } catch (e) {
+        console.warn("Telemetry offline.");
+    }
+  }
 
   async function loadAgents() {
     setLoading(true);
@@ -246,7 +257,28 @@ const Agents = () => {
                                 "{agent.description}"
                              </p>
                            </div>
-                            <div className="pt-4 border-t border-border/50 flex flex-col gap-4">
+                           <div className="pt-4 border-t border-border/50 flex flex-col gap-4">
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div className="p-3 rounded-xl bg-secondary/10 border border-border/20 flex flex-col gap-1">
+                                    <span className="text-[9px] uppercase font-bold text-muted-foreground flex items-center gap-1.5 focus:text-primary transition-colors">
+                                        <BarChart3 className="h-2.5 w-2.5" /> Total Field Usage
+                                    </span>
+                                    <span className="text-lg font-bold text-foreground">
+                                        {stats.find(s => s.agent_id === agent.id)?.usage_count || 0}
+                                    </span>
+                                  </div>
+                                  <div className="p-3 rounded-xl bg-secondary/10 border border-border/20 flex flex-col gap-1">
+                                    <span className="text-[9px] uppercase font-bold text-muted-foreground flex items-center gap-1.5">
+                                        <div className="h-2.5 w-2.5 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                                            <div className="h-1 w-1 rounded-full bg-emerald-500 animate-pulse" />
+                                        </div> 
+                                        Commulative Cost
+                                    </span>
+                                    <span className="text-lg font-bold text-foreground">
+                                        ${(stats.find(s => s.agent_id === agent.id)?.total_cost || 0).toFixed(4)}
+                                    </span>
+                                  </div>
+                                </div>
                                <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-2">
                                     {agent.is_native ? (
@@ -271,16 +303,19 @@ const Agents = () => {
                                </div>
                                
                                <div className="flex gap-2">
-                                  {agent.is_native ? (
-                                    <Button size="sm" className="flex-1 gap-2 bg-secondary/30 hover:bg-secondary/50 text-foreground border-border/50" variant="outline" onClick={() => handleFork(agent.id)}>
-                                        <GitFork className="h-4 w-4" /> Fork to Custom
-                                    </Button>
-                                  ) : (
-                                    <Button size="sm" className="flex-1 gap-2 text-destructive hover:bg-destructive/10 border-destructive/20" variant="outline" onClick={() => handleDelete(agent.id)}>
-                                        <Trash2 className="h-4 w-4" /> Decommission Specialist
-                                    </Button>
-                                  )}
-                               </div>
+                                   <Button size="sm" className="flex-1 gap-2 bg-secondary/30 hover:bg-secondary/50 text-foreground border-border/50" variant="outline" onClick={() => exportAgent(agent.id)}>
+                                       <Download className="h-4 w-4" /> Share Agent
+                                   </Button>
+                                   {agent.is_native ? (
+                                     <Button size="sm" className="flex-1 gap-2 bg-secondary/30 hover:bg-secondary/50 text-foreground border-border/50" variant="outline" onClick={() => handleFork(agent.id)}>
+                                         <GitFork className="h-4 w-4" /> Fork to Custom
+                                     </Button>
+                                   ) : (
+                                     <Button size="sm" className="flex-1 gap-2 text-destructive hover:bg-destructive/10 border-destructive/20" variant="outline" onClick={() => handleDelete(agent.id)}>
+                                         <Trash2 className="h-4 w-4" /> Decommission Specialist
+                                     </Button>
+                                   )}
+                                </div>
                             </div>
                          </div>
                        )

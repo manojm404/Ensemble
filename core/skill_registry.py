@@ -6,6 +6,7 @@ class SkillRegistry:
         self.root = os.getcwd()
         self.native_dir = os.path.join(self.root, "data/agents/native")
         self.custom_dir = os.path.join(self.root, "data/agents/custom")
+        self.legacy_skills_dir = os.path.join(self.root, "skills")
         self.integrations_dir = os.path.join(self.root, "integrations")
         self.state_file = os.path.join(self.root, "data/agents/manifest.json")
         self.skills = {}
@@ -32,9 +33,11 @@ class SkillRegistry:
         self.skills = {}
         # 1. Load Native Core (High-fidelity, categorized)
         self._load_from_path(self.native_dir, source="Native")
-        # 2. Load Custom User Agents
+        # 2. Load Legacy Registry (The 170+ specialists)
+        self._load_from_path(self.legacy_skills_dir, source="Core")
+        # 3. Load Custom User Agents
         self._load_from_path(self.custom_dir, source="Custom")
-        # 3. Load External Integrations (MetaGPT, SuperAGI)
+        # 4. Load External Integrations
         self._load_integrations()
         print(f"✅ [SkillRegistry] Successfully loaded {len(self.skills)} specialist agents.")
         return len(self.skills)

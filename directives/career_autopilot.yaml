@@ -1,0 +1,34 @@
+name: Career Autopilot v1
+description: Detects Data Engineer job openings and prepares tailored resume for human approval.
+version: 1.0.0
+author: Ensemble Architect
+
+# The Directive State Machine
+# Sequence: Search -> Extract -> Tailor -> Inbox Propose -> Final Apply
+
+steps:
+  - id: job_discovery
+    role: product-product-trend-researcher
+    action: web_search
+    params:
+      query: "Data Engineer career portals LinkedIn Indeed remote USA 2024"
+      max_results: 5
+    description: "Scan top job boards for Data Engineer positions matching the user profile."
+
+  - id: resume_tailoring
+    role: specialized-recruitment-specialist
+    action: draft_content
+    params:
+      source_link: "{{steps.job_discovery.output}}"
+      base_resume: "data/workspace/resume.pdf"
+      instruction: "Adapt the experience section to highlight Spark and Python expertise as requested in the JD."
+    description: "Analyze the top JD found and modify the user's resume for maximum alignment."
+
+  - id: governance_gate
+    role: specialized-recruitment-specialist
+    action: inbox_propose
+    params:
+      title: "Action Required: Job Application Draft Ready"
+      content: "I have prepared a tailored resume for the Data Engineer position at [Company]. Review the PDF in the workspace before I proceed with the submission."
+      approval_required: true
+    description: "Pause the autopilot loop and wait for user confirmation in the Inbox."

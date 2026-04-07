@@ -12,7 +12,7 @@
  * - The non-closable "Home" tab behavior
  */
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 import {
   MessageSquare,
   Bot,
@@ -20,15 +20,22 @@ import {
   Blocks,
   Shield,
   Settings,
-  Globe,
+  ShoppingBag,
+  LayoutGrid,
   type LucideIcon,
 } from "lucide-react";
+
+// Icon mapping for persistence
+const iconMap: Record<string, LucideIcon> = {
+  MessageSquare, Bot, GitBranch, Blocks, Shield, Settings, ShoppingBag, LayoutGrid
+};
 
 export interface AppItem {
   id: string;
   title: string;
   url: string;
   icon: LucideIcon;
+  iconName?: string; // For persistence
   description: string;
 }
 
@@ -37,32 +44,26 @@ export interface TabItem {
   title: string;
   url: string;
   icon: LucideIcon;
+  iconName?: string;
   closable: boolean;
-  /** Logo URL for external AI apps (ChatGPT, Claude, etc.) */
   logoUrl?: string;
 }
 
-/**
- * All built-in apps available in the launcher.
- * Adding a new app here automatically adds it to the Launcher grid.
- * DO NOT CHANGE order — it matches the visual grid layout.
- */
 export const allApps: AppItem[] = [
-  { id: "chat", title: "Chat", url: "/chat", icon: MessageSquare, description: "Conversations with agents" },
-  { id: "agents", title: "Agents", url: "/agents", icon: Bot, description: "Manage AI agents" },
-  { id: "workflows", title: "Workflows", url: "/workflows", icon: GitBranch, description: "Automation pipelines" },
-  { id: "macros", title: "Macros", url: "/macros", icon: Blocks, description: "Reusable sequences" },
-  { id: "permissions", title: "Permissions", url: "/permissions", icon: Shield, description: "Access control" },
-  { id: "settings", title: "Settings", url: "/settings/general", icon: Settings, description: "App configuration" },
+  { id: "chat", title: "Chat", url: "/chat", icon: MessageSquare, iconName: "MessageSquare", description: "Conversations with agents" },
+  { id: "agents", title: "Agents", url: "/agents", icon: Bot, iconName: "Bot", description: "Manage AI agents" },
+  { id: "marketplace", title: "Marketplace", url: "/marketplace", icon: ShoppingBag, iconName: "ShoppingBag", description: "Browse community agent packs" },
+  { id: "workflows", title: "Workflows", url: "/workflows", icon: GitBranch, iconName: "GitBranch", description: "Automation pipelines" },
+  { id: "macros", title: "Macros", url: "/macros", icon: Blocks, iconName: "Blocks", description: "Reusable sequences" },
+  { id: "permissions", title: "Permissions", url: "/permissions", icon: Shield, iconName: "Shield", description: "Access control" },
+  { id: "orgs", title: "Organization", url: "/orgs", icon: LayoutGrid, iconName: "LayoutGrid", description: "Corporate management OS" },
+  { id: "settings", title: "Settings", url: "/settings/general", icon: Settings, iconName: "Settings", description: "App configuration" },
 ];
 
 interface TabContextType {
   tabs: TabItem[];
-  /** Opens an internal app as a new tab (deduplicates by id) */
   openApp: (app: AppItem) => void;
-  /** Opens an external AI app (ChatGPT, Claude, etc.) in an iframe tab */
   openExternalApp: (app: { id: string; title: string; url: string; logoUrl: string }) => void;
-  /** Closes a tab by id (Home tab cannot be closed) */
   closeTab: (tabId: string) => void;
 }
 
@@ -74,30 +75,69 @@ export function useTabContext() {
   return ctx;
 }
 
-export function TabProvider({ children }: { children: ReactNode }) {
-  const [tabs, setTabs] = useState<TabItem[]>([
-    /* Home tab — always present, not closable */
-    { id: "home", title: "Home", url: "/", icon: MessageSquare, closable: false },
-  ]);
+const STORAGE_KEY = "ensemble_tabs_v3";
 
-  /** Opens app tab — skips if already open (deduplicate by id) */
+export function TabProvider({ children }: { children: ReactNode }) {
+  const [tabs, setTabs] = useState<TabItem[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.map((t: any) => ({
+          ...t,
+          url: t.id === "home" ? "/" : t.url, // Sanity check for home URL
+          icon: iconMap[t.iconName] || LayoutGrid
+        }));
+      } catch (e) {
+        console.error("Failed to restore tabs:", e);
+      }
+    }
+    return [{ id: "home", title: "Home", url: "/", icon: MessageSquare, iconName: "MessageSquare", closable: false }];
+  });
+
+  // Persist on change
+  useEffect(() => {
+    const toSave = tabs.map(t => ({
+      id: t.id,
+      title: t.title,
+      url: t.url,
+      iconName: t.iconName,
+      closable: t.closable,
+      logoUrl: t.logoUrl
+    }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+  }, [tabs]);
+
   const openApp = useCallback((app: AppItem) => {
     setTabs((prev) => {
       if (prev.some((t) => t.id === app.id)) return prev;
-      return [...prev, { ...app, closable: true }];
+      return [...prev, { 
+        id: app.id, 
+        title: app.title, 
+        url: app.url, 
+        icon: app.icon, 
+        iconName: app.iconName, 
+        closable: true 
+      }];
     });
   }, []);
 
-  /** Opens external app in iframe — prefixes id with "ext-" to avoid conflicts */
   const openExternalApp = useCallback((app: { id: string; title: string; url: string; logoUrl: string }) => {
     const tabId = `ext-${app.id}`;
     setTabs((prev) => {
       if (prev.some((t) => t.id === tabId)) return prev;
-      return [...prev, { id: tabId, title: app.title, url: `/app/${app.id}`, icon: Bot, closable: true, logoUrl: app.logoUrl }];
+      return [...prev, { 
+        id: tabId, 
+        title: app.title, 
+        url: `/app/${app.id}`, 
+        icon: Bot, 
+        iconName: "Bot",
+        closable: true, 
+        logoUrl: app.logoUrl 
+      }];
     });
   }, []);
 
-  /** Closes a tab — respects closable flag (Home can't be closed) */
   const closeTab = useCallback((tabId: string) => {
     setTabs((prev) => prev.filter((t) => t.id !== tabId || !t.closable));
   }, []);

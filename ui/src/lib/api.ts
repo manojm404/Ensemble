@@ -227,3 +227,96 @@ export async function forkAgent(id: string): Promise<any> {
         method: 'POST'
     });
 }
+
+// --- 🛒 Marketplace API ---
+
+export interface MarketplacePack {
+  id: string;
+  name: string;
+  description: string;
+  emoji: string;
+  version: string;
+  author: string;
+  download_url: string;
+  agent_files: string[];
+}
+
+export interface AgentStats {
+  agent_id: string;
+  usage_count: number;
+  total_cost: number;
+  last_used: string | null;
+}
+
+export async function getMarketplacePacks(): Promise<MarketplacePack[]> {
+  const res = await fetchApi('/api/marketplace/packs');
+  return res.packs || [];
+}
+
+export async function installPack(pack_id: string, download_url: string, version: string): Promise<any> {
+  return await fetchApi('/api/marketplace/install', {
+    method: 'POST',
+    body: JSON.stringify({ pack_id, download_url, version })
+  });
+}
+
+export async function uninstallPack(pack_id: string): Promise<any> {
+  return await fetchApi('/api/marketplace/uninstall', {
+    method: 'POST',
+    body: JSON.stringify({ pack_id })
+  });
+}
+
+export async function updatePack(pack_id: string): Promise<any> {
+  return await fetchApi(`/api/marketplace/update/${pack_id}`, {
+    method: 'POST'
+  });
+}
+
+export async function rollbackPack(pack_id: string, version: string): Promise<any> {
+  return await fetchApi(`/api/marketplace/rollback/${pack_id}`, {
+    method: 'POST',
+    body: JSON.stringify({ version })
+  });
+}
+
+export async function getAgentStats(): Promise<AgentStats[]> {
+  const res = await fetchApi('/api/agents/stats');
+  return res.stats || [];
+}
+
+export async function exportAgent(agent_id: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/marketplace/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent_id })
+  });
+  if (!response.ok) throw new Error("Export failed.");
+  
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${agent_id}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+export async function exportPack(pack_id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/api/marketplace/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pack_id })
+    });
+    if (!response.ok) throw new Error("Export failed.");
+    
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${pack_id}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }

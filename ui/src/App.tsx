@@ -19,6 +19,15 @@ import MacroDetail from "./pages/MacroDetail";
 import Permissions from "./pages/Permissions";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import Marketplace from "./pages/Marketplace";
+import OrgDashboard from "./pages/OrgDashboard";
+import OrgList from "./pages/OrgList";
+import OrgDepartments from "./pages/OrgDepartments";
+import OrgDepartmentDetail from "./pages/OrgDepartmentDetail";
+import OrgAgentHiring from "./pages/OrgAgentHiring";
+import OrgTasks from "./pages/OrgTasks";
+import OrgActivity from "./pages/OrgActivity";
+import OrgReports from "./pages/OrgReports";
 
 const queryClient = new QueryClient();
 
@@ -36,6 +45,7 @@ const App = () => (
               <Route path="/launcher" element={<Launcher />} />
               <Route path="/app/:appId" element={<ExternalApp />} />
               <Route path="/agents" element={<Agents />} />
+              <Route path="/marketplace" element={<Marketplace />} />
               <Route path="/workflows" element={<Workflows />} />
               <Route path="/workflows/:id" element={<WorkflowEditor />} />
               <Route path="/workflow-output/:id" element={<WorkflowOutput />} />
@@ -43,6 +53,14 @@ const App = () => (
               <Route path="/macros/:id" element={<MacroDetail />} />
               <Route path="/permissions" element={<Permissions />} />
               <Route path="/settings/*" element={<Settings />} />
+              <Route path="/orgs" element={<OrgList />} />
+              <Route path="/org/:id" element={<OrgDashboard />} />
+              <Route path="/org/:id/departments" element={<OrgDepartments />} />
+              <Route path="/org/:id/departments/:deptId" element={<OrgDepartmentDetail />} />
+              <Route path="/org/:id/roster" element={<OrgAgentHiring />} />
+              <Route path="/org/:id/tasks" element={<OrgTasks />} />
+              <Route path="/org/:id/activity" element={<OrgActivity />} />
+              <Route path="/org/:id/reports" element={<OrgReports />} />
             </Route>
             <Route path="/auth" element={<Auth />} />
             <Route path="*" element={<NotFound />} />
