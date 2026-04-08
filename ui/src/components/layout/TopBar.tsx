@@ -25,6 +25,7 @@ import { allApps, useTabContext } from "@/lib/tab-context";
 import { useAIApps } from "@/lib/ai-apps";
 import { AddCustomAppDialog } from "@/components/home/AddCustomAppDialog";
 import { aiLogoMap } from "@/components/icons/ai-logos";
+import { OrgSwitcher } from "./OrgSwitcher";
 
 export function TopBar() {
   const navigate = useNavigate();
@@ -40,10 +41,14 @@ export function TopBar() {
   const handleCloseTab = (e: React.MouseEvent, tabId: string) => {
     e.stopPropagation();
     const isActive = activeTabId === tabId;
-    closeTab(tabId);
     if (isActive) {
       const remaining = tabs.filter((t) => t.id !== tabId);
-      navigate(remaining[remaining.length - 1]?.url || "/");
+      const nextUrl = remaining[remaining.length - 1]?.url || "/";
+      // Navigate first, then close the tab in the next tick to avoid stale state
+      navigate(nextUrl);
+      setTimeout(() => closeTab(tabId), 0);
+    } else {
+      closeTab(tabId);
     }
   };
 
@@ -63,6 +68,9 @@ export function TopBar() {
         </button>
         <AIAppsPopover open={aiAppsOpen} onClose={() => setAiAppsOpen(false)} />
       </div>
+
+      {/* Org Switcher */}
+      <OrgSwitcher />
 
       <AnimatePresence mode="popLayout">
         {tabs.map((tab) => {

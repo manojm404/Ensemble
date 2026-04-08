@@ -42,6 +42,9 @@ temp/
 .DS_Store
 Thumbs.db
 
+# Ensemble Execution Artifacts
+deliverables/run_*/
+
 # IDE & Tooling
 .vscode/
 .idea/

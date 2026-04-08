@@ -2,8 +2,8 @@
  * API Client functions.
  */
 
-export const API_BASE_URL = 'http://127.0.0.1:8089';
-export const WS_BASE_URL = 'ws://127.0.0.1:8089';
+export const API_BASE_URL = 'http://127.0.0.1:8088';
+export const WS_BASE_URL = 'ws://127.0.0.1:8088';
 
 export async function fetchApi(endpoint: string, options: RequestInit = {}) {
   const token = localStorage.getItem('ensemble_auth_token');
@@ -64,6 +64,13 @@ export async function getWorkflow(id: string): Promise<WorkflowData> {
     name: result.name, 
     graph_json: typeof result.graph === 'string' ? result.graph : JSON.stringify(result.graph || {}) 
   };
+}
+
+/**
+ * Delete a workflow.
+ */
+export async function deleteWorkflow(id: string): Promise<void> {
+  return await fetchApi(`/api/workflows/${id}`, { method: 'DELETE' });
 }
 
 /**

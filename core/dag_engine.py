@@ -11,6 +11,8 @@ Follows AGENTS.md rules: CAS commits, audit logging, budget checks, handover pro
 """
 import hashlib
 import json
+import os
+import re
 import sqlite3
 import time
 import asyncio
@@ -60,6 +62,143 @@ class DAGWorkflowEngine:
     def _release_lock(self, workflow_id: str):
         """Release mutex lock."""
         self._locks.pop(workflow_id, None)
+
+    def _load_skill_instruction(self, role_id: str) -> str:
+        """Load skill instruction from skill registry using role_id."""
+        import os
+        import re
+        
+        # First try to find matching skill in the registry
+        try:
+            all_skills = self.gov.skill_registry.list_skills() if hasattr(self.gov, 'skill_registry') else []
+            for skill in all_skills:
+                skill_id = skill.get("id", "")
+                skill_name = skill.get("name", "").lower()
+                role_lower = role_id.lower()
+                
+                # Match by ID or name
+                if skill_id == role_id or skill_id in role_lower or role_lower in skill_id:
+                    # Found matching skill, load its file
+                    skills_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
+                    # Find the file for this skill
+                    for fname in os.listdir(skills_dir):
+                        if fname.endswith(".md"):
+                            file_path = os.path.join(skills_dir, fname)
+                            with open(file_path, "r", encoding="utf-8") as f:
+                                content = f.read()
+                            # Check if this file's frontmatter name matches
+                            fm_match = re.match(r'^---\s*\nname:\s*(.+)', content)
+                            if fm_match and fm_match.group(1).strip().lower() in role_lower:
+                                # Extract body after frontmatter
+                                body_match = re.match(r'^---\s*\n.*?\n---\s*\n(.*)$', content, re.DOTALL)
+                                if body_match:
+                                    return body_match.group(1).strip()
+                                return content
+        except Exception as e:
+            print(f"⚠️ [DAG Engine] Skill registry lookup failed: {e}", flush=True)
+        
+        # Fallback: try to load directly from skills/ directory by filename
+        skills_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
+        if not os.path.exists(skills_dir):
+            return ""
+        
+        # Try exact filename match
+        skill_file = os.path.join(skills_dir, f"{role_id}.md")
+        if os.path.exists(skill_file):
+            try:
+                with open(skill_file, "r", encoding="utf-8") as f:
+                    content = f.read()
+                body_match = re.match(r'^---\s*\n.*?\n---\s*\n(.*)$', content, re.DOTALL)
+                if body_match:
+                    return body_match.group(1).strip()
+                return content
+            except Exception as e:
+                print(f"⚠️ [DAG Engine] Failed to load {skill_file}: {e}", flush=True)
+        
+        # Try partial match
+        import glob
+        matches = glob.glob(os.path.join(skills_dir, f"*{role_id}*.md"))
+        if matches:
+            try:
+                with open(matches[0], "r", encoding="utf-8") as f:
+                    content = f.read()
+                body_match = re.match(r'^---\s*\n.*?\n---\s*\n(.*)$', content, re.DOTALL)
+                if body_match:
+                    return body_match.group(1).strip()
+                return content
+            except Exception as e:
+                print(f"⚠️ [DAG Engine] Failed to load {matches[0]}: {e}", flush=True)
+        
+        return ""
+
+    @staticmethod
+    def _extract_code_blocks(markdown: str) -> Dict[str, str]:
+        """
+        Extract code blocks from markdown and return as {filename: content} dict.
+        Detects: html, css, js/javascript, python, json, xml, sql, bash, etc.
+        """
+        import re
+        
+        files = {}
+        
+        # Pattern to match fenced code blocks with language
+        pattern = r'```(\w+)\n(.*?)```'
+        matches = re.findall(pattern, markdown, re.DOTALL)
+        
+        for lang, code in matches:
+            lang_lower = lang.lower()
+            code = code.strip()
+            
+            if not code:
+                continue
+            
+            # Map language to filename
+            if lang_lower in ('html', 'htm'):
+                if 'index.html' not in files:
+                    files['index.html'] = code
+            elif lang_lower == 'css':
+                if 'style.css' not in files:
+                    files['style.css'] = code
+                else:
+                    # Handle multiple CSS blocks
+                    idx = len([f for f in files if f.endswith('.css')]) + 1
+                    files[f'style{idx}.css'] = code
+            elif lang_lower in ('js', 'javascript', 'typescript', 'ts'):
+                if 'script.js' not in files:
+                    files['script.js'] = code
+                else:
+                    idx = len([f for f in files if f.endswith('.js')]) + 1
+                    files[f'script{idx}.js'] = code
+            elif lang_lower in ('py', 'python'):
+                if 'main.py' not in files:
+                    files['main.py'] = code
+                else:
+                    idx = len([f for f in files if f.endswith('.py')]) + 1
+                    files[f'module{idx}.py'] = code
+            elif lang_lower in ('json',):
+                if 'data.json' not in files:
+                    files['data.json'] = code
+            elif lang_lower in ('xml',):
+                if 'config.xml' not in files:
+                    files['config.xml'] = code
+            elif lang_lower in ('sql',):
+                if 'schema.sql' not in files:
+                    files['schema.sql'] = code
+            elif lang_lower in ('bash', 'sh', 'shell', 'zsh'):
+                if 'run.sh' not in files:
+                    files['run.sh'] = code
+            else:
+                # Unknown language, save with extension
+                ext_map = {
+                    'go': 'main.go', 'rs': 'main.rs', 'java': 'Main.java',
+                    'cpp': 'main.cpp', 'c': 'main.c', 'rb': 'main.rb',
+                    'php': 'index.php', 'swift': 'main.swift', 'kt': 'Main.kt',
+                }
+                fname = ext_map.get(lang_lower, f'code.{lang_lower}')
+                if fname not in files:
+                    files[fname] = code
+        
+        return files
 
     @staticmethod
     def topological_sort(nodes: List[Dict], edges: List[Dict]) -> List[str]:
@@ -371,6 +510,12 @@ class DAGWorkflowEngine:
         role = node_data.get("role", "Assistant")
         instruction = node_data.get("instruction", "")
 
+        # If instruction is empty, try to load from skill file
+        if not instruction and role:
+            instruction = self._load_skill_instruction(role)
+            if instruction:
+                print(f"📋 [DAG Engine] Loaded skill prompt for {role}", flush=True)
+
         # GLOBAL PANIC CHECK
         if self.gov.is_panic:
             print(f"🛑 [DAG Engine] Node {node_id} ABORTED due to PANIC signal.", flush=True)
@@ -462,8 +607,26 @@ class DAGWorkflowEngine:
             # 8. Mirror to physical deliverables folder (if Architect/Planner)
             self._mirror_to_deliverables(run_id, node_id, role, response)
 
-            # 9. Auto-detect Web Deliverables (for Workspace Preview)
-            if "<!DOCTYPE html>" in response or "<html>" in response.lower():
+            # 9. Auto-detect and extract code blocks into proper files
+            extracted_files = self._extract_code_blocks(response)
+            if extracted_files:
+                print(f"📁 [DAG Engine] Extracted {len(extracted_files)} files from node {node_id}", flush=True)
+                for filename, content in extracted_files.items():
+                    self.space.write(content.encode(), f"{node_id}_{filename}", node_id, self.company_id)
+                    print(f"  📄 Saved: {filename}", flush=True)
+
+            # Also save to physical workspace for preview
+            if extracted_files:
+                workspace_dir = os.path.join("data", "workspace", f"workflow_{workflow_id}", node_id)
+                os.makedirs(workspace_dir, exist_ok=True)
+                for filename, content in extracted_files.items():
+                    file_path = os.path.join(workspace_dir, filename)
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    print(f"  💾 Physical file saved: {file_path}", flush=True)
+
+            # 10. Legacy HTML detection (for backward compatibility)
+            if not extracted_files and ("<!DOCTYPE html>" in response or "<html>" in response.lower()):
                 print(f"🌐 [DAG Engine] Web deliverable detected for node {node_id}. Auto-saving index.html", flush=True)
                 # Extract HTML content if it's wrapped in markdown blocks
                 html_content = response

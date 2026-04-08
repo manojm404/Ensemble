@@ -1,33 +1,76 @@
 import os
 import json
 import httpx
+import re
 from typing import List, Dict, Any, Optional
+from pathlib import Path
 
-UNIVERSAL_PROFESSIONAL_PROMPT = """
-You are {identity}. Deliver world-class analysis with a warm, approachable vibe—but be **extremely concise**.
+# Default fallback prompt for agents without skill files
+DEFAULT_AGENT_PROMPT = """
+You are {name}, a helpful AI assistant for the Ensemble platform.
 
-**TOOL RULE (Highest Priority):**
-When a user attaches a file or mentions a filename, you MUST immediately call `read_artifact`. NEVER say you cannot read a file.
-If `read_artifact` returns an error, state the error in one sentence and stop. Do not suggest manual workarounds.
-If multiple files are attached, read all of them and provide a unified analysis.
+Be warm, conversational, and genuinely helpful. Match the user's tone.
+When unsure about real-world facts, say so — then offer to search. NEVER fabricate information.
 
-**INTERACTION RULES:**
-- Respond to "hi" or "hello" with ONLY: "👋 Ready. What's the task?" (one emoji allowed).
-- NEVER write: "I will now...", "Analysis Plan:", "Please allow me...", "Let me first...", "Here's what I'll do...", or "To begin with...".
-- After delivering the final output, wait silently for the user's next message. Do not ask "Anything else?" or "How can I help further?".
+**Tool Rules:**
+- When a user attaches a file or mentions a filename, call `read_artifact` immediately.
+- Use `search_web` for questions about real entities, companies, or current events you're uncertain about.
+- Never say you can't read files — always try read_artifact first.
 
-**OUTPUT STRUCTURE:**
-# 📊 [Title]
-## 📈 Key Metrics (Markdown table, right-aligned numbers)
-## 💡 Insights (3-5 bullets using ↗️ ↘️ →)
-## 🚀 Recommendations (Up to 5 numbered items, each under 10 words)
-
-**FORMATTING:**
-- Professional notation: $1,234.56, +12.3%, 1.96M.
-- **Visuals:** Use Mermaid diagrams ONLY if the user explicitly asks for a chart, diagram, graph, plot, or visualization. Otherwise, use Markdown tables.
-
-*Identity: {identity}*
+**Response Guidelines:**
+- Casual questions → Answer naturally, no forced structure.
+- Analysis/code tasks → Be thorough and precise, use formatting when it helps.
+- Keep responses concise. No filler like "I'd be happy to help!"
+- NEVER end responses with "Anything else?" or "How can I help further?"
 """
+
+
+def load_skill_prompt(agent_id: str, agent_name: str) -> str:
+    """
+    Load the skill file from skills/ directory and use it as the system prompt.
+    Falls back to DEFAULT_AGENT_PROMPT if no skill file exists.
+    Returns empty string if agent_id is empty (no skill loading).
+    """
+    if not agent_id:
+        return ""  # Don't load any skill file when agent_id is empty
+
+    # Try to find the skill file
+    skills_dir = Path("skills")
+    
+    # Try exact match first (e.g., "engineering-engineering-code-reviewer.md")
+    skill_file = skills_dir / f"{agent_id}.md"
+    
+    if not skill_file.exists():
+        # Try searching for a file that contains the agent_id
+        import glob
+        matches = glob.glob(str(skills_dir / f"*{agent_id}*.md"))
+        if matches:
+            skill_file = Path(matches[0])
+        else:
+            # Try searching by agent name (convert to lowercase, replace spaces with hyphens)
+            search_term = agent_name.lower().replace(" ", "-").replace("(", "").replace(")", "")
+            matches = glob.glob(str(skills_dir / f"*{search_term}*.md"))
+            if matches:
+                skill_file = Path(matches[0])
+    
+    if skill_file.exists():
+        try:
+            with open(skill_file, "r", encoding="utf-8") as f:
+                content = f.read()
+            
+            # Parse YAML frontmatter
+            frontmatter_match = re.match(r'^---\s*\n(.*?)\n---\s*\n(.*)$', content, re.DOTALL)
+            if frontmatter_match:
+                # Return the full content (frontmatter + body) - the LLM can understand both
+                return content
+            else:
+                # No frontmatter, just return the content
+                return content
+        except Exception as e:
+            print(f"⚠️ [SkillLoader] Failed to load {skill_file}: {e}", flush=True)
+    
+    # Fallback to default prompt
+    return DEFAULT_AGENT_PROMPT.format(name=agent_name)
 
 class LLMProvider:
     """
@@ -231,20 +274,21 @@ class LLMProvider:
             "x-goog-api-key": self.api_key
         }
 
-        # 1. Inject Universal Professional Prompt (Once Only)
+        # Load skill-based prompt instead of universal template
+        agent_id = kwargs.get("agent_id", "")
+        system_prompt = load_skill_prompt(agent_id, agent_name)
+        
         tag = "<!-- ENSEMBLE_SYSTEM_LOCKED -->"
         has_tag = any(tag in str(m.get("content", "")) for m in messages)
-        
+
         if not has_tag:
-            # Format the template with the provided agent identity
-            formatted_prompt = UNIVERSAL_PROFESSIONAL_PROMPT.format(identity=agent_name)
             has_system = False
             for system_m in (m for m in messages if m.get("role") == "system"):
-                system_m["content"] = f"{tag}\n{formatted_prompt}\n\n{system_m['content']}"
+                system_m["content"] = f"{tag}\n{system_prompt}\n\n{system_m['content']}"
                 has_system = True
                 break
             if not has_system:
-                messages.insert(0, {"role": "system", "content": f"{tag}\n{formatted_prompt}"})
+                messages.insert(0, {"role": "system", "content": f"{tag}\n{system_prompt}"})
 
         # Build tool declarations if requested
         requested_tools = kwargs.get("tools", [])
@@ -424,20 +468,22 @@ class LLMProvider:
     async def _chat_gemini_stream(self, messages: List[Dict[str, str]], agent_name: str = "Ensemble specialist", **kwargs):
         """Stream chunks from Gemini (no tool calling in stream mode)."""
         headers = {"Content-Type": "application/json", "x-goog-api-key": self.api_key}
+
+        # Load skill-based prompt
+        agent_id = kwargs.get("agent_id", "")
+        system_prompt = load_skill_prompt(agent_id, agent_name)
         
-        # Inject Universal Professional Prompt (Once Only)
         tag = "<!-- ENSEMBLE_SYSTEM_LOCKED -->"
         has_tag = any(tag in str(m.get("content", "")) for m in messages)
-        formatted_prompt = UNIVERSAL_PROFESSIONAL_PROMPT.format(identity=agent_name)
-        
+
         if not has_tag:
             has_system = False
             for system_m in (m for m in messages if m.get("role") == "system"):
-                system_m["content"] = f"{tag}\n{formatted_prompt}\n\n{system_m['content']}"
+                system_m["content"] = f"{tag}\n{system_prompt}\n\n{system_m['content']}"
                 has_system = True
                 break
             if not has_system:
-                messages.insert(0, {"role": "system", "content": f"{tag}\n{formatted_prompt}"})
+                messages.insert(0, {"role": "system", "content": f"{tag}\n{system_prompt}"})
 
         refined = self._prepare_messages(messages)
         contents = []
@@ -474,19 +520,21 @@ class LLMProvider:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
-        # 1. Inject Universal Professional Prompt (Once Only)
+        # Load skill-based prompt
+        agent_id = kwargs.get("agent_id", "")
+        system_prompt = load_skill_prompt(agent_id, agent_name)
+        
         tag = "<!-- ENSEMBLE_SYSTEM_LOCKED -->"
         has_tag = any(tag in str(m.get("content", "")) for m in messages)
-        formatted_prompt = UNIVERSAL_PROFESSIONAL_PROMPT.format(identity=agent_name)
-        
+
         if not has_tag:
             has_system = False
             for system_m in (m for m in messages if m.get("role") == "system"):
-                system_m["content"] = f"{tag}\n{formatted_prompt}\n\n{system_m['content']}"
+                system_m["content"] = f"{tag}\n{system_prompt}\n\n{system_m['content']}"
                 has_system = True
                 break
             if not has_system:
-                messages.insert(0, {"role": "system", "content": f"{tag}\n{formatted_prompt}"})
+                messages.insert(0, {"role": "system", "content": f"{tag}\n{system_prompt}"})
 
         refined = self._prepare_messages(messages)
         payload = {
@@ -529,22 +577,21 @@ class LLMProvider:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
-        # 1. Inject Universal Professional Prompt (Once Only)
+        # Load skill-based prompt
+        agent_id = kwargs.get("agent_id", "")
+        system_prompt = load_skill_prompt(agent_id, agent_name)
+        
         tag = "<!-- ENSEMBLE_SYSTEM_LOCKED -->"
         has_tag = any(tag in str(m.get("content", "")) for m in messages)
-        formatted_prompt = UNIVERSAL_PROFESSIONAL_PROMPT.format(identity=agent_name)
-        
+
         if not has_tag:
             has_system = False
             for system_m in (m for m in messages if m.get("role") == "system"):
-                system_m["content"] = f"{tag}\n{formatted_prompt}\n\n{system_m['content']}"
+                system_m["content"] = f"{tag}\n{system_prompt}\n\n{system_m['content']}"
                 has_system = True
                 break
             if not has_system:
-                messages.insert(0, {"role": "system", "content": f"{tag}\n{formatted_prompt}"})
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+                messages.insert(0, {"role": "system", "content": f"{tag}\n{system_prompt}"})
 
         refined = self._prepare_messages(messages)
         payload = {

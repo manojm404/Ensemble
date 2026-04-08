@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
-import { Plus, Search, GitBranch, Clock, Bot } from "lucide-react";
+import { Plus, Search, GitBranch, Clock, Bot, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useNavigate } from "react-router-dom";
-import { fetchApi } from "@/lib/api";
+import { fetchApi, deleteWorkflow } from "@/lib/api";
 import { MotionCard, StaggerContainer, StaggerItem } from "@/components/ui/motion-card";
+import { toast } from "sonner";
 
 interface Workflow {
   id: string;
@@ -60,6 +61,18 @@ const Workflows = () => {
     w.name.toLowerCase().includes(search.toLowerCase())
   );
 
+  const handleDelete = async (e: React.MouseEvent, id: string, name: string) => {
+    e.stopPropagation();
+    if (!confirm(`Delete workflow "${name}"? This cannot be undone.`)) return;
+    try {
+      await deleteWorkflow(id);
+      setWorkflows(prev => prev.filter(w => w.id !== id));
+      toast.success(`Deleted "${name}"`);
+    } catch (err) {
+      toast.error("Failed to delete workflow");
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-3 p-4 border-b border-border/50">
@@ -80,7 +93,7 @@ const Workflows = () => {
           {filtered.map((wf) => (
             <StaggerItem key={wf.id}>
               <MotionCard
-                className="p-5 group"
+                className="p-5 group relative"
                 onClick={() => navigate(`/workflows/${wf.id}`)}
               >
                 <div className="flex items-start justify-between">
@@ -88,7 +101,16 @@ const Workflows = () => {
                     <GitBranch className="h-4 w-4 text-primary" />
                     <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors">{wf.name}</h3>
                   </div>
-                  <Badge variant="secondary" className={`text-[10px] ${statusColors[wf.status]}`}>{wf.status}</Badge>
+                  <div className="flex items-center gap-1">
+                    <Badge variant="secondary" className={`text-[10px] ${statusColors[wf.status]}`}>{wf.status}</Badge>
+                    <button
+                      onClick={(e) => handleDelete(e, wf.id, wf.name)}
+                      className="opacity-0 group-hover:opacity-100 h-6 w-6 flex items-center justify-center rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+                      title="Delete workflow"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{wf.description}</p>
                 <div className="flex items-center gap-4 mt-4 text-xs text-muted-foreground">

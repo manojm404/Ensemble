@@ -21,8 +21,6 @@ const Auth = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      // Import missing? Actually, let's just use global fetch or the one from API
-      // Since we need to import fetchApi, we should add it. We'll handle imports in another chunk.
       const res = await fetch('http://127.0.0.1:8088/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

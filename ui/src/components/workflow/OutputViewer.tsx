@@ -16,13 +16,14 @@
  * - Download blob creation pattern
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Copy, Download, ExternalLink, FileText, FolderTree, Eye, ChevronRight, ChevronDown, File, Folder } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { API_BASE_URL } from "@/lib/api";
 
 export interface OutputFile {
   path: string;
@@ -33,34 +34,116 @@ export interface OutputFile {
 export interface WorkflowOutput {
   markdown?: string;
   files?: OutputFile[];
-  /** URL for iframe preview (e.g., deployed web app) */
-  previewUrl?: string;
+  /** Workflow ID for fetching preview HTML */
+  workflowId?: string;
 }
 
 /* ─── Markdown Renderer ─── */
 /**
- * Simple markdown-to-JSX renderer.
- * Handles: H1/H2/H3, lists, code fences (as <hr>), paragraphs.
- * 
- * NOTE: This is a simplified renderer. For production, consider
- * react-markdown or rehype for full spec compliance.
- * 
- * Copy button: copies raw markdown to clipboard
- * Download button: creates .md blob and triggers download
+ * White document style markdown renderer with copy/download.
+ * Same styling as OrgTasks TaskOutputDocument.
  */
 function MarkdownRenderer({ content }: { content: string }) {
   const copyToClipboard = () => navigator.clipboard.writeText(content);
+
+  const renderInline = (text: string): React.ReactNode => {
+    if (/\*\*(.*?)\*\*/g.test(text)) {
+      const parts: React.ReactNode[] = [];
+      let remaining = text;
+      let key = 0;
+      while (/\*\*(.*?)\*\*/g.test(remaining)) {
+        const match = remaining.match(/\*\*(.*?)\*\*/);
+        if (match) {
+          const idx = remaining.indexOf(match[0]);
+          if (idx > 0) parts.push(<span key={key++}>{remaining.slice(0, idx)}</span>);
+          parts.push(<strong key={key++} className="font-semibold text-gray-900 dark:text-foreground">{match[1]}</strong>);
+          remaining = remaining.slice(idx + match[0].length);
+        } else break;
+      }
+      if (remaining) parts.push(<span key={key++}>{remaining}</span>);
+      return <>{parts}</>;
+    }
+    if (/`([^`]+)`/g.test(text)) {
+      const parts: React.ReactNode[] = [];
+      let remaining = text;
+      let key = 0;
+      while (/`([^`]+)`/g.test(remaining)) {
+        const match = remaining.match(/`([^`]+)`/);
+        if (match) {
+          const idx = remaining.indexOf(match[0]);
+          if (idx > 0) parts.push(<span key={key++}>{remaining.slice(0, idx)}</span>);
+          parts.push(<code key={key++} className="bg-blue-50 dark:bg-primary/10 px-1.5 py-0.5 rounded text-xs font-mono text-blue-700 dark:text-primary">{match[1]}</code>);
+          remaining = remaining.slice(idx + match[0].length);
+        } else break;
+      }
+      if (remaining) parts.push(<span key={key++}>{remaining}</span>);
+      return <>{parts}</>;
+    }
+    return text;
+  };
+
+  const renderLines = () => {
+    const lines = content.split('\n');
+    const elements: React.ReactNode[] = [];
+    let inCodeBlock = false;
+    let codeContent: string[] = [];
+    let listItems: string[] = [];
+    let listType: 'ul' | 'ol' | null = null;
+
+    const flushList = () => {
+      if (listItems.length > 0 && listType) {
+        const Tag = listType;
+        elements.push(
+          <Tag key={`list-${elements.length}`} className={`ml-6 my-2 space-y-1 ${listType === 'ol' ? 'list-decimal' : 'list-disc'}`}>
+            {listItems.map((item, i) => <li key={i} className="text-sm text-gray-700 dark:text-muted-foreground leading-relaxed">{renderInline(item)}</li>)}
+          </Tag>
+        );
+        listItems = [];
+        listType = null;
+      }
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.startsWith('```')) {
+        if (inCodeBlock) {
+          flushList();
+          elements.push(
+            <pre key={`code-${elements.length}`} className="bg-gray-50 dark:bg-secondary/80 border border-gray-200 dark:border-border/50 rounded-lg p-4 my-3 overflow-x-auto">
+              <code className="text-xs font-mono text-gray-700 dark:text-primary leading-relaxed">{codeContent.join('\n')}</code>
+            </pre>
+          );
+          codeContent = [];
+          inCodeBlock = false;
+        } else {
+          flushList();
+          inCodeBlock = true;
+        }
+        continue;
+      }
+      if (inCodeBlock) { codeContent.push(line); continue; }
+      if (line.startsWith('### ')) { flushList(); elements.push(<h4 key={elements.length} className="text-base font-bold text-gray-900 dark:text-foreground mt-5 mb-2">{renderInline(line.slice(4))}</h4>); continue; }
+      if (line.startsWith('## ')) { flushList(); elements.push(<h3 key={elements.length} className="text-lg font-bold text-gray-900 dark:text-foreground mt-6 mb-3 pb-1 border-b border-gray-200 dark:border-border/20">{renderInline(line.slice(3))}</h3>); continue; }
+      if (line.startsWith('# ')) { flushList(); elements.push(<h2 key={elements.length} className="text-xl font-bold text-gray-900 dark:text-foreground mt-4 mb-3">{renderInline(line.slice(2))}</h2>); continue; }
+      if (line.startsWith('---') || line.startsWith('***')) { flushList(); elements.push(<hr key={elements.length} className="my-4 border-gray-200 dark:border-border/20" />); continue; }
+      if (/^\s*[-*•] /.test(line)) { listType = listType || 'ul'; listItems.push(line.replace(/^\s*[-*•] /, '')); continue; }
+      if (/^\s*\d+[\.\)] /.test(line)) { listType = listType || 'ol'; listItems.push(line.replace(/^\s*\d+[\.\)] /, '')); continue; }
+      flushList();
+      if (line.trim() === '') { elements.push(<div key={elements.length} className="h-3" />); continue; }
+      elements.push(<p key={elements.length} className="text-sm text-gray-700 dark:text-muted-foreground leading-relaxed my-1">{renderInline(line)}</p>);
+    }
+    flushList();
+    return elements;
+  };
 
   return (
     <div className="relative">
       {/* Floating action buttons */}
       <div className="absolute top-2 right-2 flex gap-1 z-10">
-        {/* Copy raw markdown to clipboard */}
-        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={copyToClipboard} title="Copy">
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 dark:text-muted-foreground hover:text-gray-700 dark:hover:text-foreground" onClick={copyToClipboard} title="Copy">
           <Copy className="h-3.5 w-3.5" />
         </Button>
-        {/* Download as .md file */}
-        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Download .md"
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 dark:text-muted-foreground hover:text-gray-700 dark:hover:text-foreground" title="Download .md"
           onClick={() => {
             const blob = new Blob([content], { type: "text/markdown" });
             const url = URL.createObjectURL(blob);
@@ -72,22 +155,11 @@ function MarkdownRenderer({ content }: { content: string }) {
           <Download className="h-3.5 w-3.5" />
         </Button>
       </div>
-      {/* Rendered content — DO NOT CHANGE prose class chain */}
-      <div className="prose prose-invert prose-sm max-w-none p-4 text-foreground
-        prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground
-        prose-code:text-primary prose-code:bg-secondary/50 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded
-        prose-pre:bg-secondary/80 prose-pre:border prose-pre:border-border/50 prose-pre:rounded-lg
-        prose-a:text-primary prose-a:no-underline hover:prose-a:underline
-        prose-li:text-muted-foreground prose-blockquote:border-primary/50 prose-blockquote:text-muted-foreground">
-        {content.split("\n").map((line, i) => {
-          if (line.startsWith("### ")) return <h3 key={i} className="text-sm font-semibold mt-4 mb-1">{line.slice(4)}</h3>;
-          if (line.startsWith("## ")) return <h2 key={i} className="text-base font-bold mt-5 mb-2">{line.slice(3)}</h2>;
-          if (line.startsWith("# ")) return <h1 key={i} className="text-lg font-bold mt-6 mb-2">{line.slice(2)}</h1>;
-          if (line.startsWith("- ")) return <li key={i} className="text-xs text-muted-foreground ml-4 list-disc">{line.slice(2)}</li>;
-          if (line.startsWith("```")) return <hr key={i} className="border-border/30 my-2" />;
-          if (line.trim() === "") return <br key={i} />;
-          return <p key={i} className="text-xs text-muted-foreground leading-relaxed">{line}</p>;
-        })}
+      {/* Theme-aware document container */}
+      <div className="bg-white dark:bg-card rounded-lg border border-gray-200 dark:border-border/20 p-5 max-h-[calc(100vh-200px)] overflow-y-auto">
+        <div className="space-y-0">
+          {renderLines()}
+        </div>
       </div>
     </div>
   );
@@ -238,11 +310,33 @@ function FileExplorer({ files }: { files: OutputFile[] }) {
 /* ─── Live Preview ─── */
 /**
  * Iframe-based live preview.
- * Shows when workflow output includes a previewUrl (e.g., deployed web app).
- * Currently MOCKED — no workflows produce a previewUrl yet.
+ * Fetches HTML from the backend preview endpoint and renders via srcdoc.
  */
-function LivePreview({ url }: { url?: string }) {
-  if (!url) {
+function LivePreview({ workflowId }: { workflowId?: string }) {
+  const [htmlContent, setHtmlContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workflowId) return;
+    setLoading(true);
+    setError(null);
+    fetch(`${API_BASE_URL}/api/workflows/${workflowId}/preview`)
+      .then(res => {
+        if (!res.ok) throw new Error("No preview found");
+        return res.json();
+      })
+      .then(data => {
+        setHtmlContent(data.html);
+        setLoading(false);
+      })
+      .catch(err => {
+        setError(err.message);
+        setLoading(false);
+      });
+  }, [workflowId]);
+
+  if (!workflowId) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3 p-8">
         <Eye className="h-8 w-8 text-muted-foreground/30" />
@@ -251,17 +345,44 @@ function LivePreview({ url }: { url?: string }) {
     );
   }
 
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3">
+        <div className="h-8 w-8 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
+        <p className="text-xs text-muted-foreground">Loading preview...</p>
+      </div>
+    );
+  }
+
+  if (error || !htmlContent) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 p-8">
+        <Eye className="h-8 w-8 text-muted-foreground/30" />
+        <p className="text-xs text-muted-foreground text-center">No HTML preview found</p>
+        <p className="text-[10px] text-muted-foreground/60">{error}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border/30">
-        <span className="text-xs text-muted-foreground truncate">{url}</span>
-        {/* Opens preview in a new browser tab */}
-        <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={() => window.open(url, "_blank")}>
+        <span className="text-xs text-muted-foreground truncate">Live Preview</span>
+        <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={() => {
+          const blob = new Blob([htmlContent], { type: 'text/html' });
+          const url = URL.createObjectURL(blob);
+          window.open(url, "_blank");
+        }}>
           <ExternalLink className="h-3 w-3" /> Open in tab
         </Button>
       </div>
       <div className="flex-1 bg-white rounded-b-lg overflow-hidden">
-        <iframe src={url} className="w-full h-full border-0" title="Preview" sandbox="allow-scripts allow-same-origin" />
+        <iframe
+          srcDoc={htmlContent}
+          className="w-full h-full border-0"
+          title="Preview"
+          sandbox="allow-scripts allow-same-origin"
+        />
       </div>
     </div>
   );
@@ -307,7 +428,7 @@ export function OutputViewer({ output }: { output: WorkflowOutput | null }) {
         {output.files && <FileExplorer files={output.files} />}
       </TabsContent>
       <TabsContent value="preview" className="flex-1 mt-0 min-h-0">
-        <LivePreview url={output.previewUrl} />
+        <LivePreview workflowId={output.workflowId} />
       </TabsContent>
     </Tabs>
   );

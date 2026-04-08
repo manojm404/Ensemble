@@ -1,14 +1,23 @@
 /**
- * org-data.ts — Mock Data for AI Company Management
- * Matches the visual density and schemas requested in the "AI Company" overhaul.
+ * org-data.ts — Dynamic Organization Data Store
+ * 
+ * Each organization gets its own isolated data universe:
+ * departments, agents, tasks, and activity are all keyed by orgId.
+ * 
+ * New orgs are auto-provisioned with default department + starter agent.
  */
 
+// ─── Types ───
 export interface Organization {
   id: string;
   name: string;
   description: string;
   tier: 'Starter' | 'Pro' | 'Enterprise';
   status: 'Active' | 'Setup';
+  industry?: string;
+  website?: string;
+  contactEmail?: string;
+  location?: string;
   memberCount: number;
   agentCount: number;
   departmentCount: number;
@@ -27,7 +36,7 @@ export interface Department {
 export interface Agent {
   id: string;
   orgId: string;
-  departmentId: string;
+  departmentId?: string;  // Optional — defaults to "General"
   departmentName: string;
   name: string;
   role: string;
@@ -44,6 +53,7 @@ export interface OrgTask {
   departmentId: string;
   departmentName: string;
   title: string;
+  description?: string;
   status: 'queued' | 'in_progress' | 'completed' | 'failed' | 'blocked';
   priority: 'low' | 'medium' | 'high' | 'critical';
   agentId: string;
@@ -51,74 +61,344 @@ export interface OrgTask {
   agentEmoji: string;
   emoji?: string;
   created: string;
+  output?: string;  // Agent's execution result
 }
 
 export interface ActivityEvent {
   id: string;
   orgId: string;
-  type: 'agent' | 'task' | 'alert' | 'member';
+  type: 'agent' | 'task' | 'alert' | 'deploy' | 'member' | 'system';
   action: string;
   time: string;
 }
 
-// ─── Mock Organizations ───
-export const MOCK_ORGS: Organization[] = [
-  {
-    id: "ensemble-labs",
-    name: "Ensemble Labs",
-    description: "Build intelligent agent pipelines to automate software development workflows",
-    tier: "Pro",
-    status: "Active",
-    memberCount: 8,
-    agentCount: 12,
-    departmentCount: 4
-  },
-  {
-    id: "nexus-ai",
-    name: "Nexus AI Corp",
-    description: "Accelerate product development with autonomous AI teams",
-    tier: "Enterprise",
-    status: "Active",
-    memberCount: 24,
-    agentCount: 38,
-    departmentCount: 7
+interface OrgData {
+  org: Organization;
+  departments: Department[];
+  agents: Agent[];
+  tasks: OrgTask[];
+  activity: ActivityEvent[];
+}
+
+// ─── Global Store ───
+const orgStore: Map<string, OrgData> = new Map();
+
+// ─── Persistence to localStorage ───
+const STORAGE_KEY = "ensemble_orgs";
+
+function saveToStorage() {
+  try {
+    const data: Record<string, OrgData> = {};
+    orgStore.forEach((val, key) => { data[key] = val; });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (e) {
+    console.warn("Failed to save orgs to localStorage", e);
   }
-];
+}
 
-// ─── Mock Departments ───
-export const MOCK_DEPARTMENTS: Department[] = [
-  { id: "dept-eng", orgId: "ensemble-labs", name: "Engineering", description: "Code review, refactoring, testing, and CI/CD automation", emoji: "⚙️", agentCount: 5, completedTaskCount: 142 },
-  { id: "dept-content", orgId: "ensemble-labs", name: "Content & Docs", description: "Technical writing, blog posts, and documentation generation", emoji: "📝", agentCount: 3, completedTaskCount: 67 },
-  { id: "dept-sec", orgId: "ensemble-labs", name: "Security", description: "Vulnerability scanning, dependency audits, and compliance checks", emoji: "🛡️", agentCount: 2, completedTaskCount: 38 },
-  { id: "dept-data", orgId: "ensemble-labs", name: "Data & Analytics", description: "Data pipeline management, reporting, and insights generation", emoji: "📊", agentCount: 2, completedTaskCount: 24 },
-];
+function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const data: Record<string, OrgData> = JSON.parse(raw);
+      Object.entries(data).forEach(([key, val]) => {
+        // Restore Date objects if needed (not needed for current schema)
+        orgStore.set(key, val);
+      });
+      return true;
+    }
+  } catch (e) {
+    console.warn("Failed to load orgs from localStorage", e);
+  }
+  return false;
+}
 
-// ─── Mock Agents ───
-export const MOCK_AGENTS: Agent[] = [
-  { id: "agent-1", orgId: "ensemble-labs", departmentId: "dept-eng", departmentName: "Engineering", name: "CodeBot", role: "Senior Engineer", model: "GPT-4o", status: "running", emoji: "🤖", skills: ["Code Review", "Refactoring", "TypeScript"], tasksCompleted: 89 },
-  { id: "agent-2", orgId: "ensemble-labs", departmentId: "dept-eng", departmentName: "Engineering", name: "TestPilot", role: "QA Lead", model: "GPT-4o", status: "running", emoji: "🧪", skills: ["Unit Testing", "E2E Testing", "Coverage"], tasksCompleted: 45 },
-  { id: "agent-3", orgId: "ensemble-labs", departmentId: "dept-content", departmentName: "Content & Docs", name: "DocWriter", role: "Technical Writer", model: "Claude 3.5 Sonnet", status: "running", emoji: "✍️", skills: ["API Docs", "Tutorials", "Changelogs"], tasksCompleted: 38 },
-];
+// Load from storage on init
+loadFromStorage();
 
-// ─── Mock Tasks ───
-export const MOCK_TASKS: OrgTask[] = [
-  { id: "task-1", orgId: "ensemble-labs", departmentId: "dept-eng", departmentName: "Engineering", title: "Refactor authentication module", status: "in_progress", priority: "high", agentId: "agent-1", agentName: "CodeBot", agentEmoji: "🤖", emoji: "🔐", created: "1h 55m" },
-  { id: "task-2", orgId: "ensemble-labs", departmentId: "dept-eng", departmentName: "Engineering", title: "Write E2E tests for checkout flow", status: "in_progress", priority: "high", agentId: "agent-2", agentName: "TestPilot", agentEmoji: "🧪", emoji: "🛒", created: "2h 48m" },
-  { id: "task-3", orgId: "ensemble-labs", departmentId: "dept-content", departmentName: "Content & Docs", title: "Update API documentation v3.2", status: "in_progress", priority: "medium", agentId: "agent-3", agentName: "DocWriter", agentEmoji: "✍️", emoji: "📄", created: "3h 30m" },
-];
+// ─── Auto-Provision New Org ───
+function provisionNewOrg(org: Organization): OrgData {
+  return {
+    org,
+    departments: [],
+    agents: [],
+    tasks: [],
+    activity: [
+      { id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, orgId: org.id, type: "system", action: `Organization "${org.name}" was created`, time: "just now" },
+    ]
+  };
+}
 
-// ─── Mock Activity ───
-export const MOCK_ACTIVITY: ActivityEvent[] = [
-  { id: "act-1", orgId: "ensemble-labs", type: "task", action: "CodeBot completed task TSK-111: Rate limiting middleware", time: "2m ago" },
-  { id: "act-2", orgId: "ensemble-labs", type: "task", action: "SecBot started CVE scan on production dependencies", time: "5m ago" },
-  { id: "act-3", orgId: "ensemble-labs", type: "agent", action: "TestPilot generated 24 new test cases for checkout flow", time: "12m ago" },
-];
+// ─── CRUD Operations ───
+
+export function createOrg(org: Omit<Organization, 'memberCount' | 'agentCount' | 'departmentCount' | 'status'>): Organization {
+  const newOrg: Organization = {
+    ...org,
+    status: "Setup",
+    memberCount: 1,
+    agentCount: 0,
+    departmentCount: 0,
+  };
+  const data = provisionNewOrg(newOrg);
+  orgStore.set(newOrg.id, data);
+  saveToStorage();
+  return newOrg;
+}
+
+export function deleteOrg(orgId: string): boolean {
+  const deleted = orgStore.delete(orgId);
+  if (deleted) saveToStorage();
+  return deleted;
+}
+
+export function createDepartment(orgId: string, dept: Omit<Department, 'id' | 'agentCount' | 'completedTaskCount'>): Department {
+  const data = orgStore.get(orgId);
+  if (!data) throw new Error(`Org ${orgId} not found`);
+  
+  const newDept: Department = {
+    ...dept,
+    orgId,
+    id: `dept-${Date.now()}`,
+    agentCount: 0,
+    completedTaskCount: 0,
+  };
+  data.departments.push(newDept);
+  data.org.departmentCount = data.departments.length;
+  saveToStorage();
+  
+  data.activity.unshift({
+    id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    orgId,
+    type: "system",
+    action: `Department "${newDept.name}" was created`,
+    time: "just now"
+  });
+  
+  return newDept;
+}
+
+export function hireAgent(orgId: string, agent: Omit<Agent, 'id' | 'tasksCompleted' | 'status'>): Agent {
+  const data = orgStore.get(orgId);
+  if (!data) throw new Error(`Org ${orgId} not found`);
+  
+  const dept = agent.departmentId ? data.departments.find(d => d.id === agent.departmentId) : null;
+  
+  const newAgent: Agent = {
+    ...agent,
+    id: `agent-${Date.now()}`,
+    orgId,
+    status: "idle",
+    tasksCompleted: 0,
+    departmentName: dept?.name || "General",
+  };
+  data.agents.push(newAgent);
+  data.org.agentCount = data.agents.length;
+  
+  // Update department agent count if assigned
+  if (dept) {
+    dept.agentCount = data.agents.filter(a => a.departmentId === dept.id).length;
+  }
+  
+  saveToStorage();
+  
+  data.activity.unshift({
+    id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    orgId,
+    type: "agent",
+    action: `${newAgent.emoji} ${newAgent.name} was hired as ${newAgent.role}${dept ? ` in ${dept.name}` : ''}`,
+    time: "just now"
+  });
+  
+  return newAgent;
+}
+
+export function createTask(orgId: string, task: Omit<OrgTask, 'id' | 'created' | 'status'>): OrgTask {
+  const data = orgStore.get(orgId);
+  if (!data) throw new Error(`Org ${orgId} not found`);
+
+  const agent = data.agents.find(a => a.id === task.agentId);
+  // Inherit agent's department or use "General"
+  const dept = data.departments.find(d => d.id === (task.departmentId || agent?.departmentId));
+
+  const newTask: OrgTask = {
+    ...task,
+    id: `task-${Date.now()}`,
+    orgId,
+    status: "queued",
+    created: "just now",
+    departmentName: dept?.name || "General",
+    agentName: agent?.name || "Unassigned",
+    agentEmoji: agent?.emoji || "🤖",
+  };
+  data.tasks.unshift(newTask);
+  saveToStorage();
+
+  data.activity.unshift({
+    id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    orgId,
+    type: "task",
+    action: `New task created: "${newTask.title}" → ${newTask.agentName}`,
+    time: "just now"
+  });
+
+  return newTask;
+}
+
+export function setTaskOutput(orgId: string, taskId: string, output: string): void {
+  const data = orgStore.get(orgId);
+  if (!data) return;
+  const task = data.tasks.find(t => t.id === taskId);
+  if (task) {
+    task.output = output;
+    saveToStorage();
+  }
+}
+
+export function getTaskById(orgId: string, taskId: string): OrgTask | undefined {
+  const data = orgStore.get(orgId);
+  return data?.tasks.find(t => t.id === taskId);
+}
+
+export function updateTaskStatus(orgId: string, taskId: string, status: OrgTask['status']): void {
+  const data = orgStore.get(orgId);
+  if (!data) return;
+  
+  const task = data.tasks.find(t => t.id === taskId);
+  if (task) {
+    task.status = status;
+    
+    if (status === "completed") {
+      const agent = data.agents.find(a => a.id === task.agentId);
+      if (agent) agent.tasksCompleted++;
+      const dept = data.departments.find(d => d.id === task.departmentId);
+      if (dept) dept.completedTaskCount++;
+      
+      data.activity.unshift({
+        id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        orgId,
+        type: "task",
+        action: `✅ ${task.agentEmoji} ${task.agentName} completed: "${task.title}"`,
+        time: "just now"
+      });
+    } else if (status === "failed") {
+      data.activity.unshift({
+        id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        orgId,
+        type: "alert",
+        action: `❌ Task failed: "${task.title}"`,
+        time: "just now"
+      });
+    } else if (status === "in_progress") {
+      data.activity.unshift({
+        id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        orgId,
+        type: "task",
+        action: `🔄 ${task.agentEmoji} ${task.agentName} started: "${task.title}"`,
+        time: "just now"
+      });
+    }
+    saveToStorage();
+  }
+}
+
+export function addActivityEvent(orgId: string, type: ActivityEvent['type'], action: string): void {
+  const data = orgStore.get(orgId);
+  if (!data) return;
+  
+  data.activity.unshift({
+    id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    orgId,
+    type,
+    action,
+    time: "just now"
+  });
+  saveToStorage();
+}
 
 // ─── Data Accessors ───
-export const getOrgById = (id: string) => MOCK_ORGS.find(o => o.id === id);
-export const getDepartmentsByOrg = (orgId: string) => MOCK_DEPARTMENTS.filter(d => d.orgId === orgId);
-export const getAgentsByOrg = (orgId: string) => MOCK_AGENTS.filter(a => a.orgId === orgId);
-export const getTasksByOrg = (orgId: string) => MOCK_TASKS.filter(t => t.orgId === orgId);
-export const getActivityByOrg = (orgId: string) => MOCK_ACTIVITY.filter(a => a.orgId === orgId);
-export const getTasksByDepartment = (deptId: string) => MOCK_TASKS.filter(t => t.departmentId === deptId);
-export const getAgentsByDepartment = (deptId: string) => MOCK_AGENTS.filter(a => a.departmentId === deptId);
+
+export function getAllOrgs(): Organization[] {
+  return Array.from(orgStore.values()).map(d => d.org);
+}
+
+export function getOrgById(id: string): Organization | undefined {
+  return orgStore.get(id)?.org;
+}
+
+export function getDepartmentsByOrg(orgId: string): Department[] {
+  return orgStore.get(orgId)?.departments || [];
+}
+
+export function getAgentsByOrg(orgId: string): Agent[] {
+  return orgStore.get(orgId)?.agents || [];
+}
+
+export function getTasksByOrg(orgId: string): OrgTask[] {
+  return orgStore.get(orgId)?.tasks || [];
+}
+
+export function getActivityByOrg(orgId: string): ActivityEvent[] {
+  return orgStore.get(orgId)?.activity || [];
+}
+
+export function getTasksByDepartment(deptId: string): OrgTask[] {
+  // Search across all orgs
+  for (const data of orgStore.values()) {
+    const tasks = data.tasks.filter(t => t.departmentId === deptId);
+    if (tasks.length > 0) return tasks;
+  }
+  return [];
+}
+
+export function getAgentsByDepartment(deptId: string): Agent[] {
+  // Search across all orgs
+  for (const data of orgStore.values()) {
+    const agents = data.agents.filter(a => a.departmentId === deptId);
+    if (agents.length > 0) return agents;
+  }
+  return [];
+}
+
+export function getDepartmentById(deptId: string): Department | undefined {
+  for (const data of orgStore.values()) {
+    const dept = data.departments.find(d => d.id === deptId);
+    if (dept) return dept;
+  }
+  return undefined;
+}
+
+export function getAgentById(agentId: string): Agent | undefined {
+  for (const data of orgStore.values()) {
+    const agent = data.agents.find(a => a.id === agentId);
+    if (agent) return agent;
+  }
+  return undefined;
+}
+
+// ─── Default Agent Options for Hiring Dialog ───
+export const AGENT_ROLES = [
+  "General Assistant",
+  "Senior Engineer",
+  "QA Lead",
+  "Technical Writer",
+  "Data Analyst",
+  "Security Auditor",
+  "DevOps Engineer",
+  "Product Manager",
+  "UX Researcher",
+  "Content Creator",
+];
+
+export const AGENT_MODELS = [
+  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "gemini" },
+  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "gemini" },
+  { id: "qwen2.5:1.5b", name: "Qwen 2.5 (Local)", provider: "ollama" },
+  { id: "llama3.2", name: "Llama 3.2 (Local)", provider: "ollama" },
+];
+
+export const AGENT_SKILLS = [
+  "Code Review", "Refactoring", "TypeScript", "Python", "React",
+  "Unit Testing", "E2E Testing", "API Docs", "Tutorials",
+  "Data Analysis", "Research", "Writing", "Security auditing",
+  "DevOps", "CI/CD", "Database Design", "UI/UX Design",
+];

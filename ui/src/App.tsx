@@ -8,6 +8,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Chat from "./pages/Chat";
+import PersonalWorkspace from "./pages/PersonalWorkspace";
 import ExternalApp from "./pages/ExternalApp";
 import Launcher from "./pages/Launcher";
 import Agents from "./pages/Agents";
@@ -25,9 +26,11 @@ import OrgList from "./pages/OrgList";
 import OrgDepartments from "./pages/OrgDepartments";
 import OrgDepartmentDetail from "./pages/OrgDepartmentDetail";
 import OrgAgentHiring from "./pages/OrgAgentHiring";
+import OrgAgents from "./pages/OrgAgents";
 import OrgTasks from "./pages/OrgTasks";
 import OrgActivity from "./pages/OrgActivity";
 import OrgReports from "./pages/OrgReports";
+import { OrgProvider } from "./lib/org-context";
 
 const queryClient = new QueryClient();
 
@@ -35,17 +38,19 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <WorkflowOutputProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <Routes>
-            <Route element={<AppLayout />}>
-              <Route path="/" element={<Index />} />
-              <Route path="/chat" element={<Chat />} />
-              <Route path="/launcher" element={<Launcher />} />
-              <Route path="/app/:appId" element={<ExternalApp />} />
-              <Route path="/agents" element={<Agents />} />
-              <Route path="/marketplace" element={<Marketplace />} />
+        <OrgProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <Routes>
+              <Route element={<AppLayout />}>
+                <Route path="/" element={<Index />} />
+                <Route path="/chat" element={<Chat />} />
+                <Route path="/personal" element={<PersonalWorkspace />} />
+                <Route path="/launcher" element={<Launcher />} />
+                <Route path="/app/:appId" element={<ExternalApp />} />
+                <Route path="/agents" element={<Agents />} />
+                <Route path="/marketplace" element={<Marketplace />} />
               <Route path="/workflows" element={<Workflows />} />
               <Route path="/workflows/:id" element={<WorkflowEditor />} />
               <Route path="/workflow-output/:id" element={<WorkflowOutput />} />
@@ -58,6 +63,7 @@ const App = () => (
               <Route path="/org/:id/departments" element={<OrgDepartments />} />
               <Route path="/org/:id/departments/:deptId" element={<OrgDepartmentDetail />} />
               <Route path="/org/:id/roster" element={<OrgAgentHiring />} />
+              <Route path="/org/:id/agents" element={<OrgAgents />} />
               <Route path="/org/:id/tasks" element={<OrgTasks />} />
               <Route path="/org/:id/activity" element={<OrgActivity />} />
               <Route path="/org/:id/reports" element={<OrgReports />} />
@@ -66,6 +72,7 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
+        </OrgProvider>
       </WorkflowOutputProvider>
     </TooltipProvider>
   </QueryClientProvider>

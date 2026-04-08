@@ -22,12 +22,13 @@ import {
   Settings,
   ShoppingBag,
   LayoutGrid,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 
 // Icon mapping for persistence
 const iconMap: Record<string, LucideIcon> = {
-  MessageSquare, Bot, GitBranch, Blocks, Shield, Settings, ShoppingBag, LayoutGrid
+  MessageSquare, Bot, GitBranch, Blocks, Shield, Settings, ShoppingBag, LayoutGrid, Sparkles
 };
 
 export interface AppItem {
@@ -50,6 +51,7 @@ export interface TabItem {
 }
 
 export const allApps: AppItem[] = [
+  { id: "personal", title: "Personal", url: "/personal", icon: Sparkles, iconName: "Sparkles", description: "Personal workspace with all native agents" },
   { id: "chat", title: "Chat", url: "/chat", icon: MessageSquare, iconName: "MessageSquare", description: "Conversations with agents" },
   { id: "agents", title: "Agents", url: "/agents", icon: Bot, iconName: "Bot", description: "Manage AI agents" },
   { id: "marketplace", title: "Marketplace", url: "/marketplace", icon: ShoppingBag, iconName: "ShoppingBag", description: "Browse community agent packs" },
@@ -83,16 +85,31 @@ export function TabProvider({ children }: { children: ReactNode }) {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        return parsed.map((t: any) => ({
+        const restoredTabs = parsed.map((t: any) => ({
           ...t,
-          url: t.id === "home" ? "/" : t.url, // Sanity check for home URL
+          url: t.id === "home" ? "/" : t.id === "personal" ? "/personal" : t.url,
           icon: iconMap[t.iconName] || LayoutGrid
         }));
+        // Ensure Personal tab is always present
+        if (!restoredTabs.some((t: any) => t.id === "personal")) {
+          restoredTabs.splice(1, 0, {
+            id: "personal",
+            title: "Personal",
+            url: "/personal",
+            icon: Sparkles,
+            iconName: "Sparkles",
+            closable: false
+          });
+        }
+        return restoredTabs;
       } catch (e) {
         console.error("Failed to restore tabs:", e);
       }
     }
-    return [{ id: "home", title: "Home", url: "/", icon: MessageSquare, iconName: "MessageSquare", closable: false }];
+    return [
+      { id: "home", title: "Home", url: "/", icon: MessageSquare, iconName: "MessageSquare", closable: false },
+      { id: "personal", title: "Personal", url: "/personal", icon: Sparkles, iconName: "Sparkles", closable: false },
+    ];
   });
 
   // Persist on change
@@ -111,13 +128,13 @@ export function TabProvider({ children }: { children: ReactNode }) {
   const openApp = useCallback((app: AppItem) => {
     setTabs((prev) => {
       if (prev.some((t) => t.id === app.id)) return prev;
-      return [...prev, { 
-        id: app.id, 
-        title: app.title, 
-        url: app.url, 
-        icon: app.icon, 
-        iconName: app.iconName, 
-        closable: true 
+      return [...prev, {
+        id: app.id,
+        title: app.title,
+        url: app.url,
+        icon: app.icon,
+        iconName: app.iconName,
+        closable: app.id !== "personal" && app.id !== "home"  // Personal and Home are never closable
       }];
     });
   }, []);

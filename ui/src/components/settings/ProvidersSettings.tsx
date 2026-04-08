@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Search, ExternalLink, Settings2, Eye, EyeOff, RefreshCw, Plus } from "lucide-react";
+import { Search, ExternalLink, Settings2, Eye, EyeOff, RefreshCw, Plus, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { fetchApi, API_BASE_URL } from "@/lib/api";
 
 interface Provider {
   name: string;
@@ -16,45 +17,71 @@ interface Provider {
   models?: number;
   /** "cloud" = remote API provider, "local" = locally-hosted LLM */
   type?: "cloud" | "local";
+  /** Backend provider key (e.g., "gemini", "ollama") */
+  providerKey?: string;
 }
 
 const defaultProviders: Provider[] = [
-  { name: "CherryIN", icon: "IN", color: "hsl(0 70% 55%)", enabled: true, apiHost: "https://open.cherryin.net", models: 0 },
+  { name: "Gemini (Google)", icon: "G", color: "hsl(220 70% 55%)", enabled: true, apiHost: "https://generativelanguage.googleapis.com", models: 0, type: "cloud", providerKey: "gemini" },
+  { name: "CherryIN", icon: "IN", color: "hsl(0 70% 55%)", enabled: false, apiHost: "https://open.cherryin.net", models: 0, type: "cloud", providerKey: "cherryin" },
   { name: "SiliconFlow", icon: "SF", color: "hsl(220 60% 55%)", enabled: false },
   { name: "AiHubMix", icon: "AH", color: "hsl(260 50% 55%)", enabled: false },
-  { name: "ocoolAI", icon: "OC", color: "hsl(0 0% 30%)", enabled: false },
-  { name: "BigModel", icon: "BM", color: "hsl(210 60% 50%)", enabled: false },
-  { name: "Z.ai", icon: "Z", color: "hsl(0 0% 20%)", enabled: false },
-  { name: "DeepSeek", icon: "DS", color: "hsl(200 70% 45%)", enabled: false },
-  { name: "Alaya NeW", icon: "AN", color: "hsl(180 40% 45%)", enabled: false },
-  { name: "DMXAPI", icon: "DM", color: "hsl(15 80% 55%)", enabled: false },
-  { name: "AiOnly", icon: "AO", color: "hsl(240 50% 55%)", enabled: false },
-  { name: "BurnCloud", icon: "BC", color: "hsl(25 80% 55%)", enabled: false },
-  { name: "TokenFlux", icon: "TF", color: "hsl(250 60% 55%)", enabled: false },
-  { name: "302.AI", icon: "3A", color: "hsl(160 60% 45%)", enabled: false },
-  { name: "Cephalon", icon: "CP", color: "hsl(210 30% 40%)", enabled: false },
-  { name: "LANYUN", icon: "LY", color: "hsl(190 50% 50%)", enabled: false },
-  { name: "PH8", icon: "PH", color: "hsl(140 50% 45%)", enabled: false },
-  { name: "SophNet", icon: "SN", color: "hsl(330 50% 50%)", enabled: false },
-  { name: "PPIO", icon: "PP", color: "hsl(200 50% 45%)", enabled: false },
+  { name: "DeepSeek", icon: "DS", color: "hsl(200 70% 45%)", enabled: false, type: "cloud", providerKey: "openai" },
 ];
 
 /** Local LLM providers — connect to locally-hosted models via compatible APIs */
 const localProviders: Provider[] = [
-  { name: "Ollama", icon: "OL", color: "hsl(0 0% 15%)", enabled: false, apiHost: "http://localhost:11434", type: "local" },
-  { name: "LM Studio", icon: "LM", color: "hsl(260 70% 50%)", enabled: false, apiHost: "http://localhost:1234", type: "local" },
-  { name: "Jan", icon: "JN", color: "hsl(200 80% 50%)", enabled: false, apiHost: "http://localhost:1337", type: "local" },
-  { name: "LocalAI", icon: "LA", color: "hsl(140 60% 40%)", enabled: false, apiHost: "http://localhost:8080", type: "local" },
-  { name: "llama.cpp", icon: "LC", color: "hsl(30 70% 50%)", enabled: false, apiHost: "http://localhost:8080", type: "local" },
-  { name: "vLLM", icon: "VL", color: "hsl(350 60% 50%)", enabled: false, apiHost: "http://localhost:8000", type: "local" },
-  { name: "GPT4All", icon: "G4", color: "hsl(120 50% 40%)", enabled: false, apiHost: "http://localhost:4891", type: "local" },
+  { name: "Ollama", icon: "OL", color: "hsl(0 0% 15%)", enabled: false, apiHost: "http://localhost:11434", type: "local", providerKey: "ollama" },
+  { name: "LM Studio", icon: "LM", color: "hsl(260 70% 50%)", enabled: false, apiHost: "http://localhost:1234", type: "local", providerKey: "openai" },
+  { name: "LocalAI", icon: "LA", color: "hsl(140 60% 40%)", enabled: false, apiHost: "http://localhost:8080", type: "local", providerKey: "openai" },
+  { name: "llama.cpp", icon: "LC", color: "hsl(30 70% 50%)", enabled: false, apiHost: "http://localhost:8080", type: "local", providerKey: "openai" },
+  { name: "vLLM", icon: "VL", color: "hsl(350 60% 50%)", enabled: false, apiHost: "http://localhost:8000", type: "local", providerKey: "openai" },
 ];
 
+const LOCAL_STORAGE_KEY = "ensemble_llm_provider";
+
 export default function ProvidersSettings() {
-  const [providers, setProviders] = useState([...defaultProviders, ...localProviders]);
-  const [selectedName, setSelectedName] = useState("CherryIN");
+  const [providers, setProviders] = useState<Provider[]>(() => {
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return [...defaultProviders, ...localProviders].map(p => ({
+          ...p,
+          enabled: p.providerKey === parsed.providerKey
+        }));
+      } catch { }
+    }
+    return [...defaultProviders, ...localProviders];
+  });
+  const [selectedName, setSelectedName] = useState("Gemini (Google)");
   const [search, setSearch] = useState("");
   const [showKey, setShowKey] = useState(false);
+  const [apiHost, setApiHost] = useState("");
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string; response_time_ms?: number } | null>(null);
+  const [currentProvider, setCurrentProvider] = useState<{ provider: string; model: string; base_url?: string } | null>(null);
+
+  // Load current provider from backend on mount
+  useEffect(() => {
+    fetchApi('/api/settings/provider')
+      .then(config => {
+        setCurrentProvider(config);
+        // Sync UI with backend
+        setProviders(prev =>
+          prev.map(p => ({
+            ...p,
+            enabled: p.providerKey === config.provider
+          }))
+        );
+        if (config.provider === "ollama" && config.base_url) {
+          setApiHost(config.base_url);
+        }
+      })
+      .catch(err => {
+        console.error("Failed to load provider settings:", err);
+      });
+  }, []);
 
   const cloudFiltered = providers.filter((p) =>
     p.type !== "local" && p.name.toLowerCase().includes(search.toLowerCase())
@@ -64,11 +91,88 @@ export default function ProvidersSettings() {
   );
   const selected = providers.find((p) => p.name === selectedName) || providers[0];
 
-  const toggleProvider = (name: string) => {
+  const toggleProvider = async (name: string) => {
+    const provider = providers.find(p => p.name === name);
+    if (!provider || !provider.providerKey) {
+      toast.error("Provider not configurable");
+      return;
+    }
+
     setProviders((prev) =>
-      prev.map((p) => (p.name === name ? { ...p, enabled: !p.enabled } : p))
+      prev.map((p) => ({ ...p, enabled: p.name === name }))
     );
+
+    // Save to localStorage (UI state only, NO API keys)
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({
+      providerKey: provider.providerKey,
+      providerName: name
+    }));
+
+    // Call backend to switch provider
+    try {
+      const body: any = {
+        provider: provider.providerKey,
+        model: provider.providerKey === "gemini" ? "gemini-2.5-flash" : "llama3.2"
+      };
+
+      if (provider.type === "local" && provider.apiHost) {
+        body.base_url = apiHost || provider.apiHost;
+      }
+
+      const result = await fetchApi('/api/settings/provider', {
+        method: 'POST',
+        body: JSON.stringify(body)
+      });
+
+      if (result.success) {
+        setCurrentProvider(result.config);
+        toast.success(`Switched to ${name}`, {
+          description: `Model: ${result.config.model}`
+        });
+      }
+    } catch (err: any) {
+      toast.error("Failed to switch provider", {
+        description: err.message || "Check backend logs for details"
+      });
+      // Revert UI state
+      setProviders(prev =>
+        prev.map(p => ({
+          ...p,
+          enabled: p.providerKey === currentProvider?.provider
+        }))
+      );
+    }
   };
+
+  const testConnection = useCallback(async () => {
+    setTestingConnection(true);
+    setTestResult(null);
+
+    try {
+      const result = await fetchApi('/api/settings/test', {
+        method: 'POST'
+      });
+
+      setTestResult(result);
+
+      if (result.success) {
+        toast.success("Connection successful!", {
+          description: `${result.message} (${result.response_time_ms}ms)`
+        });
+      } else {
+        toast.error("Connection failed", {
+          description: result.message
+        });
+      }
+    } catch (err: any) {
+      setTestResult({ success: false, message: err.message });
+      toast.error("Connection test failed", {
+        description: err.message
+      });
+    } finally {
+      setTestingConnection(false);
+    }
+  }, []);
 
   return (
     <div className="flex h-full">
@@ -110,7 +214,7 @@ export default function ProvidersSettings() {
                 <span className="truncate flex-1 text-left">{p.name}</span>
                 {p.enabled && (
                   <Badge variant="secondary" className="bg-badge-green/20 text-badge-green text-[9px] px-1.5 py-0">
-                    ON
+                    <CheckCircle2 className="h-2.5 w-2.5" />
                   </Badge>
                 )}
               </button>
@@ -141,7 +245,7 @@ export default function ProvidersSettings() {
                 <span className="truncate flex-1 text-left">{p.name}</span>
                 {p.enabled && (
                   <Badge variant="secondary" className="bg-badge-green/20 text-badge-green text-[9px] px-1.5 py-0">
-                    ON
+                    <CheckCircle2 className="h-2.5 w-2.5" />
                   </Badge>
                 )}
               </button>
@@ -166,6 +270,12 @@ export default function ProvidersSettings() {
               {selected.type === "local" && (
                 <Badge variant="outline" className="text-[10px] border-primary/30 text-primary">Local</Badge>
               )}
+              {currentProvider?.provider === selected.providerKey && (
+                <Badge variant="secondary" className="bg-badge-green/20 text-badge-green text-[10px]">
+                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                  Active
+                </Badge>
+              )}
               <ExternalLink className="h-3.5 w-3.5 text-muted-foreground cursor-pointer hover:text-foreground transition-colors" />
               <Settings2 className="h-3.5 w-3.5 text-muted-foreground cursor-pointer hover:text-foreground transition-colors" />
             </div>
@@ -185,11 +295,8 @@ export default function ProvidersSettings() {
             </div>
             {selected.type !== "local" && (
               <>
-                <Button variant="outline" size="sm" className="gap-2">
-                  → Login
-                </Button>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Provided by {selected.name.toLowerCase()}.ai
+                  Provided by {selected.name.toLowerCase()}
                 </p>
               </>
             )}
@@ -200,38 +307,8 @@ export default function ProvidersSettings() {
             )}
           </div>
 
-          {/* API Key — only for cloud providers */}
-          {selected.type !== "local" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium text-foreground">API Key</h3>
-                <Settings2 className="h-3.5 w-3.5 text-muted-foreground" />
-              </div>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Input
-                    placeholder="API Key"
-                    type={showKey ? "text" : "password"}
-                    className="bg-secondary/50 border-border/50 pr-10"
-                  />
-                  <button
-                    onClick={() => setShowKey(!showKey)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                <Button size="sm">Check</Button>
-              </div>
-              <div className="flex items-center justify-between">
-                <a href="#" className="text-xs text-primary hover:underline">Get API Key</a>
-                <span className="text-xs text-muted-foreground">Use commas to separate multiple keys</span>
-              </div>
-            </div>
-          )}
-
           {/* API Host */}
-          <div className={`space-y-3 ${selected.type !== "local" ? "mt-6" : ""}`}>
+          <div className="space-y-3">
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-medium text-foreground">
                 {selected.type === "local" ? "Server URL" : "API Host"}
@@ -242,7 +319,8 @@ export default function ProvidersSettings() {
             </div>
             <Input
               placeholder={selected.type === "local" ? "http://localhost:11434" : "https://api.provider.com"}
-              defaultValue={selected.apiHost || ""}
+              value={apiHost || selected.apiHost || ""}
+              onChange={(e) => setApiHost(e.target.value)}
               className="bg-secondary/50 border-border/50"
             />
             <p className="text-xs text-muted-foreground">
@@ -252,50 +330,84 @@ export default function ProvidersSettings() {
             </p>
           </div>
 
-          {/* Connection test — local providers only */}
-          {selected.type === "local" && (
-            <div className="space-y-3 mt-6">
-              <h3 className="text-sm font-medium text-foreground">Connection</h3>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => {
-                    /** MOCKED — Would ping the local server to verify it's running */
-                    toast(`Pinging ${selected.apiHost}...`);
-                  }}
-                >
-                  <RefreshCw className="h-3 w-3" /> Test Connection
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Make sure {selected.name} is running and accessible at the URL above
-              </p>
-            </div>
-          )}
-
-          {/* Models */}
+          {/* Connection test */}
           <div className="space-y-3 mt-6">
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-medium text-foreground">Models</h3>
-              <Badge variant="secondary" className="text-[10px]">{selected.models ?? 0}</Badge>
-            </div>
+            <h3 className="text-sm font-medium text-foreground">Connection</h3>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="gap-1.5">
-                <RefreshCw className="h-3 w-3" /> Fetch model list
-              </Button>
-              <Button variant="outline" size="sm" className="gap-1">
-                <Plus className="h-3 w-3" />
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={testingConnection}
+                onClick={testConnection}
+              >
+                {testingConnection ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" /> Testing...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-3 w-3" /> Test Connection
+                  </>
+                )}
               </Button>
             </div>
+
+            {testResult && (
+              <div className={`mt-2 p-3 rounded-md border text-xs ${
+                testResult.success
+                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                  : "bg-destructive/10 border-destructive/30 text-destructive"
+              }`}>
+                <div className="flex items-start gap-2">
+                  {testResult.success ? (
+                    <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+                  ) : (
+                    <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  )}
+                  <div className="flex-1">
+                    <p className="font-medium">{testResult.message}</p>
+                    {testResult.response_time_ms !== undefined && (
+                      <p className="mt-1 opacity-80">Response time: {testResult.response_time_ms}ms</p>
+                    )}
+                    {testResult.response_preview && (
+                      <p className="mt-1 opacity-60 truncate">{testResult.response_preview}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             <p className="text-xs text-muted-foreground">
-              {selected.type === "local"
-                ? `Models pulled in ${selected.name} will appear here after fetching`
-                : <>Check <a href="#" className="text-primary hover:underline">{selected.name} Docs</a> and{" "}
-                  <a href="#" className="text-primary hover:underline">Models</a> for more details</>}
+              Make sure {selected.name} is running and accessible at the URL above
             </p>
           </div>
+
+          {/* Current Configuration */}
+          {currentProvider && (
+            <div className="space-y-3 mt-6 p-4 rounded-lg bg-secondary/30 border border-border/30">
+              <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-badge-green" />
+                Active Configuration
+              </h3>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Provider:</span>
+                  <span className="font-mono text-foreground">{currentProvider.provider}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Model:</span>
+                  <span className="font-mono text-foreground">{currentProvider.model}</span>
+                </div>
+                {currentProvider.base_url && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Base URL:</span>
+                    <span className="font-mono text-foreground truncate max-w-[300px]">{currentProvider.base_url}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </ScrollArea>
     </div>

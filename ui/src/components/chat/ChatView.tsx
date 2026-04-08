@@ -78,6 +78,7 @@ export function ChatView() {
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string>("gemini-2.5-flash");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [activeProvider, setActiveProvider] = useState<{ provider: string; model: string } | null>(null);
 
   useEffect(() => {
     // Fetch Topics
@@ -97,8 +98,18 @@ export function ChatView() {
       })
       .catch(console.error);
 
-    /** Fetch Available Models */
+    /** Fetch Available Models and active provider */
     getModels().then(setAvailableModels).catch(console.error);
+
+    // Load active provider from backend
+    fetchApi('/api/settings/provider')
+      .then(config => {
+        if (config && config.provider && config.model) {
+          setSelectedModelId(config.model);
+          setActiveProvider({ provider: config.provider, model: config.model });
+        }
+      })
+      .catch(console.error);
 
     /** Fetch Real Agents */
     getAgents().then(data => {
@@ -116,7 +127,7 @@ export function ChatView() {
     ws.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);
-        console.log("WebSocket event:", payload);
+        // Handle WebSocket message
       } catch (e) {}
     };
     return () => ws.close();
@@ -352,6 +363,20 @@ export function ChatView() {
           </button>
 
           <div className="absolute right-3 flex items-center gap-1.5">
+            {/* Active provider badge */}
+            {activeProvider && (
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-primary/10 border border-primary/20">
+                <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                <span className="text-[10px] font-medium text-primary">
+                  {activeProvider.provider === "gemini" ? "Gemini" : activeProvider.provider === "ollama" ? "Ollama" : activeProvider.provider}
+                </span>
+                <span className="text-[10px] text-primary/60">•</span>
+                <span className="text-[10px] text-primary/80 font-mono">
+                  {activeProvider.model}
+                </span>
+              </div>
+            )}
+
             {/* "Back to Ensemble" — only shown when using a specialized agent */}
             {currentAgent.id !== "ensemble" && (
               <button

@@ -154,7 +154,7 @@ export function WorkflowExecutionPanel({ nodes, edges, onClose, initialTask = ""
 
     try {
       // 1. Execute the Workflow on the Backend
-      const response = await fetch("http://127.0.0.1:8089/api/workflows/run", {
+      const response = await fetch("http://127.0.0.1:8088/api/workflows/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -178,21 +178,32 @@ export function WorkflowExecutionPanel({ nodes, edges, onClose, initialTask = ""
         duration: s.duration || 2
       })));
 
-      // 3. Harvest generated artifacts (Word, Excel, PDF)
-      const artifactResp = await fetch(`http://127.0.0.1:8089/api/workflows/${workflowId}/artifacts`);
+      // 3. Harvest generated artifacts (Word, Excel, PDF, code files)
+      const artifactResp = await fetch(`http://127.0.0.1:8088/api/workflows/${workflowId}/artifacts`);
       const artifacts = artifactResp.ok ? await artifactResp.json() : [];
+
+      // Collect files from all steps (extracted code blocks)
+      const stepFiles = result.steps.flatMap((s: any) => s.files || []);
 
       // 4. Build final results object
       const allMarkdown = result.steps.map((s: any) => `\n\n---\n\n### ${s.agent_name}\n\n${s.output}`).join("");
-      
+
       const finalResult: WorkflowOutput = {
         markdown: `# Workflow Results\n\n**Task:** ${taskInput}\n\n**Agents:** ${result.steps.length} executed successfully\n${allMarkdown}`,
-        files: artifacts.length > 0 ? artifacts.map((a: any) => ({
-          path: a.name,
-          content: `[Binary File: ${a.type}]`, // Content is lazy-loaded by viewer
-          language: a.type
-        })) : undefined,
-        previewUrl: `http://127.0.0.1:8089/api/workspace/preview`
+        files: stepFiles.length > 0 
+          ? stepFiles.map((f: any) => ({
+              path: f.path,
+              content: `[File: ${f.name}]`,
+              language: f.language
+            }))
+          : artifacts.length > 0 
+            ? artifacts.map((a: any) => ({
+                path: a.name,
+                content: `[Binary File: ${a.type}]`,
+                language: a.type
+              }))
+            : undefined,
+        workflowId  // Pass the workflow ID for preview fetching
       };
 
       setFinalOutput(finalResult);

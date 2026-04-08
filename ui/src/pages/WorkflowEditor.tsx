@@ -274,7 +274,16 @@ function WorkflowEditorInner() {
         id: `${agent.id}-${Date.now()}`,
         type: "agentNode",
         position: { x: centerX + (Math.random() - 0.5) * 100, y: centerY + (Math.random() - 0.5) * 100 },
-        data: { label: `${meta.emoji} ${agent.name}`, subtitle: agent.description, model: "gpt-4o", temperature: 0.5, prompt: "" },
+        data: {
+          label: `${meta.emoji} ${agent.name}`,
+          subtitle: agent.description,
+          model: "gpt-4o",
+          temperature: 0.5,
+          prompt: "",
+          // Critical: These fields are read by the DAG engine
+          role: agent.id,  // Skill file identifier
+          instruction: agent.description  // Fallback instruction
+        },
       };
       setNodes((nds) => [...nds, newNode]);
       setAddOpen(false);
@@ -371,35 +380,84 @@ function WorkflowEditorInner() {
                     <Plus className="h-3.5 w-3.5" /> Agent
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent align="center" side="top" sideOffset={12} className="w-72 p-0 glass border-border/50"
-                  onOpenAutoFocus={(e) => { e.preventDefault(); setTimeout(() => searchRef.current?.focus(), 0); }}>
-                  <div className="p-2 border-b border-border/50">
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                      <Input ref={searchRef} value={search} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
-                        placeholder="Search agents..." className="h-8 pl-8 text-xs bg-secondary/50 border-border/50" />
-                    </div>
-                  </div>
-                  <ScrollArea className="max-h-[300px] p-1">
-                    {filteredAgents.map((agent) => {
-                      const meta = getAgentMetadata(agent.id);
-                      return (
-                        <button key={agent.id} onClick={() => handleAddAgent(agent)}
-                          className="w-full text-left rounded-md px-2.5 py-2 transition-all duration-150 hover:bg-primary/10 group flex items-center gap-2.5">
-                          <span className="text-base shrink-0">{meta.emoji}</span>
-                          <div className="min-w-0 flex-1">
-                            <div className="text-xs font-medium text-foreground group-hover:text-primary transition-colors">{agent.name}</div>
-                            <div className="text-[10px] text-muted-foreground truncate">{agent.description}</div>
+                <AnimatePresence>
+                  {addOpen && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+                      onClick={() => setAddOpen(false)}
+                    >
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: 8 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                        transition={{ duration: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
+                        className="w-[480px] max-h-[70vh] rounded-2xl glass border border-border/50 shadow-2xl overflow-hidden"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
+                          <div>
+                            <h3 className="text-sm font-semibold text-foreground">Add Agent</h3>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">Choose an agent to add to your workflow</p>
                           </div>
-                          <Badge variant="secondary" className={`text-[9px] px-1.5 py-0 shrink-0 ${categoryColors[meta.category] || ""}`}>
-                            {meta.category}
-                          </Badge>
-                        </button>
-                      );
-                    })}
-                    {filteredAgents.length === 0 && <p className="text-center text-xs text-muted-foreground py-4">No agents found</p>}
-                  </ScrollArea>
-                </PopoverContent>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => setAddOpen(false)}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+
+                        {/* Search */}
+                        <div className="px-4 py-3 border-b border-border/30">
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <Input
+                              ref={searchRef}
+                              value={search}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
+                              placeholder="Search agents by name or description..."
+                              className="h-9 pl-9 text-sm bg-secondary/50 border-border/50 rounded-lg"
+                              autoFocus
+                            />
+                          </div>
+                        </div>
+
+                        {/* Agent List */}
+                        <ScrollArea className="max-h-[50vh] px-2 py-2">
+                          <div className="space-y-0.5">
+                            {filteredAgents.map((agent) => {
+                              const meta = getAgentMetadata(agent.id);
+                              return (
+                                <button
+                                  key={agent.id}
+                                  onClick={() => handleAddAgent(agent)}
+                                  className="w-full text-left rounded-lg px-3 py-2.5 transition-all duration-150 hover:bg-primary/10 group flex items-center gap-3"
+                                >
+                                  <span className="text-xl shrink-0">{meta.emoji}</span>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{agent.name}</div>
+                                    <div className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{agent.description}</div>
+                                  </div>
+                                  <Badge variant="secondary" className={`text-[10px] px-2 py-0 shrink-0 ${categoryColors[meta.category] || ""}`}>
+                                    {meta.category}
+                                  </Badge>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {filteredAgents.length === 0 && (
+                            <div className="flex flex-col items-center justify-center py-8 text-center">
+                              <Search className="h-8 w-8 text-muted-foreground/30 mb-2" />
+                              <p className="text-sm text-muted-foreground">No agents found</p>
+                              <p className="text-xs text-muted-foreground/60 mt-1">Try a different search term</p>
+                            </div>
+                          )}
+                        </ScrollArea>
+                      </motion.div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </Popover>
               <div className="w-px h-5 bg-border/50" />
               <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => toast.info("Undo", { description: "Nothing to undo" })}><Undo className="h-4 w-4" /></Button>

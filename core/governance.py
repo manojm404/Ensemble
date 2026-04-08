@@ -38,6 +38,7 @@ from core.skill_registry import skill_registry
 from core.dag_engine import DAGWorkflowEngine
 # Ensure adapters are initialized
 import core.adapters
+from core import settings  # Import settings management module
 
 # Load Governance Config from .env (V1 with defaults)
 GOV_CONFIG = {
@@ -73,8 +74,8 @@ llm = LLMProvider()
 # dict to track background SOP runs: run_id -> status
 sop_runs: Dict[str, Dict[str, Any]] = {}
 
-# Global LLM instance for generation (Premium Model)
-llm = LLMProvider(provider="gemini", model="gemini-2.5-flash")
+# Initialize LLM from settings (loads provider/model from data/settings.json)
+settings.initialize_llm_from_settings(llm)
 
 # Ensure workspace directory exists for uploads
 WORKSPACE_DIR = os.getenv("WORKSPACE_DIR", "data/workspace")
@@ -82,6 +83,11 @@ os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
 # Mount the workspace directory for static asset previews (images/files)
 app.mount("/api/assets", StaticFiles(directory=WORKSPACE_DIR), name="workspace_assets")
+
+# Mount workflow workspaces for HTML preview
+workflow_ws_dir = os.path.join("data", "workspace")
+os.makedirs(workflow_ws_dir, exist_ok=True)
+app.mount("/api/workspace", StaticFiles(directory=workflow_ws_dir), name="workflow_workspace")
 
 @app.post("/api/upload")
 async def upload_file_endpoint(file: UploadFile = File(...)):
@@ -614,29 +620,39 @@ async def generate_chat_response_endpoint(req: Dict[str, Any]):
     model = req.get("model")
     provider = req.get("provider")
     agent_id = req.get("agent_id")
-    
-    # 🪪 Persona Resolution:
-    # We fetch the specialist's high-fidelity name to ensure identity sovereignty.
-    agent_name = "Ensemble specialist"
+    assistant_id = req.get("assistant_id")  # Also check assistant_id from UI
+    use_skills = req.get("use_skills", True)  # Default to True for backwards compatibility
+
+    # Use agent_id or assistant_id (whichever is provided)
+    effective_agent_id = agent_id or assistant_id
+
+    # 🪪 Persona Resolution
+    agent_name = "Ensemble AI Assistant"
     system_instruction = None
-    
-    if agent_id:
-        skill = skill_registry.get_skill(agent_id)
+
+    if use_skills and effective_agent_id:
+        skill = skill_registry.get_skill(effective_agent_id)
         if skill:
-            agent_name = f"{skill['name']} (Agent)"
-            system_instruction = f"Your specific mandate is: {skill['description']}."
+            agent_name = skill.get("name", "Ensemble specialist")
+            system_instruction = f"Your specific mandate is: {skill.get('description', '')}."
 
     if system_instruction:
-        # We prepend the specific mandate, but LLMProvider will handle the professional guardrails 
-        # using the agent_name we pass below.
         if messages and messages[0].get("role") == "system":
             messages[0]["content"] = f"{system_instruction}\n\n{messages[0]['content']}"
         else:
             messages.insert(0, {"role": "system", "content": system_instruction})
 
     try:
-        # Pass the resolved agent_name to the LLM provider for professional prompt template formatting.
-        response = await llm.chat(messages, model=model, provider=provider, agent_name=agent_name)
+        # Only pass agent_id for skill file loading if use_skills is enabled
+        chat_kwargs = {
+            "model": model,
+            "provider": provider,
+            "agent_name": agent_name,
+        }
+        if use_skills:
+            chat_kwargs["agent_id"] = effective_agent_id  # Triggers skill file loading
+
+        response = await llm.chat(messages, **chat_kwargs)
         return response
     except Exception as e:
         print(f"❌ [Chat API] Failure: {str(e)}", flush=True)
@@ -1336,6 +1352,7 @@ async def run_workflow(request: Request):
             steps_meta = {row[0]: row[1] for row in cursor.fetchall()}
 
         final_steps = []
+        all_files = []
         for node in nodes:
             node_id = node["id"]
             agent_name = node.get("data", {}).get("label", "Agent")
@@ -1346,12 +1363,28 @@ async def run_workflow(request: Request):
             if space.exists(artifact_name):
                 output = space.read(artifact_name).decode("utf-8", errors="ignore")
 
+            # Check for extracted code blocks
+            node_files = []
+            for fname in ['index.html', 'style.css', 'script.js', 'main.py', 'data.json', 'config.xml', 'schema.sql', 'run.sh']:
+                artifact_key = f"{node_id}_{fname}"
+                if space.exists(artifact_key):
+                    node_files.append({
+                        "path": f"{agent_name.split()[-1]}/{fname}",  # e.g., "Development/index.html"
+                        "name": fname,
+                        "node_id": node_id,
+                        "language": fname.split('.')[-1]
+                    })
+            
+            if node_files:
+                all_files.extend(node_files)
+
             final_steps.append({
                 "id": node_id,
                 "agent_name": agent_name,
                 "status": steps_meta.get(node_id, "completed"),
                 "output": output,
-                "duration": 2
+                "duration": 2,
+                "files": node_files  # Include per-node files
             })
 
         return {
@@ -1438,28 +1471,71 @@ JSON SCHEMA:
 @app.get("/api/workflows/{workflow_id}/artifacts")
 async def get_workflow_artifacts_api(workflow_id: str):
     """
-    Harvests physical files generated during the workflow run.
-    Checks the workspace for Excel, PDF, and Word documents.
+    Returns files generated by a specific workflow run.
+    Only scans the workflow's dedicated workspace subdirectory.
     """
     artifacts = []
-    # Check for generated content in the current directory and specialized artifact folders
-    # In V3, robots write artifacts to the project root or specific data subfolders
-    search_paths = [".", "data/ensemble_space/artifacts"]
     
-    for folder in search_paths:
-        if not os.path.exists(folder): continue
-        for f in os.listdir(folder):
-            if f.endswith((".xlsx", ".docx", ".pdf", ".csv", ".md")):
-                full_path = os.path.join(folder, f)
+    # Only check the workflow-specific workspace
+    workflow_ws_dir = os.path.join("data", "workspace", f"workflow_{workflow_id}")
+    if not os.path.exists(workflow_ws_dir):
+        return []
+    
+    code_extensions = {'.html', '.css', '.js', '.ts', '.jsx', '.tsx', '.py', '.json', '.xml', '.md', '.sql', '.sh', '.yaml', '.yml'}
+    
+    for node_dir in os.listdir(workflow_ws_dir):
+        node_path = os.path.join(workflow_ws_dir, node_dir)
+        if not os.path.isdir(node_path):
+            continue
+        for f in os.listdir(node_path):
+            ext = os.path.splitext(f)[1].lower()
+            if ext in code_extensions:
+                full_path = os.path.join(node_path, f)
                 artifacts.append({
-                    "id": f,
+                    "id": f"{node_dir}/{f}",
                     "name": f,
-                    "path": full_path,
-                    "type": f.split(".")[-1],
+                    "path": f"{node_dir}/{f}",
+                    "type": ext.lstrip('.'),
+                    "node": node_dir,
                     "size": os.path.getsize(full_path),
-                    "created_at": datetime.fromtimestamp(os.path.getctime(full_path)).isoformat()
+                    "created_at": datetime.fromtimestamp(os.path.getmtime(full_path)).isoformat()
                 })
+    
     return sorted(artifacts, key=lambda x: x["created_at"], reverse=True)
+
+
+@app.get("/api/workflows/{workflow_id}/preview")
+async def get_workflow_preview(workflow_id: str):
+    """
+    Serves the index.html from the workflow's workspace for preview.
+    Returns the actual HTML content so the frontend can render it in an iframe via srcdoc.
+    """
+    workflow_ws_dir = os.path.join("data", "workspace", f"workflow_{workflow_id}")
+    if not os.path.exists(workflow_ws_dir):
+        raise HTTPException(status_code=404, detail="No workflow workspace found")
+    
+    # Find the first index.html in any node subdirectory
+    for node_dir in os.listdir(workflow_ws_dir):
+        node_path = os.path.join(workflow_ws_dir, node_dir)
+        if os.path.isdir(node_path):
+            index_path = os.path.join(node_path, "index.html")
+            if os.path.exists(index_path):
+                with open(index_path, "r", encoding="utf-8") as f:
+                    html_content = f.read()
+                return {
+                    "html": html_content,
+                    "node": node_dir,
+                    "path": f"workflow_{workflow_id}/{node_dir}/index.html"
+                }
+    
+    # Check for preview.html as fallback
+    preview_path = os.path.join("data", "workspace", "preview.html")
+    if os.path.exists(preview_path):
+        with open(preview_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return {"html": html_content, "node": "legacy", "path": "preview.html"}
+    
+    raise HTTPException(status_code=404, detail="No index.html found in workflow workspace")
 
 def get_all_agents_logic():
     """Shared logic to aggregate file-based and DB-based agents."""
@@ -1804,3 +1880,158 @@ async def get_agent_stats():
             return {"stats": stats}
     except Exception as e:
         return {"stats": [], "error": str(e)}
+
+
+# ============================================================
+# LLM Provider Settings Endpoints
+# ============================================================
+
+@app.get("/api/settings/provider")
+async def get_provider_settings():
+    """
+    Get the current LLM provider configuration.
+    NOTE: API keys are NEVER returned - they stay in .env only.
+    """
+    try:
+        provider_config = settings.get_active_provider()
+        return provider_config
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read settings: {str(e)}")
+
+
+@app.post("/api/settings/provider")
+async def set_provider_settings(req: Dict[str, Any]):
+    """
+    Switch the active LLM provider.
+    
+    Body: { "provider": "gemini"|"ollama"|"openai", "model": "...", "base_url": "..." }
+    
+    The backend reinitializes the LLM client immediately. API keys remain in .env.
+    """
+    try:
+        provider = req.get("provider")
+        model = req.get("model")
+        base_url = req.get("base_url")
+        
+        if not provider or not model:
+            raise HTTPException(
+                status_code=400,
+                detail="provider and model are required"
+            )
+        
+        result = settings.switch_provider(
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            llm_instance=llm
+        )
+        
+        return {
+            "success": True,
+            "config": result
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to switch provider: {str(e)}")
+
+
+@app.post("/api/settings/test")
+async def test_llm_connection_endpoint():
+    """
+    Test the currently configured LLM connection.
+    Sends a simple message and measures response time.
+    Does NOT expose API keys or internals.
+    """
+    try:
+        result = await settings.test_llm_connection(llm)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Test failed: {str(e)}")
+
+
+# ============================================================
+# Organization Management Endpoints
+# ============================================================
+
+# In-memory org store (will be replaced with DB in production)
+_org_store: Dict[str, Dict[str, Any]] = {}
+
+@app.get("/api/orgs")
+async def list_orgs():
+    """List all organizations."""
+    return list(_org_store.values())
+
+@app.post("/api/orgs")
+async def create_org(request: Request):
+    """Create a new organization with auto-provisioning."""
+    try:
+        data = await request.json()
+        org_id = data.get("id") or data.get("name", "org").lower().replace(" ", "-") + "-" + str(uuid.uuid4())[:8]
+        
+        org = {
+            "id": org_id,
+            "name": data.get("name", "New Organization"),
+            "description": data.get("description", ""),
+            "tier": data.get("tier", "Starter"),
+            "status": "Setup",
+            "industry": data.get("industry", ""),
+            "website": data.get("website", ""),
+            "contact_email": data.get("contact_email", ""),
+            "location": data.get("location", ""),
+            "memberCount": 1,
+            "agentCount": 0,
+            "departmentCount": 0,
+            "created_at": datetime.now().isoformat()
+        }
+        
+        _org_store[org_id] = org
+        return {"success": True, "id": org_id, **org}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create org: {str(e)}")
+
+@app.get("/api/orgs/{org_id}")
+async def get_org(org_id: str):
+    """Get a specific organization."""
+    org = _org_store.get(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return org
+
+@app.delete("/api/orgs/{org_id}")
+async def delete_org(org_id: str):
+    """Delete an organization."""
+    if org_id not in _org_store:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    del _org_store[org_id]
+    return {"success": True, "message": f"Organization {org_id} deleted"}
+
+@app.post("/api/orgs/{org_id}/tasks/{task_id}/run")
+async def run_org_task(org_id: str, task_id: str, request: Request):
+    """
+    Execute a task via LLM.
+    The task is sent to the chat API with the agent's role as context.
+    """
+    try:
+        data = await request.json()
+        task_title = data.get("title", "Task")
+        task_desc = data.get("description", "")
+        agent_id = data.get("agent_id", "")
+        
+        # Call the LLM with the task
+        response = await llm.chat(
+            messages=[{"role": "user", "content": f"{task_title}\n\n{task_desc}\n\nPlease complete this task."}],
+            model=data.get("model", "gemini-2.5-flash"),
+            provider=data.get("provider", "gemini"),
+            agent_name=agent_id or "Ensemble specialist"
+        )
+        
+        return {
+            "success": True,
+            "task_id": task_id,
+            "output": response.get("text", ""),
+            "usage": response.get("usage", {})
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Task execution failed: {str(e)}")
