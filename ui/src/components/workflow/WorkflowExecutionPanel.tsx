@@ -23,7 +23,7 @@
  * - The 3-section layout (header | steps | output)
  */
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -35,6 +35,8 @@ import { useWorkflowOutput } from "@/lib/workflow-output-context";
 import { useTabContext } from "@/lib/tab-context";
 import { Send, Paperclip, X, Sparkles, FileText, ExternalLink, Bot, FileCode } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "sonner";
+import { saveWorkflow } from "@/lib/api";
 import type { Node, Edge } from "reactflow";
 
 /**
@@ -91,9 +93,13 @@ interface WorkflowExecutionPanelProps {
   initialTask?: string;
   /** Workflow ID for output storage — used to open output in a separate tab */
   workflowId?: string;
+  /** Workflow name for auto-save before run */
+  workflowName?: string;
+  /** Stored output from a previous run (passed from WorkflowEditor) */
+  storedOutput?: any;
 }
 
-export function WorkflowExecutionPanel({ nodes, edges, onClose, initialTask = "", workflowId = "new" }: WorkflowExecutionPanelProps) {
+export function WorkflowExecutionPanel({ nodes, edges, onClose, initialTask = "", workflowId = "new", workflowName = "Workflow", storedOutput }: WorkflowExecutionPanelProps) {
   const [taskInput, setTaskInput] = useState(initialTask);
   const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
   const [steps, setSteps] = useState<AgentStep[]>([]);
@@ -101,10 +107,79 @@ export function WorkflowExecutionPanel({ nodes, edges, onClose, initialTask = ""
   const [finalOutput, setFinalOutput] = useState<WorkflowOutput | null>(null);
   /** Phase state machine: input → running → complete */
   const [phase, setPhase] = useState<"input" | "running" | "complete">("input");
+  /** The actual workflow ID (may differ from prop if auto-saved) */
+  const [activeWorkflowId, setActiveWorkflowId] = useState<string>(workflowId);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const { setOutput } = useWorkflowOutput();
   const { openApp } = useTabContext();
+
+  // Restore from storedOutput prop (passed directly from WorkflowEditor)
+  useEffect(() => {
+    if (storedOutput?.output) {
+      setPhase("complete");
+      setTaskInput(storedOutput.task);
+      setFinalOutput(storedOutput.output);
+      setSteps(Array.from({ length: storedOutput.agentCount }, (_, i) => ({
+        id: `step-${i}`,
+        agentName: `Agent ${i + 1}`,
+        emoji: "🤖",
+        status: "done" as const,
+      })));
+      return;
+    }
+    // Check for running/completed state under this workflow's specific key
+    if (activeWorkflowId && activeWorkflowId !== "new") {
+      try {
+        const raw = localStorage.getItem(`workflow_run_${activeWorkflowId}`);
+        if (raw) {
+          const runState = JSON.parse(raw);
+          if (runState.phase && runState.task) {
+            setPhase(runState.phase);
+            setTaskInput(runState.task);
+            if (runState.output) setFinalOutput(runState.output);
+            if (runState.steps) setSteps(runState.steps);
+            return;
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    if (initialTask) {
+      setTaskInput(initialTask);
+    }
+  }, []);
+
+  // Persist running state to localStorage for tab-switch resilience
+  useEffect(() => {
+    if (workflowId !== "new" && workflowId !== activeWorkflowId) {
+      try {
+        localStorage.setItem(`workflow_run_${activeWorkflowId}`, JSON.stringify({
+          phase, task: taskInput, output: finalOutput, steps
+        }));
+      } catch { /* ignore */ }
+    }
+    if (workflowId !== "new") {
+      try {
+        localStorage.setItem(`workflow_run_${workflowId}`, JSON.stringify({
+          phase, task: taskInput, output: finalOutput, steps
+        }));
+      } catch { /* ignore */ }
+    }
+  }, [phase, taskInput, finalOutput, steps, workflowId, activeWorkflowId]);
+
+  // Persist state changes (only after completion)
+  useEffect(() => {
+    if (phase === "complete" && finalOutput && activeWorkflowId !== "new") {
+      setOutput(activeWorkflowId, {
+        title: workflowName,
+        task: taskInput,
+        agentCount: steps.length,
+        output: finalOutput,
+        completedAt: new Date(),
+        workflowId: activeWorkflowId,
+      });
+    }
+  }, [phase, finalOutput, activeWorkflowId]);
 
   /** MOCKED — File attach. Stores filename only, no real upload. */
   const handleAttachFile = () => fileInputRef.current?.click();
@@ -138,7 +213,13 @@ export function WorkflowExecutionPanel({ nodes, edges, onClose, initialTask = ""
    * 3. Harvests physical artifacts (Word/Excel/PDF) generated during the run.
    */
   const handleRun = async () => {
-    if (!taskInput.trim() || nodes.length === 0) return;
+    if (!taskInput.trim() || nodes.length === 0) {
+      if (nodes.length === 0) toast.error("Add agents to the canvas first");
+      if (!taskInput.trim()) toast.error("Describe your task before running");
+      return;
+    }
+
+    toast.info(`Running workflow with ${nodes.length} agent(s)...`);
 
     setIsRunning(true);
     setPhase("running");
@@ -153,12 +234,26 @@ export function WorkflowExecutionPanel({ nodes, edges, onClose, initialTask = ""
     setSteps(initialSteps);
 
     try {
+      // 0. Auto-save the workflow so it persists and gets a real ID
+      let runId = workflowId;
+      if (workflowId === "new") {
+        try {
+          const graphJson = JSON.stringify({ nodes, edges });
+          const saved = await saveWorkflow(workflowName, graphJson);
+          runId = saved.id;
+          setActiveWorkflowId(runId);
+          console.log(`✅ Auto-saved workflow: ${runId}`);
+        } catch (e) {
+          console.warn("Failed to auto-save workflow, continuing with temp ID", e);
+        }
+      }
+
       // 1. Execute the Workflow on the Backend
       const response = await fetch("http://127.0.0.1:8088/api/workflows/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: workflowId,
+          id: runId,
           nodes,
           edges,
           initialInput: taskInput
@@ -179,48 +274,53 @@ export function WorkflowExecutionPanel({ nodes, edges, onClose, initialTask = ""
       })));
 
       // 3. Harvest generated artifacts (Word, Excel, PDF, code files)
-      const artifactResp = await fetch(`http://127.0.0.1:8088/api/workflows/${workflowId}/artifacts`);
+      const artifactResp = await fetch(`http://127.0.0.1:8088/api/workflows/${runId}/artifacts`);
       const artifacts = artifactResp.ok ? await artifactResp.json() : [];
 
       // Collect files from all steps (extracted code blocks)
       const stepFiles = result.steps.flatMap((s: any) => s.files || []);
+
+      // Filter out HTML files from the files list — they belong in the Preview tab
+      const nonHtmlFiles = [...stepFiles, ...artifacts].filter((f: any) => {
+        const ext = (f.language || f.type || '').toLowerCase();
+        return ext !== 'html' && ext !== 'htm';
+      });
 
       // 4. Build final results object
       const allMarkdown = result.steps.map((s: any) => `\n\n---\n\n### ${s.agent_name}\n\n${s.output}`).join("");
 
       const finalResult: WorkflowOutput = {
         markdown: `# Workflow Results\n\n**Task:** ${taskInput}\n\n**Agents:** ${result.steps.length} executed successfully\n${allMarkdown}`,
-        files: stepFiles.length > 0 
-          ? stepFiles.map((f: any) => ({
+        files: nonHtmlFiles.length > 0
+          ? nonHtmlFiles.map((f: any) => ({
               path: f.path,
-              content: `[File: ${f.name}]`,
-              language: f.language
+              content: f.content || `[File: ${f.name}]`,
+              language: f.language || f.type
             }))
-          : artifacts.length > 0 
-            ? artifacts.map((a: any) => ({
-                path: a.name,
-                content: `[Binary File: ${a.type}]`,
-                language: a.type
-              }))
-            : undefined,
-        workflowId  // Pass the workflow ID for preview fetching
+          : undefined,
+        workflowId: runId
       };
 
       setFinalOutput(finalResult);
       setPhase("complete");
 
+      toast.success(`Workflow completed — ${result.steps.length} agent(s) executed`);
+
       // 5. Commit to Global Output Store
-      setOutput(workflowId, {
-        title: `Workflow Results`,
+      setOutput(runId, {
+        title: workflowName,
         task: taskInput,
         agentCount: result.steps.length,
         output: finalResult,
         completedAt: new Date(),
+        workflowId: runId,
       });
 
-    } catch (err) {
+    } catch (err: any) {
       console.error("❌ Workflow Execution Error:", err);
-      // Fallback to error display in tracker
+      const errorMsg = err?.message || "Unknown error";
+      toast.error(`Workflow failed: ${errorMsg}`);
+      // Reset running steps back to pending
       setSteps(prev => prev.map(s => s.status === "running" ? { ...s, status: "pending" } : s));
       setPhase("input"); // Reset on hard failure
     } finally {
@@ -230,14 +330,15 @@ export function WorkflowExecutionPanel({ nodes, edges, onClose, initialTask = ""
 
   /** Opens workflow output in a dedicated full-width tab */
   const handleOpenInTab = () => {
+    const targetId = activeWorkflowId !== "new" ? activeWorkflowId : workflowId;
     openApp({
-      id: `workflow-output-${workflowId}`,
-      title: "Workflow Output",
-      url: `/workflow-output/${workflowId}`,
+      id: `workflow-output-${targetId}`,
+      title: `${workflowName} — Output`,
+      url: `/workflow-output/${targetId}`,
       icon: FileCode,
       description: "Workflow execution results",
     });
-    navigate(`/workflow-output/${workflowId}`);
+    navigate(`/workflow-output/${targetId}`);
   };
 
   return (

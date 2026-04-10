@@ -317,7 +317,7 @@ export async function exportPack(pack_id: string): Promise<void> {
       body: JSON.stringify({ pack_id })
     });
     if (!response.ok) throw new Error("Export failed.");
-    
+
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -327,3 +327,116 @@ export async function exportPack(pack_id: string): Promise<void> {
     a.click();
     a.remove();
   }
+
+// --- Dashboard API ---
+
+export interface DashboardStats {
+  active_workflows: number;
+  agents_running: number;
+  tokens_today: number;
+  monthly_cost: number;
+  total_workflows: number;
+  total_agents: number;
+  execution_stats: Record<string, number>;
+}
+
+export interface DashboardWorkflow {
+  id: string;
+  name: string;
+  agents: number;
+  runs: number;
+  status: "active" | "idle";
+  lastRun: string;
+}
+
+export interface DashboardActivity {
+  agent_id: string;
+  action_type: string;
+  details: Record<string, any>;
+  timestamp: string;
+  message: string;
+}
+
+export interface TokenUsageDay {
+  day: string;
+  date: string;
+  tokens: number;
+}
+
+export interface AgentStat {
+  rank: number;
+  agent_id: string;
+  name: string;
+  emoji: string;
+  category: string;
+  runs: number;
+  cost: number;
+}
+
+export interface PipelineStatus {
+  id: string;
+  workflow_id: string;
+  name: string;
+  status: string;
+  current_step: string;
+  total_steps: string;
+  started_at: string;
+  time: string;
+}
+
+export async function getDashboardStats(): Promise<DashboardStats> {
+  try {
+    return await fetchApi('/api/dashboard/stats');
+  } catch (e) {
+    console.warn("Dashboard stats API not ready", e);
+    return {
+      active_workflows: 0, agents_running: 0, tokens_today: 0,
+      monthly_cost: 0, total_workflows: 0, total_agents: 0, execution_stats: {}
+    };
+  }
+}
+
+export async function getDashboardWorkflows(): Promise<DashboardWorkflow[]> {
+  try {
+    return await fetchApi('/api/dashboard/workflows');
+  } catch (e) {
+    console.warn("Dashboard workflows API not ready", e);
+    return [];
+  }
+}
+
+export async function getDashboardActivity(limit = 20): Promise<DashboardActivity[]> {
+  try {
+    return await fetchApi(`/api/dashboard/activity?limit=${limit}`);
+  } catch (e) {
+    console.warn("Dashboard activity API not ready", e);
+    return [];
+  }
+}
+
+export async function getTokenUsage(days = 7): Promise<TokenUsageDay[]> {
+  try {
+    return await fetchApi(`/api/dashboard/token-usage?days=${days}`);
+  } catch (e) {
+    console.warn("Token usage API not ready", e);
+    return [];
+  }
+}
+
+export async function getDashboardAgentStats(): Promise<AgentStat[]> {
+  try {
+    return await fetchApi('/api/dashboard/agent-stats');
+  } catch (e) {
+    console.warn("Agent stats API not ready", e);
+    return [];
+  }
+}
+
+export async function getPipelineStatus(): Promise<PipelineStatus[]> {
+  try {
+    return await fetchApi('/api/dashboard/pipeline-status');
+  } catch (e) {
+    console.warn("Pipeline status API not ready", e);
+    return [];
+  }
+}

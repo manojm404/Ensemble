@@ -67,6 +67,7 @@ interface TabContextType {
   openApp: (app: AppItem) => void;
   openExternalApp: (app: { id: string; title: string; url: string; logoUrl: string }) => void;
   closeTab: (tabId: string) => void;
+  updateCurrentTabUrl: (url: string, title?: string) => void;
 }
 
 const TabContext = createContext<TabContextType | null>(null);
@@ -159,8 +160,19 @@ export function TabProvider({ children }: { children: ReactNode }) {
     setTabs((prev) => prev.filter((t) => t.id !== tabId || !t.closable));
   }, []);
 
+  const updateCurrentTabUrl = useCallback((url: string, title?: string) => {
+    setTabs((prev) => {
+      return prev.map((t) => {
+        if (t.id === "workflows" || t.url.startsWith("/workflows/")) {
+          return { ...t, url, title: title || t.title };
+        }
+        return t;
+      });
+    });
+  }, []);
+
   return (
-    <TabContext.Provider value={{ tabs, openApp, openExternalApp, closeTab }}>
+    <TabContext.Provider value={{ tabs, openApp, openExternalApp, closeTab, updateCurrentTabUrl }}>
       {children}
     </TabContext.Provider>
   );

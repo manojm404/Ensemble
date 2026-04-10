@@ -214,6 +214,7 @@ function buildWorkflow(
   const nodes: Node[] = agents.map((agent, i) => {
     const meta = getAgentMetadata(agent.id);
     const nodeId = `${agent.id}-${Date.now()}-${i}`;
+    const taskPrompt = generateTaskPrompt(agent.id, userPrompt);
     return {
       id: nodeId,
       type: "agentNode",
@@ -223,7 +224,10 @@ function buildWorkflow(
         subtitle: agent.description,
         model: "gpt-4o",
         temperature: 0.5,
-        prompt: generateTaskPrompt(agent.id, userPrompt),
+        prompt: taskPrompt,
+        // Critical: These fields are read by the DAG engine to execute agents
+        role: agent.id,
+        instruction: taskPrompt,
       },
     };
   });

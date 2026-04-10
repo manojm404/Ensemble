@@ -18,10 +18,32 @@ import { OutputViewer } from "@/components/workflow/OutputViewer";
 import { Badge } from "@/components/ui/badge";
 import { FileText, Clock, Bot } from "lucide-react";
 
+const STORAGE_KEY = "ensemble_workflow_outputs";
+
+function loadStoredOutput(id: string) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const data = parsed[id];
+    if (data?.output?.markdown) {
+      return { ...data, completedAt: new Date(data.completedAt) };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export default function WorkflowOutput() {
   const { id } = useParams<{ id: string }>();
   const { getOutput } = useWorkflowOutput();
-  const data = id ? getOutput(id) : undefined;
+  let data = id ? getOutput(id) : undefined;
+
+  // Fallback: load from localStorage directly (handles page refresh)
+  if (!data && id) {
+    data = loadStoredOutput(id) || undefined;
+  }
 
   if (!data) {
     return (

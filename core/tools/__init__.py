@@ -51,32 +51,18 @@ def read_artifact(path: str = None, file_id: str = None) -> str:
     return f"Error: File '{path or file_id}' not found in agent sandbox."
 
 def search_web(query: str) -> str:
-    """Search the web for real-time information using Tavily API."""
-    api_key = os.getenv("TAVILY_API_KEY")
-    if not api_key:
-        return "🔍 Web Search unavailable: Add TAVILY_API_KEY to your .env file to enable research."
-
-    import requests
+    """Search the web for real-time information using DuckDuckGo."""
     try:
-        response = requests.post(
-            "https://api.tavily.com/search",
-            json={
-                "api_key": api_key,
-                "query": query,
-                "search_depth": "basic",
-                "max_results": 5
-            },
-            timeout=10
-        )
-        response.raise_for_status()
-        data = response.json()
-        results = data.get("results", [])
+        from duckduckgo_search import DDGS
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=5))
+
         if not results:
             return f"No results found for '{query}'."
-        
+
         output = []
         for r in results:
-            output.append(f"Source: {r.get('url')}\nContent: {r.get('content')}")
+            output.append(f"Title: {r.get('title')}\nURL: {r.get('href')}\nSnippet: {r.get('body')}")
         return "\n\n".join(output)
     except Exception as e:
         return f"Error during web search: {str(e)}"

@@ -26,7 +26,7 @@ import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Play, Save, Undo, Redo, X, Search, Plus, Settings2, Loader2, CheckCircle2, Wand2, Sparkles } from "lucide-react";
+import { Play, Save, Undo, Redo, X, Search, Plus, Settings2, Loader2, CheckCircle2, Wand2, Sparkles, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { getWorkflow, saveWorkflow, getAgents, type AgentSkill } from "@/lib/api";
@@ -34,6 +34,7 @@ import { getAgentMetadata, categoryColors } from "@/lib/agent-metadata";
 import { MagicWandDialog } from "@/components/workflow/MagicWandDialog";
 import { generateWorkflowFromPrompt } from "@/lib/workflow-generator";
 import { WorkflowExecutionPanel } from "@/components/workflow/WorkflowExecutionPanel";
+import { useTabContext, allApps } from "@/lib/tab-context";
 
 // --- Agent Node ---
 const nodeStyle = {
@@ -174,6 +175,7 @@ function CanvasEmptyState({ onAddAgent, onMagicGenerate }: { onAddAgent: () => v
 function WorkflowEditorInner() {
   const { id: routeId } = useParams();
   const navigate = useNavigate();
+  const { openApp } = useTabContext();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [availableAgents, setAvailableAgents] = useState<AgentSkill[]>([]);
@@ -187,6 +189,7 @@ function WorkflowEditorInner() {
   const [isGeneratingWorkflow, setIsGeneratingWorkflow] = useState(false);
   const [executionPanelOpen, setExecutionPanelOpen] = useState(false);
   const [initialTask, setInitialTask] = useState("");
+  const [storedOutput, setStoredOutput] = useState<any>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const reactFlowInstance = useReactFlow();
 
@@ -207,6 +210,46 @@ function WorkflowEditorInner() {
           const graph = JSON.parse(wf.graph_json);
           setNodes(graph.nodes || []);
           setEdges(graph.edges || []);
+
+          // Check if there's stored output from a previous run
+          try {
+            const raw = localStorage.getItem("ensemble_workflow_outputs");
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              const stored = parsed[routeId];
+              if (stored?.output?.markdown) {
+                setStoredOutput(stored);
+                if (stored.task) setInitialTask(stored.task);
+                setExecutionPanelOpen(true);
+              }
+            }
+          } catch {
+            // Ignore localStorage errors
+          }
+
+          // Check if there's a running or completed workflow stored under this specific ID
+          if (routeId && routeId !== "new") {
+            try {
+              const runRaw = localStorage.getItem(`workflow_run_${routeId}`);
+              if (runRaw) {
+                const runState = JSON.parse(runRaw);
+                if (runState.phase === "running" || runState.phase === "complete") {
+                  if (runState.task) setInitialTask(runState.task);
+                  if (runState.output) setStoredOutput(runState);
+                  setExecutionPanelOpen(true);
+                }
+              }
+            } catch {
+              // Ignore
+            }
+          }
+
+          // Check if user came from "Re-run" button on workflow list
+          const rerunFlag = sessionStorage.getItem(`rerun_${routeId}`);
+          if (rerunFlag) {
+            sessionStorage.removeItem(`rerun_${routeId}`);
+            setExecutionPanelOpen(true);
+          }
         }
       } catch (e) {
         console.error("Failed to load workflow data:", e);
@@ -467,6 +510,20 @@ function WorkflowEditorInner() {
                 {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : saveStatus === "saved" ? <CheckCircle2 className="h-3.5 w-3.5 text-badge-green" /> : <Save className="h-3.5 w-3.5" />}
                 {saveStatus === "saved" ? "Saved" : "Save"}
               </Button>
+              {storedOutput && storedOutput.output?.markdown && routeId && (
+                <Button size="sm" variant="outline" className="gap-1.5 h-8 text-xs" onClick={() => {
+                  openApp({
+                    id: `workflow-output-${routeId}`,
+                    title: `${workflowName} — Output`,
+                    url: `/workflow-output/${routeId}`,
+                    icon: FileText,
+                    description: "Workflow execution results",
+                  });
+                  navigate(`/workflow-output/${routeId}`);
+                }}>
+                  <FileText className="h-3.5 w-3.5" /> View Output
+                </Button>
+              )}
               <Button size="sm" className="gap-1.5 h-8 text-xs font-semibold" onClick={() => setExecutionPanelOpen(true)}>
                 <Play className="h-3.5 w-3.5 fill-current" /> Run
               </Button>
@@ -485,7 +542,7 @@ function WorkflowEditorInner() {
       {/* Execution Panel */}
       <AnimatePresence>
         {executionPanelOpen && (
-          <WorkflowExecutionPanel nodes={nodes} edges={edges} onClose={() => setExecutionPanelOpen(false)} initialTask={initialTask} workflowId={routeId || "new"} />
+          <WorkflowExecutionPanel nodes={nodes} edges={edges} onClose={() => setExecutionPanelOpen(false)} initialTask={initialTask} workflowId={routeId || "new"} workflowName={workflowName} storedOutput={storedOutput} />
         )}
       </AnimatePresence>
 

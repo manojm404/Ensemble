@@ -415,7 +415,7 @@ export function OutputViewer({ output }: { output: WorkflowOutput | null }) {
         <TabsTrigger value="files" className="text-xs gap-1.5 h-6 px-3" disabled={!output.files?.length}>
           <FolderTree className="h-3 w-3" /> Files
         </TabsTrigger>
-        <TabsTrigger value="preview" className="text-xs gap-1.5 h-6 px-3" disabled={!output.previewUrl}>
+        <TabsTrigger value="preview" className="text-xs gap-1.5 h-6 px-3" disabled={!output.workflowId && !output.previewUrl}>
           <Eye className="h-3 w-3" /> Preview
         </TabsTrigger>
       </TabsList>

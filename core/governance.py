@@ -727,21 +727,29 @@ async def get_workspace_preview():
 
 @app.get("/api/workflows/{run_id}/artifacts")
 async def get_workflow_artifacts(run_id: str):
-    """List artifacts generated for a specific run."""
-    # For now, we list everything in the sandbox. In the future, we filter by run_id
+    """List artifacts generated for a specific workflow run."""
+    # Check workflow-specific workspace first
+    wf_workspace = os.path.join("data", "workspace", f"workflow_{run_id}")
+
     tree = []
-    if os.path.exists(WORKSPACE_DIR):
-        for name in os.listdir(WORKSPACE_DIR):
-            if name.startswith("."): continue
-            p = os.path.join(WORKSPACE_DIR, name)
-            if os.path.isfile(p):
+    if os.path.exists(wf_workspace):
+        for root, dirs, files in os.walk(wf_workspace):
+            for name in files:
+                if name.startswith("."):
+                    continue
+                full_path = os.path.join(root, name)
+                rel_path = os.path.relpath(full_path, wf_workspace)
                 tree.append({
                     "name": name,
-                    "path": name,
+                    "path": rel_path,
                     "type": os.path.splitext(name)[1][1:] or "file",
-                    "size": os.path.getsize(p)
+                    "size": os.path.getsize(full_path)
                 })
-    return tree
+        return tree
+
+    # Fallback: return empty list if no workflow-specific workspace exists
+    # (files from global workspace belong to other runs)
+    return []
 
 @app.get("/api/workspace/download")
 async def download_workspace_file(path: str):
@@ -1153,6 +1161,271 @@ async def delete_chat_topic(topic_id: str):
         conn.execute("DELETE FROM chat_topics WHERE id = ?", (topic_id,))
     return {"status": "success", "id": topic_id}
 
+# --- Dashboard Stats API Endpoints ---
+
+@app.get("/api/dashboard/stats")
+async def get_dashboard_stats():
+    """Get real-time dashboard statistics."""
+    audit_db_path = "data/ensemble_audit.db"
+    
+    with sqlite3.connect(gov_instance.db_path) as conn:
+        # Count active workflows (workflows with recent executions)
+        cursor = conn.execute("""
+            SELECT COUNT(DISTINCT w.id) FROM workflows w
+            INNER JOIN executions e ON w.id = e.workflow_id
+            WHERE e.status IN ('running', 'queued', 'completed')
+        """)
+        active_workflows = cursor.fetchone()[0] or 0
+
+        # Count running agents
+        cursor = conn.execute("""
+            SELECT COUNT(DISTINCT last_agent_id) FROM executions
+            WHERE status = 'running' AND last_agent_id IS NOT NULL
+        """)
+        agents_running = cursor.fetchone()[0] or 0
+
+        # Workflow stats
+        cursor = conn.execute("SELECT COUNT(*) FROM workflows")
+        total_workflows = cursor.fetchone()[0] or 0
+
+        cursor = conn.execute("""
+            SELECT status, COUNT(*) FROM executions GROUP BY status
+        """)
+        execution_stats = {}
+        for row in cursor.fetchall():
+            execution_stats[row[0]] = row[1]
+
+        # Monthly cost (from budgets)
+        cursor = conn.execute("SELECT COALESCE(SUM(spent), 0) FROM budgets")
+        monthly_cost = cursor.fetchone()[0] or 0.0
+
+    # Token usage today (from audit events)
+    try:
+        with sqlite3.connect(audit_db_path) as audit_conn:
+            cursor = audit_conn.execute("""
+                SELECT COUNT(*) FROM events
+                WHERE timestamp >= date('now', 'start of day')
+            """)
+            events_today = cursor.fetchone()[0] or 0
+    except:
+        events_today = 0
+    tokens_today = events_today * 1000  # Estimate ~1000 tokens per event
+
+    # Agent stats from registry
+    skills = skill_registry.list_skills()
+    total_agents = len(skills)
+
+    return {
+        "active_workflows": active_workflows,
+        "agents_running": agents_running,
+        "tokens_today": tokens_today,
+        "monthly_cost": monthly_cost,
+        "total_workflows": total_workflows,
+        "total_agents": total_agents,
+        "execution_stats": execution_stats
+    }
+
+@app.get("/api/dashboard/workflows")
+async def get_dashboard_workflows():
+    """Get workflow summary for dashboard."""
+    with sqlite3.connect(gov_instance.db_path) as conn:
+        cursor = conn.execute("""
+            SELECT w.id, w.name, w.graph_json, w.updated_at,
+                   (SELECT COUNT(*) FROM executions e WHERE e.workflow_id = w.id AND e.status = 'running') as running_count,
+                   (SELECT COUNT(*) FROM executions e WHERE e.workflow_id = w.id) as total_runs
+            FROM workflows w ORDER BY w.updated_at DESC LIMIT 10
+        """)
+        workflows = []
+        for row in cursor.fetchall():
+            wf_id, name, graph_json, updated_at, running_count, total_runs = row
+            try:
+                graph = json.loads(graph_json) if graph_json else {}
+                agent_count = len(graph.get("nodes", [])) if isinstance(graph, dict) else 2
+            except:
+                agent_count = 2
+
+            status = "active" if running_count > 0 else "idle"
+            workflows.append({
+                "id": wf_id,
+                "name": name,
+                "agents": agent_count,
+                "runs": total_runs,
+                "status": status,
+                "lastRun": _format_relative_time(updated_at) if updated_at else "unknown"
+            })
+        return workflows
+
+@app.get("/api/dashboard/activity")
+async def get_dashboard_activity(limit: int = Query(default=20)):
+    """Get recent activity feed."""
+    audit_db_path = "data/ensemble_audit.db"
+    try:
+        with sqlite3.connect(audit_db_path) as audit_conn:
+            cursor = audit_conn.execute("""
+                SELECT agent_id, action_type, details_json, timestamp
+                FROM events ORDER BY id DESC LIMIT ?
+            """, (limit,))
+            activity = []
+            for row in cursor.fetchall():
+                agent_id, action_type, details_json, timestamp = row
+                try:
+                    details = json.loads(details_json) if details_json else {}
+                except:
+                    details = {}
+                activity.append({
+                    "agent_id": agent_id,
+                    "action_type": action_type,
+                    "details": details,
+                    "timestamp": timestamp,
+                    "message": _format_activity_message(action_type, details, agent_id)
+                })
+            return activity
+    except:
+        return []
+
+@app.get("/api/dashboard/token-usage")
+async def get_token_usage(days: int = Query(default=7)):
+    """Get token usage over the last N days."""
+    from datetime import datetime, timedelta
+    audit_db_path = "data/ensemble_audit.db"
+    try:
+        with sqlite3.connect(audit_db_path) as audit_conn:
+            cursor = audit_conn.execute("""
+                SELECT date(timestamp) as day, COUNT(*) as event_count
+                FROM events
+                WHERE timestamp >= date('now', '-{} days')
+                GROUP BY day ORDER BY day ASC
+            """.format(days))
+            
+            usage_data = {}
+            for row in cursor.fetchall():
+                usage_data[row[0]] = row[1] * 1000
+    except:
+        usage_data = {}
+
+    result = []
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    for i in range(days):
+        target_date = datetime.now() - timedelta(days=days-1-i)
+        target_str = target_date.strftime('%Y-%m-%d')
+        tokens = usage_data.get(target_str, 0)
+        result.append({
+            "day": day_names[target_date.weekday()],
+            "date": target_str,
+            "tokens": round(tokens / 1000, 1)
+        })
+    
+    return result
+
+@app.get("/api/dashboard/agent-stats")
+async def get_dashboard_agent_stats():
+    """Get agent performance stats for leaderboard."""
+    audit_db_path = "data/ensemble_audit.db"
+    try:
+        with sqlite3.connect(audit_db_path) as audit_conn:
+            cursor = audit_conn.execute("""
+                SELECT agent_id, COUNT(*) as run_count, COALESCE(SUM(cost_usd), 0) as total_cost
+                FROM events WHERE agent_id IS NOT NULL AND agent_id != 'human_user'
+                GROUP BY agent_id ORDER BY run_count DESC LIMIT 10
+            """)
+            
+            rows_data = cursor.fetchall()
+    except:
+        rows_data = []
+    
+    skills = skill_registry.list_skills()
+    skill_map = {s["id"]: s for s in skills}
+    
+    agent_stats = []
+    rank = 1
+    for row in rows_data:
+        agent_id, run_count, total_cost = row
+        skill = skill_map.get(agent_id, {})
+        agent_stats.append({
+            "rank": rank,
+            "agent_id": agent_id,
+            "name": skill.get("name", agent_id),
+            "emoji": skill.get("emoji", "🤖"),
+            "category": skill.get("category", "General"),
+            "runs": run_count,
+            "cost": total_cost
+        })
+        rank += 1
+    
+    return agent_stats
+
+@app.get("/api/dashboard/pipeline-status")
+async def get_pipeline_status():
+    """Get current pipeline/workflow execution status."""
+    with sqlite3.connect(gov_instance.db_path) as conn:
+        cursor = conn.execute("""
+            SELECT e.run_id, e.workflow_id, e.status, e.current_node, e.started_at, w.name
+            FROM executions e
+            LEFT JOIN workflows w ON e.workflow_id = w.id
+            ORDER BY e.started_at DESC LIMIT 10
+        """)
+        
+        pipelines = []
+        for row in cursor.fetchall():
+            run_id, wf_id, status, current_node, started_at, name = row
+            try:
+                graph = json.loads(wf_id) if wf_id else {}
+            except:
+                graph = {}
+            
+            pipelines.append({
+                "id": run_id,
+                "workflow_id": wf_id,
+                "name": name or f"Workflow {wf_id[:8]}",
+                "status": status,
+                "current_step": current_node or "1",
+                "total_steps": "3",
+                "started_at": started_at,
+                "time": _format_relative_time(started_at) if started_at else "unknown"
+            })
+        
+        return pipelines
+
+def _format_relative_time(timestamp):
+    """Format a timestamp as relative time (e.g. '2m ago')."""
+    if not timestamp:
+        return "unknown"
+    try:
+        if isinstance(timestamp, str):
+            timestamp = timestamp.replace("T", " ").replace("Z", "")
+            dt = datetime.strptime(timestamp[:19], "%Y-%m-%d %H:%M:%S")
+        else:
+            dt = datetime.fromtimestamp(timestamp)
+        
+        diff = (datetime.now() - dt).total_seconds()
+        if diff < 60:
+            return f"{int(diff)}s ago"
+        elif diff < 3600:
+            return f"{int(diff // 60)}m ago"
+        elif diff < 86400:
+            return f"{int(diff // 3600)}h ago"
+        else:
+            return f"{int(diff // 86400)}d ago"
+    except:
+        return "unknown"
+
+def _format_activity_message(action_type, details, agent_id):
+    """Format an activity message for display."""
+    messages = {
+        "SOP_START": "SOP execution started",
+        "SOP_COMPLETE": "SOP execution completed",
+        "SOP_ERROR": f"SOP execution error: {details.get('error', 'unknown')}",
+        "APPROVAL_REQUEST": f"Approval requested: {details.get('reason', 'action')}",
+        "APPROVAL_DECISION": f"Approval {'approved' if details.get('approved') else 'denied'}",
+        "COST_CHECK": f"Cost check: ${details.get('cost', 0):.4f}",
+        "USER_INPUT": "User input received",
+        "TASK_START": f"Task started: {details.get('task', 'unknown')}",
+        "TASK_COMPLETE": f"Task completed: {details.get('task', 'unknown')}",
+        "WORKFLOW_START": "Workflow execution started",
+        "WORKFLOW_COMPLETE": "Workflow execution completed",
+    }
+    return messages.get(action_type, f"{action_type} by {agent_id or 'system'}")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8088)
@@ -1507,35 +1780,55 @@ async def get_workflow_artifacts_api(workflow_id: str):
 @app.get("/api/workflows/{workflow_id}/preview")
 async def get_workflow_preview(workflow_id: str):
     """
-    Serves the index.html from the workflow's workspace for preview.
+    Serves the index.html or preview.html from the workflow's workspace for preview.
     Returns the actual HTML content so the frontend can render it in an iframe via srcdoc.
     """
     workflow_ws_dir = os.path.join("data", "workspace", f"workflow_{workflow_id}")
-    if not os.path.exists(workflow_ws_dir):
-        raise HTTPException(status_code=404, detail="No workflow workspace found")
-    
-    # Find the first index.html in any node subdirectory
-    for node_dir in os.listdir(workflow_ws_dir):
-        node_path = os.path.join(workflow_ws_dir, node_dir)
-        if os.path.isdir(node_path):
-            index_path = os.path.join(node_path, "index.html")
-            if os.path.exists(index_path):
-                with open(index_path, "r", encoding="utf-8") as f:
-                    html_content = f.read()
-                return {
-                    "html": html_content,
-                    "node": node_dir,
-                    "path": f"workflow_{workflow_id}/{node_dir}/index.html"
-                }
-    
-    # Check for preview.html as fallback
-    preview_path = os.path.join("data", "workspace", "preview.html")
-    if os.path.exists(preview_path):
-        with open(preview_path, "r", encoding="utf-8") as f:
-            html_content = f.read()
-        return {"html": html_content, "node": "legacy", "path": "preview.html"}
-    
-    raise HTTPException(status_code=404, detail="No index.html found in workflow workspace")
+
+    # First check workflow-specific directory
+    if os.path.exists(workflow_ws_dir):
+        # Find the first index.html in any node subdirectory
+        for node_dir in os.listdir(workflow_ws_dir):
+            node_path = os.path.join(workflow_ws_dir, node_dir)
+            if os.path.isdir(node_path):
+                index_path = os.path.join(node_path, "index.html")
+                if os.path.exists(index_path):
+                    with open(index_path, "r", encoding="utf-8") as f:
+                        html_content = f.read()
+                    return {
+                        "html": html_content,
+                        "node": node_dir,
+                        "path": f"workflow_{workflow_id}/{node_dir}/index.html"
+                    }
+
+        # Check for preview.html in workflow workspace as fallback
+        preview_path = os.path.join(workflow_ws_dir, "preview.html")
+        if os.path.exists(preview_path):
+            with open(preview_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+            return {"html": html_content, "node": "legacy", "path": "preview.html"}
+
+    # Fallback: look for HTML files in the global workspace that may have been generated
+    # during this run (sorted by most recent first, but only if modified within 10 min)
+    global_ws = os.path.join("data", "workspace")
+    if os.path.exists(global_ws):
+        import time
+        now = time.time()
+        html_files = []
+        for f in os.listdir(global_ws):
+            if f.lower().endswith(('.html', '.htm')):
+                full_path = os.path.join(global_ws, f)
+                mtime = os.path.getmtime(full_path)
+                if now - mtime < 600:  # Only files modified within last 10 minutes
+                    html_files.append((full_path, mtime, f))
+        html_files.sort(key=lambda x: x[1], reverse=True)
+        if html_files:
+            latest_path, _, latest_name = html_files[0]
+            with open(latest_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+            return {"html": html_content, "node": "global", "path": latest_name}
+
+    raise HTTPException(status_code=404, detail="No HTML preview found for this workflow")
 
 def get_all_agents_logic():
     """Shared logic to aggregate file-based and DB-based agents."""

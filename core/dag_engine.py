@@ -136,22 +136,23 @@ class DAGWorkflowEngine:
         """
         Extract code blocks from markdown and return as {filename: content} dict.
         Detects: html, css, js/javascript, python, json, xml, sql, bash, etc.
+        Falls back to raw HTML extraction if no fenced blocks found.
         """
         import re
-        
+
         files = {}
-        
+
         # Pattern to match fenced code blocks with language
         pattern = r'```(\w+)\n(.*?)```'
         matches = re.findall(pattern, markdown, re.DOTALL)
-        
+
         for lang, code in matches:
             lang_lower = lang.lower()
             code = code.strip()
-            
+
             if not code:
                 continue
-            
+
             # Map language to filename
             if lang_lower in ('html', 'htm'):
                 if 'index.html' not in files:
@@ -160,7 +161,6 @@ class DAGWorkflowEngine:
                 if 'style.css' not in files:
                     files['style.css'] = code
                 else:
-                    # Handle multiple CSS blocks
                     idx = len([f for f in files if f.endswith('.css')]) + 1
                     files[f'style{idx}.css'] = code
             elif lang_lower in ('js', 'javascript', 'typescript', 'ts'):
@@ -178,26 +178,31 @@ class DAGWorkflowEngine:
             elif lang_lower in ('json',):
                 if 'data.json' not in files:
                     files['data.json'] = code
-            elif lang_lower in ('xml',):
-                if 'config.xml' not in files:
-                    files['config.xml'] = code
-            elif lang_lower in ('sql',):
-                if 'schema.sql' not in files:
-                    files['schema.sql'] = code
-            elif lang_lower in ('bash', 'sh', 'shell', 'zsh'):
-                if 'run.sh' not in files:
-                    files['run.sh'] = code
-            else:
-                # Unknown language, save with extension
-                ext_map = {
-                    'go': 'main.go', 'rs': 'main.rs', 'java': 'Main.java',
-                    'cpp': 'main.cpp', 'c': 'main.c', 'rb': 'main.rb',
-                    'php': 'index.php', 'swift': 'main.swift', 'kt': 'Main.kt',
-                }
-                fname = ext_map.get(lang_lower, f'code.{lang_lower}')
-                if fname not in files:
-                    files[fname] = code
-        
+
+        # FALLBACK: If no fenced blocks found, try to extract raw HTML
+        if not files and ('<html' in markdown.lower() or '<!doctype' in markdown.lower()):
+            # Extract complete HTML document
+            html_match = re.search(r'(<html[\s\S]*?</html>|<!DOCTYPE\s+html[\s\S]*?</html>)',
+                                   markdown, re.IGNORECASE)
+            if html_match:
+                html_content = html_match.group(1)
+                # Clean up markdown artifacts (backticks, language hints)
+                html_content = re.sub(r'```[\w]*', '', html_content).strip()
+                if html_content:
+                    files['index.html'] = html_content
+
+            # Extract CSS from <style> tags or standalone CSS blocks
+            css_blocks = re.findall(r'<style[^>]*>([\s\S]*?)</style>', markdown, re.IGNORECASE)
+            if css_blocks:
+                combined_css = '\n\n'.join(css_blocks)
+                files['style.css'] = combined_css.strip()
+
+            # Extract JS from <script> tags
+            js_blocks = re.findall(r'<script[^>]*>([\s\S]*?)</script>', markdown, re.IGNORECASE)
+            if js_blocks:
+                combined_js = '\n\n'.join(js_blocks)
+                files['script.js'] = combined_js.strip()
+
         return files
 
     @staticmethod
@@ -563,10 +568,27 @@ class DAGWorkflowEngine:
 
         # 3. Create and run agent
         agent_id = f"{role.lower().replace(' ', '_')}_{node_id}_{int(time.time())}"
+
+        # Enforce code output for coding agents
+        coding_keywords = ['develop', 'frontend', 'coder', 'developer', 'implement', 'write code', 'create the']
+        is_coding_task = any(kw in instruction.lower() for kw in coding_keywords)
+
+        enhanced_instruction = instruction
+        if is_coding_task:
+            enhanced_instruction = instruction + (
+                "\n\nIMPORTANT: You MUST output ALL code files inside fenced code blocks. "
+                "For each file, use:\n"
+                "```html\n...full HTML code...\n```\n"
+                "```css\n...full CSS code...\n```\n"
+                "```js\n...full JavaScript code...\n```\n"
+                "Do NOT describe code in prose. Output complete, working files. "
+                "Each file must be in its own fenced code block with the language specified."
+            )
+
         agent = ManagedAgent(
             agent_id=agent_id,
             company_id=self.company_id,
-            system_prompt=instruction,
+            system_prompt=enhanced_instruction,
             gov=self.gov,
             audit=self.audit,
             llm=self.llm,
@@ -577,7 +599,7 @@ class DAGWorkflowEngine:
             # Check panic again right before LLM call
             if self.gov.is_panic: return False, None
 
-            response = await agent.run(f"Instruction: {instruction}\nContext: {context}")
+            response = await agent.run(f"Instruction: {enhanced_instruction}\nContext: {context}")
 
             if "Execution aborted" in response or "Budget exhausted" in response:
                 print(f"⏸️ [DAG Engine] Node {node_id} paused/aborted", flush=True)
@@ -634,12 +656,14 @@ class DAGWorkflowEngine:
                     html_content = response.split("```html")[1].split("```")[0].strip()
                 elif "```" in response:
                     html_content = response.split("```")[1].split("```")[0].strip()
-                # Save to data/workspace/preview.html for the UI to pick up
-                preview_path = os.path.join("data", "workspace", "preview.html")
-                os.makedirs(os.path.dirname(preview_path), exist_ok=True)
-                with open(preview_path, "w") as f:
+
+                # Save to workflow-specific directory for the UI to pick up
+                wf_workspace = os.path.join("data", "workspace", f"workflow_{workflow_id}")
+                os.makedirs(wf_workspace, exist_ok=True)
+                preview_path = os.path.join(wf_workspace, "preview.html")
+                with open(preview_path, "w", encoding="utf-8") as f:
                     f.write(html_content)
-                print(f"🌐 [DAG Engine] Web deliverable saved to preview.html", flush=True)
+                print(f"🌐 [DAG Engine] Web deliverable saved to {preview_path}", flush=True)
 
             # Update node status
             self._update_node_status(run_id, node_id, "completed")

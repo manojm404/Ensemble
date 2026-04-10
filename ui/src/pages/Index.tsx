@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useTabContext, allApps } from "@/lib/tab-context";
@@ -26,62 +26,26 @@ import {
   Inbox,
   LayoutGrid,
   Building2,
-  Zap
+  Zap,
+  Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-
-/** MOCKED DATA */
-const stats = [
-  { label: "Active Workflows", value: "12", change: "+3", trend: "up" as const, icon: GitBranch, color: "text-primary", bgColor: "bg-primary/10" },
-  { label: "Agents Running", value: "8", change: "+2", trend: "up" as const, icon: Bot, color: "text-emerald-400", bgColor: "bg-emerald-400/10" },
-  { label: "Tokens Today", value: "48.2K", change: "+12K", trend: "up" as const, icon: Coins, color: "text-amber-400", bgColor: "bg-amber-400/10" },
-  { label: "Monthly Cost", value: "$24.50", change: "+$3.20", trend: "down" as const, icon: DollarSign, color: "text-rose-400", bgColor: "bg-rose-400/10" },
-];
-
-const livePipelines = [
-  { id: "1", name: "Code Review", step: 3, totalSteps: 4, agents: 4, status: "running" as const, time: "2m ago" },
-  { id: "2", name: "Content Generator", step: 5, totalSteps: 5, agents: 3, status: "completed" as const, time: "8m ago" },
-  { id: "3", name: "Bug Triage", step: 1, totalSteps: 3, agents: 2, status: "running" as const, time: "30s ago" },
-];
-
-const activityFeed = [
-  { id: 1, icon: Play, iconColor: "text-primary", message: "Code Review pipeline started", time: "2m ago", isError: false },
-  { id: 2, icon: CheckCircle2, iconColor: "text-emerald-400", message: "Content Generator completed successfully", time: "8m ago", isError: false },
-  { id: 3, icon: AlertCircle, iconColor: "text-rose-400", message: "API Doc Writer failed at step 2", time: "12m ago", isError: true },
-  { id: 4, icon: MessageSquare, iconColor: "text-amber-400", message: "New chat message in Design Channel", time: "25m ago", isError: false },
-  { id: 5, icon: Plus, iconColor: "text-primary", message: "Data Analyzer workflow created", time: "1h ago", isError: false },
-  { id: 6, icon: Clock, iconColor: "text-muted-foreground", message: "System maintenance scheduled", time: "2h ago", isError: false },
-  { id: 7, icon: CheckCircle2, iconColor: "text-emerald-400", message: "Bug Triage completed successfully", time: "3h ago", isError: false },
-];
-
-const topAgents = [
-  { rank: 1, emoji: "🤖", name: "CodeBot", category: "Programming", runs: 340 },
-  { rank: 2, emoji: "📝", name: "DocWriter", category: "Writing", runs: 128 },
-  { rank: 3, emoji: "🧪", name: "TestPilot", category: "Programming", runs: 89 },
-  { rank: 4, emoji: "🐛", name: "Debugger", category: "Programming", runs: 56 },
-  { rank: 5, emoji: "🎨", name: "PixelPro", category: "Design", runs: 34 },
-];
-
-const tokenUsage = [
-  { day: "Mon", tokens: 32.4 },
-  { day: "Tue", tokens: 41.2 },
-  { day: "Wed", tokens: 58.1 },
-  { day: "Thu", tokens: 45.8 },
-  { day: "Fri", tokens: 62.3 },
-  { day: "Sat", tokens: 28.9 },
-  { day: "Sun", tokens: 48.2 },
-];
-const maxTokens = Math.max(...tokenUsage.map((t) => t.tokens));
-
-const recentWorkflows = [
-  { id: "1", name: "Code Review", agents: 4, runs: 128, status: "active", lastRun: "2m" },
-  { id: "2", name: "Content Generator", agents: 3, runs: 56, status: "active", lastRun: "15m" },
-  { id: "3", name: "Bug Triage", agents: 2, runs: 89, status: "idle", lastRun: "1h" },
-  { id: "4", name: "API Doc Writer", agents: 3, runs: 34, status: "active", lastRun: "5m" },
-  { id: "5", name: "Data Analyzer", agents: 5, runs: 22, status: "idle", lastRun: "3h" },
-];
+import {
+  getDashboardStats,
+  getDashboardWorkflows,
+  getDashboardActivity,
+  getTokenUsage,
+  getDashboardAgentStats,
+  getPipelineStatus,
+  type DashboardStats,
+  type DashboardWorkflow,
+  type DashboardActivity,
+  type TokenUsageDay,
+  type AgentStat,
+  type PipelineStatus
+} from "@/lib/api";
 
 import InboxView from "./Inbox";
 
@@ -89,6 +53,44 @@ const Index = () => {
   const navigate = useNavigate();
   const { openApp } = useTabContext();
   const [activeSubTab, setActiveSubTab] = useState("dashboard");
+
+  // Real data states
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [workflows, setWorkflows] = useState<DashboardWorkflow[]>([]);
+  const [activityFeed, setActivityFeed] = useState<DashboardActivity[]>([]);
+  const [topAgents, setTopAgents] = useState<AgentStat[]>([]);
+  const [tokenUsage, setTokenUsage] = useState<TokenUsageDay[]>([]);
+  const [pipelines, setPipelines] = useState<PipelineStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchData = async () => {
+    try {
+      const [statsData, workflowsData, activityData, tokenData, agentsData, pipelinesData] = await Promise.all([
+        getDashboardStats(),
+        getDashboardWorkflows(),
+        getDashboardActivity(10),
+        getTokenUsage(7),
+        getDashboardAgentStats(),
+        getPipelineStatus()
+      ]);
+      setStats(statsData);
+      setWorkflows(workflowsData);
+      setActivityFeed(activityData);
+      setTopAgents(agentsData);
+      setTokenUsage(tokenData);
+      setPipelines(pipelinesData);
+    } catch (error) {
+      console.error("Failed to fetch dashboard data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 30000); // Refresh every 30s
+    return () => clearInterval(interval);
+  }, []);
 
   const handleAppOpen = (appId: string) => {
     const app = allApps.find((a) => a.id === appId);
@@ -101,10 +103,50 @@ const Index = () => {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
+  // Format helpers
+  const formatTokens = (tokens: number) => {
+    if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`;
+    return tokens.toString();
+  };
+
+  const formatCost = (cost: number) => `$${cost.toFixed(2)}`;
+
+  // Activity icon mapping
+  const getActivityIcon = (actionType: string) => {
+    switch (actionType) {
+      case "SOP_START":
+      case "WORKFLOW_START":
+        return Play;
+      case "SOP_COMPLETE":
+      case "WORKFLOW_COMPLETE":
+      case "TASK_COMPLETE":
+        return CheckCircle2;
+      case "SOP_ERROR":
+        return AlertCircle;
+      case "USER_INPUT":
+        return MessageSquare;
+      case "APPROVAL_REQUEST":
+        return Plus;
+      default:
+        return Clock;
+    }
+  };
+
+  const getActivityIconColor = (actionType: string) => {
+    if (actionType.includes("ERROR")) return "text-rose-400";
+    if (actionType.includes("COMPLETE")) return "text-emerald-400";
+    if (actionType.includes("APPROVAL")) return "text-amber-400";
+    return "text-primary";
+  };
+
+  const maxTokens = tokenUsage.length > 0 ? Math.max(...tokenUsage.map((t) => t.tokens), 1) : 1;
+  const totalTokens = tokenUsage.reduce((sum, t) => sum + t.tokens, 0);
+  const avgTokens = tokenUsage.length > 0 ? totalTokens / tokenUsage.length : 0;
+
   return (
     <div className="h-full overflow-y-auto px-6 py-8">
       <div className="max-w-7xl mx-auto flex gap-8">
-        
+
         {/* SIDEBAR NAVIGATION (Within Tab) */}
         <aside className="w-64 hidden xl:flex flex-col gap-8 shrink-0">
           <div className="space-y-4">
@@ -114,17 +156,17 @@ const Index = () => {
              </Button>
 
               <div className="space-y-1">
-                <NavButton 
-                  icon={Inbox} 
-                  label="Inbox" 
-                  active={activeSubTab === "inbox"} 
-                  onClick={() => setActiveSubTab("inbox")} 
+                <NavButton
+                  icon={Inbox}
+                  label="Inbox"
+                  active={activeSubTab === "inbox"}
+                  onClick={() => setActiveSubTab("inbox")}
                 />
-                <NavButton 
-                  icon={LayoutGrid} 
-                  label="Dashboard" 
-                  active={activeSubTab === "dashboard"} 
-                  onClick={() => setActiveSubTab("dashboard")} 
+                <NavButton
+                  icon={LayoutGrid}
+                  label="Dashboard"
+                  active={activeSubTab === "dashboard"}
+                  onClick={() => setActiveSubTab("dashboard")}
                 />
               </div>
           </div>
@@ -150,8 +192,8 @@ const Index = () => {
                   { name: "Bug Triage", color: "bg-orange-400" },
                   { name: "ORG", color: "bg-primary", isOrg: true },
                 ].map(p => (
-                   <button 
-                    key={p.name} 
+                   <button
+                    key={p.name}
                     onClick={() => p.isOrg ? handleAppOpen("orgs") : {}}
                     className="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-xs font-bold text-muted-foreground/60 hover:text-foreground hover:bg-white/5 transition-all group"
                    >
@@ -168,15 +210,20 @@ const Index = () => {
           {activeSubTab === "dashboard" && (
             <>
               {/* 1. Greeting + Quick Actions */}
-              <motion.div 
-                initial={{ opacity: 0, y: 16 }} 
-                animate={{ opacity: 1, y: 0 }} 
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, delay: 0.1 }}
                 className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
               >
                 <div>
                   <h1 className="text-2xl font-bold tracking-tight text-foreground">{greeting}</h1>
-                  <p className="text-sm text-muted-foreground mt-0.5 font-medium italic opacity-60">System status: Optimizing agent throughput</p>
+                  <p className="text-sm text-muted-foreground mt-0.5 font-medium italic opacity-60">
+                    {loading ? "Loading system status..." :
+                     stats && stats.total_agents > 0
+                       ? `${stats.total_agents} agents ready · ${stats.total_workflows} workflows configured`
+                       : "System status: Ready — no agents or workflows configured yet"}
+                  </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <Button size="sm" variant="default" className="h-9 px-4 rounded-xl shadow-lg font-bold uppercase tracking-widest text-[9px]" onClick={() => handleAppOpen("workflows")}>
@@ -187,237 +234,360 @@ const Index = () => {
               </motion.div>
 
               {/* 2. Stats Row */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {stats.map((stat, i) => {
-                const Icon = stat.icon;
-                const TrendIcon = stat.trend === "up" ? ArrowUpRight : ArrowDownRight;
-                const trendColor = stat.label === "Monthly Cost"
-                  ? stat.trend === "up" ? "text-rose-400" : "text-emerald-400"
-                  : stat.trend === "up" ? "text-emerald-400" : "text-rose-400";
-                
-                return (
-                  <motion.div
-                    key={stat.label}
-                    initial={{ opacity: 0, y: 16 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.4, delay: 0.15 + i * 0.05 }}
-                    className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-4 hover:border-border/60 transition-colors"
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <div className={`h-9 w-9 rounded-lg ${stat.bgColor} flex items-center justify-center`}>
-                        <Icon className={`h-4.5 w-4.5 ${stat.color}`} />
-                      </div>
-                      <div className={`flex items-center gap-0.5 text-xs font-medium ${trendColor}`}>
-                        <TrendIcon className="h-3 w-3" />
-                        {stat.change}
-                      </div>
+              {loading ? (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[...Array(4)].map((_, i) => (
+                    <div key={i} className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-4 animate-pulse">
+                      <div className="h-9 w-9 rounded-lg bg-muted/50 mb-3" />
+                      <div className="h-8 w-16 bg-muted/50 mb-1" />
+                      <div className="h-4 w-24 bg-muted/30" />
                     </div>
-                    <p className="text-2xl font-bold text-foreground">{stat.value}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{stat.label}</p>
-                  </motion.div>
-                );
-              })}
-            </div>
-
-            {/* 3. Live Pipelines + Activity Feed */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Left — Live Pipelines */}
-              <motion.div
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.3 }}
-                className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-5"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <Workflow className="h-4 w-4 text-primary" />
-                    Live Pipelines
-                  </div>
-                  <Badge variant="secondary" className="font-normal">
-                    {livePipelines.filter(p => p.status === "running").length} Running
-                  </Badge>
-                </div>
-                <div className="space-y-3">
-                  {livePipelines.map((pipeline) => (
-                    <button
-                      key={pipeline.id}
-                      onClick={() => handleAppOpen("workflows")}
-                      className="w-full text-left rounded-lg border border-border/30 bg-background/50 p-3 hover:border-border/50 transition-colors"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium text-foreground">{pipeline.name}</span>
-                        <Badge variant={pipeline.status === "running" ? "default" : "secondary"} className="text-[10px] uppercase tracking-wider">
-                          {pipeline.status === "running" ? "Running" : "Done ✓"}
-                        </Badge>
-                      </div>
-                      <Progress value={(pipeline.step / pipeline.totalSteps) * 100} className="h-1.5 mb-2" />
-                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                        <span>Step {pipeline.step}/{pipeline.totalSteps} · {pipeline.agents} agents</span>
-                        <span>{pipeline.time}</span>
-                      </div>
-                    </button>
                   ))}
                 </div>
-              </motion.div>
+              ) : (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    { label: "Active Workflows", value: stats?.active_workflows?.toString() || "0", change: stats?.total_workflows ? `${stats.total_workflows} total` : "None configured", trend: (stats?.active_workflows || 0) > 0 ? "up" : "down" as const, icon: GitBranch, color: "text-primary", bgColor: "bg-primary/10" },
+                    { label: "Agents Running", value: stats?.agents_running?.toString() || "0", change: stats?.total_agents ? `${stats.total_agents} available` : "None available", trend: (stats?.agents_running || 0) > 0 ? "up" : "down" as const, icon: Bot, color: "text-emerald-400", bgColor: "bg-emerald-400/10" },
+                    { label: "Tokens Today", value: formatTokens(stats?.tokens_today || 0), change: stats?.tokens_today ? `~${formatTokens(stats.tokens_today)}` : "No activity", trend: (stats?.tokens_today || 0) > 0 ? "up" : "down" as const, icon: Coins, color: "text-amber-400", bgColor: "bg-amber-400/10" },
+                    { label: "Monthly Cost", value: formatCost(stats?.monthly_cost || 0), change: stats?.monthly_cost ? `Total spent` : "No spend yet", trend: (stats?.monthly_cost || 0) > 0 ? "up" : "down" as const, icon: DollarSign, color: "text-rose-400", bgColor: "bg-rose-400/10" },
+                  ].map((stat, i) => {
+                    const Icon = stat.icon;
+                    const TrendIcon = stat.trend === "up" ? ArrowUpRight : ArrowDownRight;
+                    const trendColor = stat.label === "Monthly Cost"
+                      ? stat.trend === "up" ? "text-rose-400" : "text-emerald-400"
+                      : stat.trend === "up" ? "text-emerald-400" : "text-muted-foreground/40";
 
-              {/* Right — Recent Activity Feed */}
-              <motion.div
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.35 }}
-                className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-5"
-              >
-                <h2 className="text-sm font-semibold text-foreground mb-4">Recent Activity</h2>
-                <div className="max-h-[240px] overflow-y-auto pr-1 space-y-1">
-                  {activityFeed.map((item) => {
-                    const Icon = item.icon;
                     return (
-                      <div
-                        key={item.id}
-                        className={`flex items-start gap-3 rounded-md px-2 py-2 text-sm transition-colors ${
-                          item.isError ? "bg-rose-500/5" : "hover:bg-muted/50"
-                        }`}
+                      <motion.div
+                        key={stat.label}
+                        initial={{ opacity: 0, y: 16 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.4, delay: 0.15 + i * 0.05 }}
+                        className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-4 hover:border-border/60 transition-colors"
                       >
-                        <div className={`mt-0.5 ${item.iconColor}`}>
-                          <Icon className="h-4 w-4" />
+                        <div className="flex items-center justify-between mb-3">
+                          <div className={`h-9 w-9 rounded-lg ${stat.bgColor} flex items-center justify-center`}>
+                            <Icon className={`h-4.5 w-4.5 ${stat.color}`} />
+                          </div>
+                          <div className={`flex items-center gap-0.5 text-xs font-medium ${trendColor}`}>
+                            <TrendIcon className="h-3 w-3" />
+                            {stat.change}
+                          </div>
                         </div>
-                        <div className="flex-1">
-                          <p className={`text-xs ${item.isError ? "text-rose-400" : "text-foreground/80"}`}>
-                            {item.message}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">{item.time}</p>
-                        </div>
-                      </div>
+                        <p className="text-2xl font-bold text-foreground">{stat.value}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{stat.label}</p>
+                      </motion.div>
                     );
                   })}
                 </div>
-              </motion.div>
-            </div>
+              )}
 
-            {/* 4. Top Agents + Token Usage */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Left — Top Agents leaderboard */}
+              {/* 3. Live Pipelines + Activity Feed */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Left — Live Pipelines */}
+                <motion.div
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.3 }}
+                  className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-5"
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                      <Workflow className="h-4 w-4 text-primary" />
+                      {pipelines.length > 0 ? "Live Pipelines" : "Pipelines"}
+                    </div>
+                    <Badge variant="secondary" className="font-normal">
+                      {loading ? "..." : pipelines.filter(p => p.status === "running").length} Running
+                    </Badge>
+                  </div>
+                  {loading ? (
+                    <div className="space-y-3">
+                      {[...Array(2)].map((_, i) => (
+                        <div key={i} className="rounded-lg border border-border/30 bg-background/50 p-3 animate-pulse">
+                          <div className="h-4 w-24 bg-muted/50 mb-2" />
+                          <div className="h-1.5 w-full bg-muted/30 rounded mb-2" />
+                          <div className="h-3 w-32 bg-muted/30" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : pipelines.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <Workflow className="h-8 w-8 text-muted-foreground/20 mb-2" />
+                      <p className="text-sm text-muted-foreground">No active pipelines</p>
+                      <p className="text-xs text-muted-foreground/60 mt-0.5">Run a workflow to see live status here</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {pipelines.slice(0, 5).map((pipeline) => (
+                        <button
+                          key={pipeline.id}
+                          onClick={() => handleAppOpen("workflows")}
+                          className="w-full text-left rounded-lg border border-border/30 bg-background/50 p-3 hover:border-border/50 transition-colors"
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium text-foreground">{pipeline.name}</span>
+                            <Badge variant={pipeline.status === "running" ? "default" : "secondary"} className="text-[10px] uppercase tracking-wider">
+                              {pipeline.status === "running" ? "Running" : pipeline.status === "completed" ? "Done ✓" : pipeline.status}
+                            </Badge>
+                          </div>
+                          <Progress value={pipeline.status === "completed" ? 100 : pipeline.status === "running" ? 50 : 10} className="h-1.5 mb-2" />
+                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span>Step {pipeline.current_step}/{pipeline.total_steps}</span>
+                            <span>{pipeline.time}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </motion.div>
+
+                {/* Right — Recent Activity Feed */}
+                <motion.div
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.35 }}
+                  className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-5"
+                >
+                  <h2 className="text-sm font-semibold text-foreground mb-4">Recent Activity</h2>
+                  {loading ? (
+                    <div className="space-y-2">
+                      {[...Array(5)].map((_, i) => (
+                        <div key={i} className="flex items-start gap-3 rounded-md px-2 py-2 animate-pulse">
+                          <div className="h-4 w-4 bg-muted/50 rounded mt-0.5" />
+                          <div className="flex-1">
+                            <div className="h-3 w-48 bg-muted/30 mb-1" />
+                            <div className="h-2 w-16 bg-muted/20" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : activityFeed.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <Clock className="h-8 w-8 text-muted-foreground/20 mb-2" />
+                      <p className="text-sm text-muted-foreground">No activity recorded</p>
+                      <p className="text-xs text-muted-foreground/60 mt-0.5">Agent actions will appear here in real-time</p>
+                    </div>
+                  ) : (
+                    <div className="max-h-[240px] overflow-y-auto pr-1 space-y-1">
+                      {activityFeed.map((item, idx) => {
+                        const Icon = getActivityIcon(item.action_type);
+                        const iconColor = getActivityIconColor(item.action_type);
+                        const isError = item.action_type.includes("ERROR") || item.action_type.includes("FAIL");
+                        return (
+                          <div
+                            key={idx}
+                            className={`flex items-start gap-3 rounded-md px-2 py-2 text-sm transition-colors ${
+                              isError ? "bg-rose-500/5" : "hover:bg-muted/50"
+                            }`}
+                          >
+                            <div className={`mt-0.5 ${iconColor}`}>
+                              <Icon className="h-4 w-4" />
+                            </div>
+                            <div className="flex-1">
+                              <p className={`text-xs ${isError ? "text-rose-400" : "text-foreground/80"}`}>
+                                {item.message}
+                              </p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">{item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : "just now"}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </motion.div>
+              </div>
+
+              {/* 4. Top Agents + Token Usage */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Left — Top Agents leaderboard */}
+                <motion.div
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.4 }}
+                  className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-5"
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-sm font-semibold text-foreground">Top Agents</h2>
+                    <button
+                      onClick={() => handleAppOpen("agents")}
+                      className="text-[11px] text-primary hover:text-primary/80 flex items-center gap-0.5 transition-colors"
+                    >
+                      View All <ChevronRight className="h-3 w-3" />
+                    </button>
+                  </div>
+                  {loading ? (
+                    <div className="space-y-1">
+                      {[...Array(3)].map((_, i) => (
+                        <div key={i} className="flex items-center gap-3 px-2 py-2 animate-pulse">
+                          <div className="h-3 w-3 bg-muted/30" />
+                          <div className="h-4 w-4 bg-muted/30" />
+                          <div className="flex-1">
+                            <div className="h-4 w-24 bg-muted/30 mb-1" />
+                            <div className="h-2 w-16 bg-muted/20" />
+                          </div>
+                          <div className="h-4 w-8 bg-muted/30" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : topAgents.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <Users className="h-8 w-8 text-muted-foreground/20 mb-2" />
+                      <p className="text-sm text-muted-foreground">No agent runs recorded</p>
+                      <p className="text-xs text-muted-foreground/60 mt-0.5">Agent performance will rank here</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {topAgents.slice(0, 5).map((agent) => (
+                        <div key={agent.agent_id} className="flex items-center gap-3 px-2 py-2 rounded-md hover:bg-muted/30 transition-colors">
+                          <span className="text-xs w-4 text-right text-muted-foreground">{agent.rank}</span>
+                          <span className="text-base">{agent.emoji}</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-foreground">{agent.name}</p>
+                            <p className="text-[10px] text-muted-foreground">{agent.category}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs font-semibold text-foreground">{agent.runs}</p>
+                            <p className="text-[10px] text-muted-foreground">runs</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </motion.div>
+
+                {/* Right — Token Usage Chart */}
+                <motion.div
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.45 }}
+                  className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-5"
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h2 className="text-sm font-semibold text-foreground">Token Usage</h2>
+                      <p className="text-xs text-muted-foreground mt-0.5">Last 7 days</p>
+                    </div>
+                    {tokenUsage.length > 1 && (
+                      <Badge variant="outline" className={tokenUsage[tokenUsage.length - 1].tokens > tokenUsage[0].tokens ? "bg-emerald-400/10 text-emerald-400 border-emerald-400/20 font-medium" : "bg-muted/10 text-muted-foreground border-border/20 font-medium"}>
+                        <TrendingUp className="h-3 w-3 mr-1" />
+                        {tokenUsage[tokenUsage.length - 1].tokens > tokenUsage[0].tokens ? "+" : ""}{((tokenUsage[tokenUsage.length - 1].tokens - tokenUsage[0].tokens) / Math.max(tokenUsage[0].tokens, 0.001) * 100).toFixed(0)}%
+                      </Badge>
+                    )}
+                  </div>
+
+                  {loading ? (
+                    <div className="flex items-end gap-2 h-28 mb-3">
+                      {[...Array(7)].map((_, i) => (
+                        <div key={i} className="flex-1 flex flex-col justify-end h-full">
+                          <div className="w-full rounded-t-md bg-muted/30 animate-pulse" style={{ height: `${20 + Math.random() * 60}%` }} />
+                        </div>
+                      ))}
+                    </div>
+                  ) : tokenUsage.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-28 text-center">
+                      <Coins className="h-6 w-6 text-muted-foreground/20 mb-1" />
+                      <p className="text-xs text-muted-foreground">No token usage data</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-end gap-2 h-28 mb-3">
+                        {tokenUsage.map((item, i) => (
+                          <div key={item.day + i} className="flex-1 flex flex-col justify-end h-full relative group">
+                            <motion.div
+                              initial={{ height: 0 }}
+                              animate={{ height: `${Math.max((item.tokens / maxTokens) * 100, 2)}%` }}
+                              transition={{ delay: 0.5 + i * 0.05, duration: 0.5, ease: "easeOut" }}
+                              className="w-full rounded-t-md bg-primary/20 group-hover:bg-primary/40 transition-colors"
+                            />
+                            <div className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                              {item.tokens}K
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex items-center justify-between px-1 mb-4">
+                        {tokenUsage.map((item, i) => (
+                          <span key={item.day + i} className="text-[9px] text-muted-foreground flex-1 text-center">
+                            {item.day}
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  {tokenUsage.length > 0 && (
+                    <div className="flex items-center justify-between text-xs border-t border-border/30 pt-3">
+                      <span className="text-foreground font-medium">Total: {formatTokens(totalTokens)} tokens</span>
+                      <span className="text-muted-foreground">Avg: {formatTokens(avgTokens)}/day</span>
+                    </div>
+                  )}
+                </motion.div>
+              </div>
+
+              {/* 5. Recent Workflows table */}
               <motion.div
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.4 }}
-                className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-5"
+                transition={{ duration: 0.4, delay: 0.5 }}
+                className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm overflow-hidden"
               >
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-sm font-semibold text-foreground">Top Agents</h2>
-                  <button 
-                    onClick={() => handleAppOpen("agents")}
+                <div className="px-5 py-4 border-b border-border/30 flex items-center justify-between bg-card/50">
+                  <h2 className="text-sm font-semibold text-foreground">Recent Workflows</h2>
+                  <button
+                    onClick={() => handleAppOpen("workflows")}
                     className="text-[11px] text-primary hover:text-primary/80 flex items-center gap-0.5 transition-colors"
                   >
                     View All <ChevronRight className="h-3 w-3" />
                   </button>
                 </div>
-                <div className="space-y-1">
-                  {topAgents.map((agent) => (
-                    <div key={agent.name} className="flex items-center gap-3 px-2 py-2 rounded-md hover:bg-muted/30 transition-colors">
-                      <span className="text-xs w-4 text-right text-muted-foreground">{agent.rank}</span>
-                      <span className="text-base">{agent.emoji}</span>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-foreground">{agent.name}</p>
-                        <p className="text-[10px] text-muted-foreground">{agent.category}</p>
+                {loading ? (
+                  <div className="divide-y divide-border/20">
+                    {[...Array(3)].map((_, i) => (
+                      <div key={i} className="flex items-center justify-between px-5 py-3 animate-pulse">
+                        <div className="flex items-center gap-3">
+                          <div className="h-2 w-2 rounded-full bg-muted/30" />
+                          <div>
+                            <div className="h-4 w-32 bg-muted/30 mb-1" />
+                            <div className="h-3 w-20 bg-muted/20" />
+                          </div>
+                        </div>
+                        <div className="h-3 w-8 bg-muted/20" />
                       </div>
-                      <div className="text-right">
-                        <p className="text-xs font-semibold text-foreground">{agent.runs}</p>
-                        <p className="text-[10px] text-muted-foreground">runs</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-
-              {/* Right — Token Usage Chart */}
-              <motion.div
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.45 }}
-                className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-5"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h2 className="text-sm font-semibold text-foreground">Token Usage</h2>
-                    <p className="text-xs text-muted-foreground mt-0.5">Last 7 days</p>
+                    ))}
                   </div>
-                  <Badge variant="outline" className="bg-emerald-400/10 text-emerald-400 border-emerald-400/20 font-medium">
-                    <TrendingUp className="h-3 w-3 mr-1" />
-                    +18%
-                  </Badge>
-                </div>
-                
-                <div className="flex items-end gap-2 h-28 mb-3">
-                  {tokenUsage.map((item, i) => (
-                    <div key={item.day} className="flex-1 flex flex-col justify-end h-full relative group">
-                      <motion.div
-                        initial={{ height: 0 }}
-                        animate={{ height: `${(item.tokens / maxTokens) * 100}%` }}
-                        transition={{ delay: 0.5 + i * 0.05, duration: 0.5, ease: "easeOut" }}
-                        className="w-full rounded-t-md bg-primary/20 group-hover:bg-primary/40 transition-colors"
-                      />
-                      <div className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                        {item.tokens}K
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex items-center justify-between px-1 mb-4">
-                  {tokenUsage.map((item) => (
-                    <span key={item.day} className="text-[9px] text-muted-foreground flex-1 text-center">
-                      {item.day}
-                    </span>
-                  ))}
-                </div>
-                
-                <div className="flex items-center justify-between text-xs border-t border-border/30 pt-3">
-                  <span className="text-foreground font-medium">Total: 316.9K tokens</span>
-                  <span className="text-muted-foreground">Avg: 45.3K/day</span>
-                </div>
+                ) : workflows.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-center">
+                    <GitBranch className="h-8 w-8 text-muted-foreground/20 mb-2" />
+                    <p className="text-sm text-muted-foreground">No workflows configured</p>
+                    <p className="text-xs text-muted-foreground/60 mt-0.5">Create workflows in the Studio to see them here</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-border/20">
+                    {workflows.slice(0, 5).map((wf) => (
+                      <button
+                        key={wf.id || wf.name}
+                        onClick={() => handleAppOpen("workflows")}
+                        className="flex items-center justify-between px-5 py-3 hover:bg-muted/30 transition-colors w-full text-left"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`h-2 w-2 rounded-full ${wf.status === "active" ? "bg-emerald-400" : "bg-muted-foreground/40"}`} />
+                          <div>
+                            <p className="text-sm font-medium text-foreground">{wf.name}</p>
+                            <p className="text-xs text-muted-foreground">{wf.agents} agents · {wf.runs} runs</p>
+                          </div>
+                        </div>
+                        <span className="text-xs text-muted-foreground">{wf.lastRun} ago</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </motion.div>
-            </div>
-
-            {/* 5. Recent Workflows table */}
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.5 }}
-              className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm overflow-hidden"
-            >
-              <div className="px-5 py-4 border-b border-border/30 flex items-center justify-between bg-card/50">
-                <h2 className="text-sm font-semibold text-foreground">Recent Workflows</h2>
-                <button 
-                  onClick={() => handleAppOpen("workflows")}
-                  className="text-[11px] text-primary hover:text-primary/80 flex items-center gap-0.5 transition-colors"
-                >
-                  View All <ChevronRight className="h-3 w-3" />
-                </button>
-              </div>
-              <div className="divide-y divide-border/20">
-                {recentWorkflows.map((wf) => (
-                  <button
-                    key={wf.name}
-                    onClick={() => handleAppOpen("workflows")}
-                    className="flex items-center justify-between px-5 py-3 hover:bg-muted/30 transition-colors w-full text-left"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`h-2 w-2 rounded-full ${wf.status === "active" ? "bg-emerald-400" : "bg-muted-foreground/40"}`} />
-                      <div>
-                        <p className="text-sm font-medium text-foreground">{wf.name}</p>
-                        <p className="text-xs text-muted-foreground">{wf.agents} agents · {wf.runs} runs</p>
-                      </div>
-                    </div>
-                    <span className="text-xs text-muted-foreground">{wf.lastRun} ago</span>
-                  </button>
-                ))}
-              </div>
-            </motion.div>
             </>
           )}
 
           {activeSubTab === "inbox" && <InboxView />}
-          
+
           {(activeSubTab === "issues" || activeSubTab === "routines" || activeSubTab === "goals") && (
             <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-4">
               <div className="h-16 w-16 rounded-3xl bg-primary/10 flex items-center justify-center border border-primary/20">
@@ -439,11 +609,11 @@ const Index = () => {
 
 function NavButton({ icon: Icon, label, active, onClick }: { icon: any, label: string, active?: boolean, onClick?: () => void }) {
   return (
-    <button 
+    <button
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-bold transition-all group ${
-        active 
-          ? "bg-primary/10 text-primary shadow-sm" 
+        active
+          ? "bg-primary/10 text-primary shadow-sm"
           : "text-muted-foreground/60 hover:text-foreground hover:bg-white/5"
       }`}
     >
