@@ -1,23 +1,17 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Search, Plus, Bot, RefreshCw, Shield, Sparkles, Github, Globe, CheckCircle2, Loader2 } from "lucide-react";
+import { Search, Plus, Bot, RefreshCw, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MotionCard, StaggerContainer, StaggerItem } from "@/components/ui/motion-card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { useInspector } from "@/components/layout/InspectorPanel";
 import { toast } from "sonner";
-import { getAgents, syncRegistry, toggleAgentStatus, importExternalRepo, AgentSkill, AgentStats } from "@/lib/api";
+import { getAgents, syncRegistry, toggleAgentStatus, AgentSkill, AgentStats } from "@/lib/api";
 import { hireAgent } from "@/lib/org-data";
 import { Switch } from "@/components/ui/switch";
+import { NamespaceBadge } from "@/components/ui/namespace-badge";
 
 const categoryColors: Record<string, string> = {
   Engineering: "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -37,9 +31,6 @@ const Agents = () => {
   const [agents, setAgents] = useState<AgentSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [importUrl, setImportUrl] = useState("");
-  const [importing, setImporting] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
   const [hiringId, setHiringId] = useState<string | null>(null);
   const { open: openInspector } = useInspector();
 
@@ -76,19 +67,6 @@ const Agents = () => {
         setAgents(prev => prev.map(a => a.id === id ? { ...a, enabled: !current } : a));
         toast.success(`Agent ${!current ? 'Enabled' : 'Disabled'}`);
     } catch (err) { toast.error("Status update failed."); }
-  };
-
-  const handleImport = async () => {
-    if (!importUrl) return;
-    setImporting(true);
-    try {
-        const res = await importExternalRepo(importUrl);
-        toast.success(`Integrated ${res.repo}.`);
-        setImportOpen(false);
-        setImportUrl("");
-        loadAgents();
-    } catch (err) { toast.error("GitHub Integration failed."); }
-    finally { setImporting(false); }
   };
 
   const handleHireAgent = async (agent: AgentSkill) => {
@@ -154,24 +132,6 @@ const Agents = () => {
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={orgId ? "Search agents to hire..." : "Search specialists..."} className="pl-9 bg-secondary/30 border-border/20 text-sm h-9" />
           </div>
 
-          <Dialog open={importOpen} onOpenChange={setImportOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm" className="gap-2 h-9 px-4" variant="outline"><Github className="h-4 w-4" /> Import</Button>
-            </DialogTrigger>
-            <DialogContent className="glass sm:max-w-md border-primary/20">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2"><Globe className="h-5 w-5 text-primary" /> Ingest External Registry</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 pt-4">
-                <Input placeholder="https://github.com/user/agent-repo" value={importUrl} onChange={(e) => setImportUrl(e.target.value)} className="bg-secondary/50" />
-                <Button className="w-full gap-2" onClick={handleImport} disabled={importing || !importUrl}>
-                  {importing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  {importing ? 'Cloning...' : 'Integrate'}
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-
           {!orgId && (
             <Button size="sm" className="gap-2 h-9 px-4 shrink-0 shadow-lg shadow-primary/20"><Plus className="h-4 w-4" /> Deploy Custom</Button>
           )}
@@ -232,10 +192,13 @@ function AgentCard({ agent, orgMode, hiring, onHire, onInspect, onToggle }: {
           ) : (
             <Badge variant="outline" className="text-[8px] px-1 py-0 border-emerald-400/40 bg-emerald-400/5 text-emerald-400">✓ Click to Hire</Badge>
           )
-        ) : agent.is_native ? (
-          <Badge variant="outline" className="text-[8px] px-1 py-0 border-primary/40 bg-primary/5 text-primary">🛡️ Sovereign</Badge>
         ) : (
-          <Badge variant="outline" className="text-[8px] px-1 py-0 border-purple-500/40 bg-purple-500/5 text-purple-500">✨ Custom</Badge>
+          // 🆕 Show namespace badge instead of old Sovereign/Custom badges
+          <NamespaceBadge 
+            namespace={agent.namespace || (agent.is_native ? "native" : "custom")} 
+            packId={agent.pack_id}
+            size="sm"
+          />
         )}
       </div>
       <div className="flex flex-col gap-4">
@@ -265,18 +228,47 @@ function AgentCard({ agent, orgMode, hiring, onHire, onInspect, onToggle }: {
 
 /* ─── Extracted Inspector Content ─── */
 function AgentInspectorContent({ agent }: { agent: AgentSkill }) {
+  const [modelOverride, setModelOverride] = useState(agent.model_override || null);
+  
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
         <div className="h-16 w-16 rounded-2xl bg-secondary/50 flex items-center justify-center text-4xl shadow-inner">{agent.emoji}</div>
-        <div>
+        <div className="flex-1">
           <h4 className="text-xl font-bold text-foreground tracking-tight">{agent.name}</h4>
-          <div className="flex gap-2 mt-1">
+          <div className="flex flex-wrap gap-2 mt-2">
             <Badge variant="outline" className={`text-[10px] font-bold uppercase tracking-wider ${categoryColors[agent.category] || ""}`}>{agent.category}</Badge>
-            <Badge variant="secondary" className="text-[10px] opacity-70">ID: {agent.id}</Badge>
+            {/* 🆕 Namespace Badge */}
+            <NamespaceBadge 
+              namespace={agent.namespace || (agent.is_native ? "native" : "custom")} 
+              packId={agent.pack_id}
+              size="md"
+            />
+            <Badge variant="secondary" className="text-[9px] opacity-70">ID: {agent.id}</Badge>
           </div>
         </div>
       </div>
+      
+      {/* 🆕 Model Override Section */}
+      {modelOverride && (
+        <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-primary uppercase tracking-wider">Model Override</span>
+            <Badge variant="outline" className="text-[10px]">
+              {modelOverride.provider}/{modelOverride.model}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            This agent uses a custom model configuration instead of global settings.
+          </p>
+          {modelOverride.temperature !== undefined && (
+            <p className="text-xs text-muted-foreground">
+              Temperature: {modelOverride.temperature}
+            </p>
+          )}
+        </div>
+      )}
+      
       <div className="space-y-2">
         <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Specialist Mandate</p>
         <p className="text-sm text-foreground leading-relaxed bg-secondary/20 p-4 rounded-xl border border-border/30 italic">"{agent.description}"</p>

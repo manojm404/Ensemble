@@ -137,7 +137,7 @@ export function ChatView() {
     if (activeConversation) {
       fetchApi(`/api/chat/messages/${activeConversation}`)
         .then(data => {
-          if (data && Array.isArray(data)) {
+          if (data && Array.isArray(data) && data.length > 0) {
             const loadedMsgs = data.map((m: any) => ({
               id: m.id,
               role: m.role,
@@ -323,17 +323,6 @@ export function ChatView() {
         availableAgents={availableAgents}
         onSelect={(id) => {
           setActiveConversation(id);
-          const conv = conversations.find((c) => c.id === id);
-          if (conv) {
-            setMessages([
-              {
-                id: "welcome",
-                role: "assistant",
-                content: `Hello, I'm ${conv.agentName}. You can start chatting with me right away`,
-                timestamp: new Date(),
-              },
-            ]);
-          }
         }}
         onSearchOpen={() => setSearchOpen(true)}
         onNewChat={handleNewChat}

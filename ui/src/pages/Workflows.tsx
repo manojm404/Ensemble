@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Search, GitBranch, Clock, Bot, Trash2, RotateCcw, CheckCircle2, AlertCircle } from "lucide-react";
+import { Plus, Search, GitBranch, Clock, Bot, Trash2, RotateCcw, CheckCircle2, AlertCircle, FileText, Sparkles, Play, ExternalLink } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,9 +8,27 @@ import { useNavigate } from "react-router-dom";
 import { useTabContext } from "@/lib/tab-context";
 import { fetchApi, deleteWorkflow } from "@/lib/api";
 import { MotionCard, StaggerContainer, StaggerItem } from "@/components/ui/motion-card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { OutputViewer } from "@/components/workflow/OutputViewer";
 import { toast } from "sonner";
 
 const STORAGE_KEY = "ensemble_workflow_outputs";
+
+interface WorkflowOutput {
+  title: string;
+  task: string;
+  agentCount: number;
+  output: {
+    markdown?: string;
+    files?: Array<{ name: string; content: string }>;
+  };
+  completedAt: string;
+}
 
 interface Workflow {
   id: string;
@@ -21,6 +39,7 @@ interface Workflow {
   status: "draft" | "active" | "archived";
   graphJson?: string;
   runStatus: "success" | "failed" | "none";
+  lastOutput?: WorkflowOutput | null;
 }
 
 const statusColors: Record<string, string> = {
@@ -32,43 +51,48 @@ const statusColors: Record<string, string> = {
 const Workflows = () => {
   const [search, setSearch] = useState("");
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [viewingOutput, setViewingOutput] = useState<Workflow | null>(null);
   const navigate = useNavigate();
   const { updateCurrentTabUrl } = useTabContext();
 
   useEffect(() => {
-    fetchApi('/api/workflows')
-      .then(data => {
-        if (data && Array.isArray(data)) {
-          const loaded = data.map((w: any) => {
+    Promise.all([
+      fetchApi('/api/workflows'),
+      fetchApi('/api/workflow-runs/outputs').catch(() => ({ outputs: {}, total: 0 }))
+    ])
+      .then(([wfData, outputsData]) => {
+        if (wfData && Array.isArray(wfData)) {
+          const backendOutputs = outputsData?.outputs || {};
+          const hasAnyOutputs = Object.keys(backendOutputs).length > 0;
+          
+          // Also check localStorage
+          let lsOutputs: Record<string, any> = {};
+          try {
+            const lsRaw = localStorage.getItem(STORAGE_KEY);
+            if (lsRaw) {
+              lsOutputs = JSON.parse(lsRaw);
+            }
+          } catch { /* ignore */ }
+          
+          const allOutputs = { ...backendOutputs, ...lsOutputs };
+          
+          const loaded = wfData.map((w: any) => {
             let lastEditedStr = 'Unknown';
             if (w.updated_at) {
               const d = new Date(w.updated_at);
               lastEditedStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             }
 
-            // Count actual nodes from graph_json
             let agentCount = 0;
             try {
               const graph = typeof w.graph_json === 'string' ? JSON.parse(w.graph_json) : w.graph_json;
               agentCount = Array.isArray(graph?.nodes) ? graph.nodes.length : 0;
-            } catch {
-              agentCount = 0;
-            }
+            } catch { agentCount = 0; }
 
-            // Check localStorage for run status
-            let runStatus: "success" | "failed" | "none" = "none";
-            try {
-              const raw = localStorage.getItem(STORAGE_KEY);
-              if (raw) {
-                const outputs = JSON.parse(raw);
-                if (outputs[w.id]?.output?.markdown) {
-                  runStatus = "success";
-                }
-              }
-            } catch {
-              // ignore
-            }
-
+            // Check for localStorage output for this specific workflow
+            const lsOutput = lsOutputs[w.id];
+            const hasLocalStorageOutput = !!lsOutput?.output?.markdown;
+            
             return {
               id: w.id,
               name: w.name,
@@ -77,7 +101,9 @@ const Workflows = () => {
               lastEdited: lastEditedStr,
               status: "active" as const,
               graphJson: w.graph_json,
-              runStatus,
+              runStatus: hasLocalStorageOutput ? "success" : "none",
+              lastOutput: hasLocalStorageOutput ? lsOutput : null,
+              hasOutputsAvailable: false // Don't show Output button unless localStorage has it
             };
           });
           setWorkflows(loaded);
@@ -104,12 +130,22 @@ const Workflows = () => {
 
   const handleRerun = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    // Update the tab URL so switching back returns to this workflow
     const wf = workflows.find(w => w.id === id);
     if (wf) updateCurrentTabUrl(`/workflows/${id}`, wf.name);
-    // Navigate to workflow and signal to auto-open execution panel
     sessionStorage.setItem(`rerun_${id}`, "true");
     navigate(`/workflows/${id}`);
+    toast.info("🔄 Opening workflow for rerun");
+  };
+
+  const handleViewOutput = (e: React.MouseEvent, wf: Workflow) => {
+    e.stopPropagation();
+    
+    // Only show output if we have one from localStorage
+    if (wf.lastOutput?.output?.markdown) {
+      setViewingOutput(wf);
+    } else {
+      toast.warning("No output found for this workflow. Run it to generate output.");
+    }
   };
 
   return (
@@ -139,46 +175,83 @@ const Workflows = () => {
             return (
               <StaggerItem key={wf.id}>
                 <MotionCard
-                  className={`p-5 group relative transition-all duration-300 hover:shadow-lg min-h-[180px] flex flex-col justify-between ${statusGlow}`}
+                  className={`p-5 group relative transition-all duration-300 hover:shadow-lg min-h-[200px] flex flex-col justify-between ${statusGlow}`}
                   onClick={() => {
-                    // Update the tab URL so switching back returns to this workflow
                     updateCurrentTabUrl(`/workflows/${wf.id}`, wf.name);
                     navigate(`/workflows/${wf.id}`);
                   }}
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2">
-                      <GitBranch className="h-4 w-4 text-primary" />
-                      <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors">{wf.name}</h3>
+                  {/* Header */}
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                        <GitBranch className="h-4 w-4 text-primary" />
+                      </div>
+                      <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors truncate">{wf.name}</h3>
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 shrink-0 ml-2">
                       <Badge variant="secondary" className={`text-[10px] ${statusColors[wf.status]}`}>{wf.status}</Badge>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground line-clamp-2 mb-3">{wf.description}</p>
+
+                  {/* Stats Row */}
+                  <div className="flex items-center gap-3 mb-3 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1"><Bot className="h-3 w-3" /> {wf.agentCount} agents</span>
+                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {wf.lastEdited}</span>
+                  </div>
+
+                  {/* Status & Action Buttons */}
+                  <div className="flex items-center justify-between pt-3 border-t border-border/30">
+                    {/* Status Indicator */}
+                    <div className="flex items-center gap-1">
+                      {wf.runStatus === "success" ? (
+                        <span className="flex items-center gap-1 text-emerald-400 text-xs">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          <span className="font-medium">Completed</span>
+                        </span>
+                      ) : wf.runStatus === "failed" ? (
+                        <span className="flex items-center gap-1 text-rose-400 text-xs">
+                          <AlertCircle className="h-3.5 w-3.5" />
+                          <span className="font-medium">Failed</span>
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-muted-foreground text-xs">
+                          <Clock className="h-3.5 w-3.5" />
+                          <span>Not run</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex items-center gap-1.5">
+                      {wf.runStatus === "success" && (
+                        <button
+                          onClick={(e) => handleViewOutput(e, wf)}
+                          className="h-8 px-3 flex items-center gap-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 text-xs font-medium transition-all hover:scale-105"
+                          title="View output"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          <span className="hidden sm:inline">Output</span>
+                        </button>
+                      )}
                       <button
                         onClick={(e) => handleRerun(e, wf.id)}
-                        className="h-6 w-6 flex items-center justify-center rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
-                        title="Re-run workflow"
+                        className="h-8 px-3 flex items-center gap-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-xs font-medium transition-all hover:scale-105 group/btn"
+                        title="Rerun workflow"
                       >
-                        <RotateCcw className="h-3 w-3" />
+                        <RotateCcw className="h-3.5 w-3.5 transition-transform group-hover/btn:-rotate-180 duration-500" />
+                        <span className="hidden sm:inline">Rerun</span>
                       </button>
                       <button
                         onClick={(e) => handleDelete(e, wf.id, wf.name)}
-                        className="h-6 w-6 flex items-center justify-center rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+                        className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
                         title="Delete workflow"
                       >
-                        <Trash2 className="h-3 w-3" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{wf.description}</p>
-                  <div className="flex items-center gap-4 mt-4 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1"><Bot className="h-3 w-3" /> {wf.agentCount} agents</span>
-                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {wf.lastEdited}</span>
-                    {wf.runStatus === "success" && (
-                      <span className="flex items-center gap-0.5 text-emerald-400"><CheckCircle2 className="h-3 w-3" /> Completed</span>
-                    )}
-                    {wf.runStatus === "failed" && (
-                      <span className="flex items-center gap-0.5 text-rose-400"><AlertCircle className="h-3 w-3" /> Failed</span>
-                    )}
                   </div>
                 </MotionCard>
               </StaggerItem>
@@ -186,6 +259,73 @@ const Workflows = () => {
           })}
         </StaggerContainer>
       </ScrollArea>
+
+      {/* 🆕 Output Viewing Dialog */}
+      <Dialog open={!!viewingOutput} onOpenChange={(open) => !open && setViewingOutput(null)}>
+        <DialogContent className="max-w-5xl max-h-[90vh] p-0 overflow-hidden border-primary/20">
+          <div className="bg-gradient-to-br from-primary/5 via-transparent to-transparent p-6 pb-4 border-b border-border/30">
+            <DialogHeader>
+              <div className="flex items-start justify-between">
+                <div className="space-y-1">
+                  <DialogTitle className="text-xl flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                      <FileText className="h-4 w-4 text-emerald-400" />
+                    </div>
+                    {viewingOutput?.name} — Output
+                  </DialogTitle>
+                  <p className="text-xs text-muted-foreground max-w-2xl line-clamp-2">
+                    {viewingOutput?.lastOutput?.task}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-xs gap-1.5">
+                    <Bot className="h-3 w-3" />
+                    {viewingOutput?.lastOutput?.agentCount || viewingOutput?.agentCount} agents
+                  </Badge>
+                  {viewingOutput?.lastOutput?.completedAt && (
+                    <Badge variant="outline" className="text-xs gap-1.5 text-muted-foreground">
+                      <Clock className="h-3 w-3" />
+                      {new Date(viewingOutput.lastOutput.completedAt).toLocaleString()}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </DialogHeader>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-auto p-6">
+            {viewingOutput?.lastOutput?.output?.markdown ? (
+              <OutputViewer output={viewingOutput.lastOutput.output} />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-64 gap-3 text-muted-foreground">
+                <FileText className="h-12 w-12 opacity-20" />
+                <p className="text-sm font-medium">Loading output...</p>
+                <p className="text-xs">Fetching from server</p>
+              </div>
+            )}
+          </div>
+
+          <div className="p-4 border-t border-border/30 bg-secondary/10 flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              💡 Output is read-only. To modify and rerun, close this dialog and click the workflow card.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => {
+                if (viewingOutput) {
+                  setViewingOutput(null);
+                  navigate(`/workflows/${viewingOutput.id}`);
+                }
+              }}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Open in Editor
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

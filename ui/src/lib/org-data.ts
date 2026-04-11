@@ -177,7 +177,7 @@ export function createDepartment(orgId: string, dept: Omit<Department, 'id' | 'a
   return newDept;
 }
 
-export function hireAgent(orgId: string, agent: Omit<Agent, 'id' | 'tasksCompleted' | 'status'>): Agent {
+export function hireAgent(orgId: string, agent: Omit<Agent, 'id' | 'orgId' | 'tasksCompleted' | 'status' | 'departmentName'>): Agent {
   const data = orgStore.get(orgId);
   if (!data) throw new Error(`Org ${orgId} not found`);
   
@@ -212,7 +212,7 @@ export function hireAgent(orgId: string, agent: Omit<Agent, 'id' | 'tasksComplet
   return newAgent;
 }
 
-export function createTask(orgId: string, task: Omit<OrgTask, 'id' | 'created' | 'status'>): OrgTask {
+export function createTask(orgId: string, task: Omit<OrgTask, 'id' | 'orgId' | 'created' | 'status' | 'departmentName' | 'agentName' | 'agentEmoji'>): OrgTask {
   const data = orgStore.get(orgId);
   if (!data) throw new Error(`Org ${orgId} not found`);
 

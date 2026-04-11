@@ -210,46 +210,7 @@ function WorkflowEditorInner() {
           const graph = JSON.parse(wf.graph_json);
           setNodes(graph.nodes || []);
           setEdges(graph.edges || []);
-
-          // Check if there's stored output from a previous run
-          try {
-            const raw = localStorage.getItem("ensemble_workflow_outputs");
-            if (raw) {
-              const parsed = JSON.parse(raw);
-              const stored = parsed[routeId];
-              if (stored?.output?.markdown) {
-                setStoredOutput(stored);
-                if (stored.task) setInitialTask(stored.task);
-                setExecutionPanelOpen(true);
-              }
-            }
-          } catch {
-            // Ignore localStorage errors
-          }
-
-          // Check if there's a running or completed workflow stored under this specific ID
-          if (routeId && routeId !== "new") {
-            try {
-              const runRaw = localStorage.getItem(`workflow_run_${routeId}`);
-              if (runRaw) {
-                const runState = JSON.parse(runRaw);
-                if (runState.phase === "running" || runState.phase === "complete") {
-                  if (runState.task) setInitialTask(runState.task);
-                  if (runState.output) setStoredOutput(runState);
-                  setExecutionPanelOpen(true);
-                }
-              }
-            } catch {
-              // Ignore
-            }
-          }
-
-          // Check if user came from "Re-run" button on workflow list
-          const rerunFlag = sessionStorage.getItem(`rerun_${routeId}`);
-          if (rerunFlag) {
-            sessionStorage.removeItem(`rerun_${routeId}`);
-            setExecutionPanelOpen(true);
-          }
+          restoreStoredOutput(routeId);
         }
       } catch (e) {
         console.error("Failed to load workflow data:", e);
@@ -257,6 +218,47 @@ function WorkflowEditorInner() {
     };
     init();
   }, [routeId, setNodes, setEdges]);
+
+  // Re-check localStorage when window regains focus (e.g., after switching tabs/models)
+  useEffect(() => {
+    const onFocus = () => {
+      if (routeId && routeId !== "new") {
+        restoreStoredOutput(routeId);
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [routeId]);
+
+  const restoreStoredOutput = useCallback((id: string) => {
+    // Check ensemble_workflow_outputs (completed runs)
+    try {
+      const raw = localStorage.getItem("ensemble_workflow_outputs");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const stored = parsed[id];
+        if (stored?.output?.markdown) {
+          setStoredOutput(stored);
+          if (stored.task) setInitialTask(stored.task);
+          setExecutionPanelOpen(true);
+          return;
+        }
+      }
+    } catch { /* ignore */ }
+
+    // Check workflow_run_* (running/complete state)
+    try {
+      const runRaw = localStorage.getItem(`workflow_run_${id}`);
+      if (runRaw) {
+        const runState = JSON.parse(runRaw);
+        if (runState.phase === "running" || runState.phase === "complete") {
+          if (runState.task) setInitialTask(runState.task);
+          if (runState.output) setStoredOutput(runState);
+          setExecutionPanelOpen(true);
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
 
   const handleSave = async () => {
     try {

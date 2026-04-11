@@ -130,7 +130,6 @@ export default function OrgDepartmentDetail() {
         name: registryAgent.name,
         role: registryAgent.name,
         departmentId: deptId,
-        departmentName: dept.name,
         model: "gemini-2.5-flash",
         emoji: registryAgent.emoji || "🤖",
         skills: [registryAgent.category],
@@ -162,7 +161,6 @@ export default function OrgDepartmentDetail() {
       createTask(id, {
         title: taskTitle,
         description: taskDesc || "No description",
-        status: "queued",
         priority: taskPriority,
         agentId: selectedAgentId,
         departmentId: deptId,

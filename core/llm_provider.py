@@ -139,10 +139,17 @@ class LLMProvider:
             "OLLAMA_MODEL" if self.provider == "ollama" else "GEMINI_MODEL",
             default_model
         )
-        self.base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        raw_base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        
+        # Ensure Ollama base_url includes /v1 for OpenAI-compatible API
+        if self.provider == "ollama" and raw_base_url:
+            if not raw_base_url.rstrip("/").endswith("/v1"):
+                raw_base_url = raw_base_url.rstrip("/") + "/v1"
+        
+        self.base_url = raw_base_url
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
 
-        print(f"🔄 [LLMProvider] Reinitialized: {self.provider} | Model: {self.model}", flush=True)
+        print(f"🔄 [LLMProvider] Reinitialized: {self.provider} | Model: {self.model} | URL: {self.base_url}", flush=True)
 
     # -------------------------------------------------------------------------
     # Public API
@@ -155,6 +162,67 @@ class LLMProvider:
             return await self._chat_openai_compatible(messages, agent_name=agent_name, **kwargs)
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
+    
+    async def chat_with_model(self, messages: List[Dict[str, str]], model_override: Dict[str, Any], 
+                              agent_name: str = "Ensemble specialist", **kwargs) -> Dict[str, Any]:
+        """
+        Chat with a specific model override (agent-level model configuration).
+        
+        Args:
+            messages: Conversation messages
+            model_override: Dict with 'provider', 'model', 'temperature', 'base_url' (optional)
+            agent_name: Agent name for logging
+            **kwargs: Additional parameters
+        
+        Returns:
+            Chat response dict
+        """
+        # Save current config
+        original_provider = self.provider
+        original_model = self.model
+        original_base_url = self.base_url
+        original_api_key = self.api_key
+        
+        try:
+            # Apply override
+            override_provider = model_override.get('provider', self.provider)
+            override_model = model_override.get('model', self.model)
+            override_base_url = model_override.get('base_url')
+            override_api_key = model_override.get('api_key')
+            
+            # Reconfigure for this call
+            self.provider = override_provider
+            self.model = override_model
+            if override_base_url:
+                self.base_url = override_base_url
+            if override_api_key:
+                self.api_key = override_api_key
+            
+            print(f"🎯 [LLMProvider] Using model override: {override_provider}/{override_model}", flush=True)
+            
+            # Make the chat call with overridden config
+            if self.provider == "gemini":
+                return await self._chat_gemini(messages, agent_name=agent_name, **kwargs)
+            elif self.provider in ["ollama", "openai", "local"]:
+                return await self._chat_openai_compatible(messages, agent_name=agent_name, **kwargs)
+            else:
+                # Fallback to original provider
+                self.provider = original_provider
+                self.model = original_model
+                self.base_url = original_base_url
+                self.api_key = original_api_key
+                
+                if self.provider == "gemini":
+                    return await self._chat_gemini(messages, agent_name=agent_name, **kwargs)
+                else:
+                    return await self._chat_openai_compatible(messages, agent_name=agent_name, **kwargs)
+        
+        finally:
+            # Always restore original config
+            self.provider = original_provider
+            self.model = original_model
+            self.base_url = original_base_url
+            self.api_key = original_api_key
 
     async def chat_stream(self, messages: List[Dict[str, str]], agent_name: str = "Ensemble specialist", **kwargs):
         """Streaming chat completion. Yields text chunks."""

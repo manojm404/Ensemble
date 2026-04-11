@@ -1893,25 +1893,29 @@ async def list_marketplace_packs():
     return data
 
 @app.post("/api/marketplace/install")
-async def install_pack(req: Dict[str, str]):
-    """Download and extract an agent pack to data/agents/custom/."""
+async def install_pack(req: Dict[str, Any]):
+    """Download and extract an agent pack with conflict detection."""
     pack_id = req.get("pack_id")
     download_url = req.get("download_url")
-    
+    conflict_action = req.get("conflict_action", "prompt")  # prompt, skip, replace, merge
+
     if not pack_id or not download_url:
         raise HTTPException(status_code=400, detail="Missing pack_id or download_url")
 
     pack_dir = os.path.join("data/agents/custom", pack_id)
-    os.makedirs(pack_dir, exist_ok=True)
     
-    # 1. Get ZIP content (Handle local loopback or real URL)
+    # 🆕 Step 0: Extract to temp dir first for conflict checking
+    import zipfile
+    import io
+    import requests
+    from pathlib import Path
+    
+    temp_dir = f"data/agents/temp/{pack_id}"
+    os.makedirs(temp_dir, exist_ok=True)
+
     try:
-        import zipfile
-        import io
-        import requests
-        
-        print(f"📦 [Marketplace] Installing {pack_id} from {download_url}...")
-        
+        print(f"📦 [Marketplace] Preparing to install {pack_id} from {download_url}...")
+
         content = None
         # DEADLOCK PROTECTION: If it's a local static URL, read from disk directly
         if "127.0.0.1:8089/static/marketplace/zips/" in download_url:
@@ -1923,37 +1927,142 @@ async def install_pack(req: Dict[str, str]):
                     content = f.read()
             else:
                 raise FileNotFoundError(f"Local pack ZIP missing at {local_path}")
-        
+
         if content is None:
             # Fallback to real HTTP request for external URLs
-            # Using timeout to avoid hanging the app
             response = requests.get(download_url, timeout=10)
             response.raise_for_status()
             content = response.content
-        
-        # 2. Extract
+
+        # 🆕 Step 1: Extract to temp directory
         with zipfile.ZipFile(io.BytesIO(content)) as z:
-            z.extractall(pack_dir)
+            z.extractall(temp_dir)
+
+        # 🆕 Step 2: Scan for conflicts
+        new_agents = []
+        for root, dirs, files in os.walk(temp_dir):
+            for f in files:
+                if f.endswith(".md"):
+                    filepath = os.path.join(root, f)
+                    # Parse minimal metadata
+                    with open(filepath, 'r', encoding='utf-8') as mf:
+                        content = mf.read()
+                        meta = {}
+                        if content.startswith("---"):
+                            parts = content.split("---", 2)
+                            if len(parts) >= 3:
+                                try:
+                                    meta = yaml.safe_load(parts[1]) or {}
+                                except:
+                                    pass
+                    
+                    new_agents.append({
+                        "filepath": filepath,
+                        "name": meta.get("name", Path(f).stem),
+                        "description": meta.get("description", ""),
+                        "tags": meta.get("tags", []),
+                        "force_replace": conflict_action == "replace"
+                    })
+        
+        conflicts = skill_registry.detect_conflicts(new_agents)
+        
+        # 🆕 Step 3: If conflicts exist and action is 'prompt', return conflict info
+        if conflicts["has_conflicts"] and conflict_action == "prompt":
+            # Clean up temp
+            shutil.rmtree(temp_dir, ignore_errors=True)
             
-        # 3. Store Pack Metadata
+            return {
+                "status": "conflict",
+                "pack_id": pack_id,
+                "conflicts": {
+                    "exact_matches": [
+                        {
+                            "file": m["file"],
+                            "existing_agents": [
+                                {"id": e["id"], "name": e["name"], "namespace": e.get("namespace", e["source"])}
+                                for e in m["existing_agents"]
+                            ]
+                        }
+                        for m in conflicts["exact_matches"]
+                    ],
+                    "similar_agents": [
+                        {
+                            "new_name": s["new_agent"]["name"],
+                            "existing_id": s["existing_agent"]["id"],
+                            "existing_name": s["existing_agent"]["name"],
+                            "similarity": s["similarity"],
+                            "recommendation": s["recommendation"]
+                        }
+                        for s in conflicts["similar_agents"]
+                    ]
+                },
+                "resolution_options": ["skip", "replace", "merge", "cancel"]
+            }
+
+        # 🆕 Step 4: Apply conflict resolution
+        if conflicts["has_conflicts"]:
+            if conflict_action == "skip":
+                # Remove conflicting files from temp
+                for match in conflicts["exact_matches"]:
+                    conflict_file = match["file"]
+                    conflict_path = os.path.join(temp_dir, conflict_file)
+                    if os.path.exists(conflict_path):
+                        os.remove(conflict_path)
+                        print(f"⊘ [Marketplace] Skipping conflicting file: {conflict_file}")
+            
+            elif conflict_action == "replace":
+                # Archive existing agents
+                for match in conflicts["exact_matches"]:
+                    for existing in match["existing_agents"]:
+                        existing_path = existing.get("filepath")
+                        if existing_path and os.path.exists(existing_path):
+                            archive_dir = f"data/agents/archive/{pack_id}/pre_replace"
+                            os.makedirs(archive_dir, exist_ok=True)
+                            shutil.copy2(existing_path, archive_dir)
+                            os.remove(existing_path)
+                            print(f"🔄 [Marketplace] Replacing existing agent: {existing['id']}")
+
+        # 🆕 Step 5: Move from temp to final location
+        if os.path.exists(pack_dir):
+            shutil.rmtree(pack_dir)
+        shutil.move(temp_dir, pack_dir)
+
+        # 6. Store Pack Metadata (enhanced)
         meta = {
             "pack_id": pack_id,
             "installed_at": str(datetime.now()),
             "version": req.get("version", "1.0.0"),
-            "url": download_url
+            "url": download_url,
+            "source": req.get("source", "local"),  # 🆕 Track source (local, github, etc.)
+            "repo": req.get("repo"),  # 🆕 GitHub repo if applicable
+            "conflict_action": conflict_action,  # 🆕 Record resolution strategy
+            "agent_count": len([f for f in os.listdir(pack_dir) if f.endswith(".md")])
         }
         with open(os.path.join(pack_dir, ".pack_meta.json"), "w") as f:
             json.dump(meta, f, indent=2)
-            
-        # 4. Sync Registry
+
+        # 7. Sync Registry
         skill_registry.sync_all()
+
+        # 🆕 Build summary
+        installed_count = meta["agent_count"]
+        skipped_count = len(conflicts["exact_matches"]) if conflict_action == "skip" else 0
         
-        return {"status": "success", "pack_id": pack_id, "message": f"Pack '{pack_id}' installed successfully."}
-        
+        return {
+            "status": "success",
+            "pack_id": pack_id,
+            "message": f"Pack '{pack_id}' installed successfully ({installed_count} agents).",
+            "installed_count": installed_count,
+            "skipped_count": skipped_count,
+            "similar_agents_found": len(conflicts["similar_agents"])
+        }
+
     except Exception as e:
         # Cleanup on failure
         if os.path.exists(pack_dir):
             shutil.rmtree(pack_dir)
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
         raise HTTPException(status_code=500, detail=f"Installation failed: {str(e)}")
 
 @app.post("/api/marketplace/uninstall")
@@ -1962,14 +2071,49 @@ async def uninstall_pack(req: Dict[str, str]):
     pack_id = req.get("pack_id")
     if not pack_id:
         raise HTTPException(status_code=400, detail="Missing pack_id")
-    
+
     pack_dir = os.path.join("data/agents/custom", pack_id)
     if os.path.exists(pack_dir):
+        # 🆕 Archive before uninstall for safety
+        archive_dir = f"data/agents/archive/{pack_id}/uninstalled"
+        os.makedirs(archive_dir, exist_ok=True)
+        
+        # Copy pack to archive
+        for item in os.listdir(pack_dir):
+            if item == ".pack_meta.json":
+                continue
+            shutil.copy2(os.path.join(pack_dir, item), archive_dir)
+        
         shutil.rmtree(pack_dir)
         skill_registry.sync_all()
-        return {"status": "success", "message": f"Pack '{pack_id}' removed."}
+        return {"status": "success", "message": f"Pack '{pack_id}' removed and archived.", "archive_path": archive_dir}
     else:
-        raise HTTPException(status_code=404, detail="Pack not found localy.")
+        raise HTTPException(status_code=404, detail="Pack not found locally.")
+
+@app.get("/api/marketplace/packs/{pack_id}/agents")
+async def get_pack_agents(pack_id: str):
+    """Get all agents in a specific pack."""
+    agents = skill_registry.get_pack_agents(pack_id)
+    if not agents:
+        # Check if pack is installed at all
+        pack_dir = os.path.join("data/agents/custom", pack_id)
+        if not os.path.exists(pack_dir):
+            raise HTTPException(status_code=404, detail="Pack not installed")
+    
+    return {
+        "pack_id": pack_id,
+        "agent_count": len(agents),
+        "agents": agents
+    }
+
+@app.get("/api/agents/namespace-stats")
+async def get_namespace_stats():
+    """Get statistics about agents per namespace."""
+    stats = skill_registry.get_namespace_stats()
+    return {
+        "stats": stats,
+        "total_agents": sum(stats.values())
+    }
 
 @app.delete("/api/registry/agents/{agent_id}")
 async def delete_agent(agent_id: str):
@@ -2148,6 +2292,332 @@ async def export_to_zip(req: Dict[str, Any]):
         filename=download_name,
         media_type='application/zip'
     )
+
+# --- 🌐 Phase 2: Remote Marketplace Integration ---
+
+from core.marketplace_sync import marketplace_sync, MarketplaceSource
+from core.github_pack_builder import GitHubPackBuilder
+from core.auto_update_service import auto_update_service
+
+@app.get("/api/marketplace/remote/packs")
+async def list_remote_packs(source_id: Optional[str] = None):
+    """Fetch packs from remote marketplace sources."""
+    try:
+        if source_id:
+            # Fetch from specific source
+            source = next((s for s in marketplace_sync.sources if s.id == source_id), None)
+            if not source:
+                raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
+            packs = source.fetch_available_packs()
+        else:
+            # Fetch from all sources
+            packs = marketplace_sync.fetch_all_packs()
+        
+        return {
+            "packs": packs,
+            "total": len(packs),
+            "sources": [s.name for s in marketplace_sync.sources if s.enabled]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch remote packs: {str(e)}")
+
+@app.get("/api/marketplace/remote/packs/{pack_id}/updates")
+async def check_pack_updates(pack_id: str):
+    """Check for updates to a specific pack."""
+    # Get local version
+    pack_dir = f"data/agents/custom/{pack_id}"
+    meta_path = f"{pack_dir}/.pack_meta.json"
+    
+    if not os.path.exists(meta_path):
+        raise HTTPException(status_code=404, detail="Pack not installed")
+    
+    with open(meta_path) as f:
+        local_meta = json.load(f)
+    
+    # Check remote sources
+    updates = []
+    for source in marketplace_sync.sources:
+        if not source.enabled:
+            continue
+        
+        try:
+            update_info = source.check_for_updates(pack_id, local_meta.get('version', '1.0.0'))
+            if update_info.get('has_update'):
+                updates.append({
+                    'source': source.name,
+                    **update_info
+                })
+        except Exception as e:
+            print(f"⚠️ [Marketplace] Failed to check updates from {source.name}: {e}")
+    
+    return {
+        "pack_id": pack_id,
+        "local_version": local_meta.get('version', '1.0.0'),
+        "updates_available": len(updates) > 0,
+        "updates": updates
+    }
+
+@app.post("/api/marketplace/remote/sync")
+async def sync_remote_packs(req: Dict[str, Any] = {}):
+    """Manually trigger remote pack synchronization."""
+    try:
+        # Fetch all remote packs
+        remote_packs = marketplace_sync.fetch_all_packs()
+        
+        # Merge with local manifest
+        local_manifest = {"packs": []}
+        if os.path.exists(MARKETPLACE_MANIFEST):
+            with open(MARKETPLACE_MANIFEST, "r") as f:
+                local_manifest = json.load(f)
+        
+        # Add remote packs (avoid duplicates)
+        local_ids = {p['id'] for p in local_manifest.get('packs', [])}
+        new_packs = [p for p in remote_packs if p['id'] not in local_ids]
+        local_manifest['packs'].extend(new_packs)
+        
+        # Save updated manifest
+        os.makedirs(os.path.dirname(MARKETPLACE_MANIFEST), exist_ok=True)
+        with open(MARKETPLACE_MANIFEST, "w") as f:
+            json.dump(local_manifest, f, indent=2)
+        
+        return {
+            "status": "success",
+            "synced_packs": len(new_packs),
+            "total_packs": len(local_manifest['packs']),
+            "new_packs": [p['name'] for p in new_packs]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+
+@app.get("/api/marketplace/download/{source_id}/{plugin_name}")
+async def download_pack_from_github(source_id: str, plugin_name: str):
+    """Download a pack ZIP directly from GitHub."""
+    from fastapi.responses import StreamingResponse
+    
+    # Find source
+    source = next((s for s in marketplace_sync.sources if s.id == source_id), None)
+    if not source:
+        raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
+    
+    # Download pack
+    zip_data = source.download_pack_zip(plugin_name)
+    if not zip_data:
+        raise HTTPException(status_code=404, detail=f"Pack not found: {plugin_name}")
+    
+    # Return as file download
+    return StreamingResponse(
+        io.BytesIO(zip_data),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={plugin_name}.zip"}
+    )
+
+@app.get("/api/marketplace/sources")
+async def list_marketplace_sources():
+    """List all configured marketplace sources."""
+    return {
+        "sources": marketplace_sync.get_source_status()
+    }
+
+@app.post("/api/marketplace/sources")
+async def add_marketplace_source(req: Dict[str, Any]):
+    """Add a new marketplace source."""
+    try:
+        marketplace_sync.add_source(req)
+        return {
+            "status": "success",
+            "message": f"Source added: {req.get('name', req.get('id'))}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to add source: {str(e)}")
+
+@app.delete("/api/marketplace/sources/{source_id}")
+async def remove_marketplace_source(source_id: str):
+    """Remove a marketplace source."""
+    try:
+        marketplace_sync.remove_source(source_id)
+        return {
+            "status": "success",
+            "message": f"Source removed: {source_id}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to remove source: {str(e)}")
+
+@app.post("/api/marketplace/auto-update/check")
+async def check_auto_updates():
+    """Manually trigger update check."""
+    try:
+        updates = auto_update_service.check_now()
+        return {
+            "updates_available": len(updates),
+            "updates": updates
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Update check failed: {str(e)}")
+
+@app.get("/api/marketplace/auto-update/status")
+async def get_auto_update_status():
+    """Get auto-update service status."""
+    return auto_update_service.get_status()
+
+@app.post("/api/marketplace/github/plugins")
+async def list_github_plugins(req: Dict[str, str] = {}):
+    """List all plugins from a GitHub repository."""
+    repo = req.get('repo', 'wshobson/agents')
+    branch = req.get('branch', 'main')
+    
+    try:
+        builder = GitHubPackBuilder(repo, branch)
+        plugins = builder.list_all_plugins()
+        
+        return {
+            "repo": repo,
+            "branch": branch,
+            "plugins": plugins,
+            "total": len(plugins)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list plugins: {str(e)}")
+
+@app.get("/api/marketplace/github/plugins/{plugin_name}/info")
+async def get_plugin_info(plugin_name: str, repo: str = "wshobson/agents"):
+    """Get information about a specific plugin."""
+    try:
+        builder = GitHubPackBuilder(repo)
+        info = builder.get_plugin_info(plugin_name)
+        
+        if not info:
+            raise HTTPException(status_code=404, detail=f"Plugin not found: {plugin_name}")
+        
+        return info
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get plugin info: {str(e)}")
+
+@app.get("/api/workflow-runs/outputs")
+async def get_workflow_outputs():
+    """
+    Fetch all previous workflow run outputs from audit log.
+    Returns outputs keyed by workflow ID for the Workflows page.
+    """
+    try:
+        import re
+        
+        with sqlite3.connect(audit_logger.db_path) as conn:
+            # Get all RESULT events with their run context
+            cursor = conn.execute("""
+                SELECT agent_id, action_type, details_json, timestamp, cas_hash
+                FROM events
+                WHERE action_type IN ('RESULT', 'DELIVERABLE_EXPORTED')
+                ORDER BY timestamp DESC
+            """)
+            
+            # Group by workflow run to find completed workflows
+            workflow_outputs = {}
+            
+            for row in cursor.fetchall():
+                agent_id, action_type, details_json, timestamp, cas_hash = row
+                
+                try:
+                    details = json.loads(details_json) if details_json else {}
+                except:
+                    details = {}
+                
+                # Extract result content
+                result_content = details.get('result', '')
+                
+                # Try to extract workflow context from agent_id or details
+                # Agent IDs look like: core_.._.._.._skills_xxx_step1_timestamp
+                # or workflow step IDs
+                if action_type == 'RESULT' and result_content:
+                    # Store the latest result per potential workflow key
+                    # Use agent_id as a key for now
+                    if agent_id not in workflow_outputs:
+                        # Clean up markdown code blocks
+                        markdown = result_content
+                        # Remove leading/trailing code fences if present
+                        if markdown.startswith('```'):
+                            lines = markdown.split('\n')
+                            # Remove first line if it's a code fence
+                            if lines[0].startswith('```'):
+                                lines = lines[1:]
+                            # Remove last line if it's a code fence  
+                            if lines and lines[-1].strip().startswith('```'):
+                                lines = lines[:-1]
+                            markdown = '\n'.join(lines)
+                        
+                        workflow_outputs[agent_id] = {
+                            'agent_id': agent_id,
+                            'output': {'markdown': markdown},
+                            'completedAt': timestamp,
+                            'task': details.get('task', details.get('instruction', 'Workflow execution'))[:200],
+                            'agentCount': 1
+                        }
+            
+            # Now try to map agent outputs to workflows by checking graph_json
+            # This is a best-effort mapping since the audit log doesn't store workflow IDs directly
+            
+            return {
+                'outputs': workflow_outputs,
+                'total': len(workflow_outputs)
+            }
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {'outputs': {}, 'total': 0, 'error': str(e)}
+
+@app.get("/api/workflows/{workflow_id}/output")
+async def get_workflow_output(workflow_id: str):
+    """
+    Fetch the latest output for a specific workflow.
+    Tries to match workflow runs to stored outputs.
+    """
+    try:
+        with sqlite3.connect(audit_logger.db_path) as conn:
+            # Get the most recent RESULT for this workflow
+            # Try matching by workflow_id in various ways
+            cursor = conn.execute("""
+                SELECT agent_id, details_json, timestamp
+                FROM events
+                WHERE action_type = 'RESULT'
+                ORDER BY timestamp DESC
+                LIMIT 10
+            """)
+            
+            results = []
+            for row in cursor.fetchall():
+                agent_id, details_json, timestamp = row
+                try:
+                    details = json.loads(details_json) if details_json else {}
+                except:
+                    details = {}
+                
+                result = details.get('result', '')
+                if result:
+                    # Clean markdown
+                    markdown = result
+                    if markdown.startswith('```'):
+                        lines = markdown.split('\n')
+                        if lines[0].startswith('```'):
+                            lines = lines[1:]
+                        if lines and lines[-1].strip().startswith('```'):
+                            lines = lines[:-1]
+                        markdown = '\n'.join(lines)
+                    
+                    results.append({
+                        'agent_id': agent_id,
+                        'output': {'markdown': markdown},
+                        'completedAt': timestamp,
+                        'task': details.get('task', details.get('instruction', ''))[:200]
+                    })
+            
+            return {
+                'workflow_id': workflow_id,
+                'outputs': results,
+                'latest': results[0] if results else None
+            }
+    
+    except Exception as e:
+        return {'workflow_id': workflow_id, 'outputs': [], 'latest': None, 'error': str(e)}
 
 @app.get("/api/agents/stats")
 async def get_agent_stats():

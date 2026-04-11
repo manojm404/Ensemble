@@ -53,19 +53,43 @@ def read_artifact(path: str = None, file_id: str = None) -> str:
 def search_web(query: str) -> str:
     """Search the web for real-time information using DuckDuckGo."""
     try:
-        from duckduckgo_search import DDGS
+        # Use the new ddgs package (formerly duckduckgo_search)
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS
+        
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=5))
 
         if not results:
-            return f"No results found for '{query}'."
+            return f"""🔍 Search Results for: "{query}"
 
-        output = []
-        for r in results:
-            output.append(f"Title: {r.get('title')}\nURL: {r.get('href')}\nSnippet: {r.get('body')}")
-        return "\n\n".join(output)
+No results found. Try:
+- Using different keywords
+- Making the query more specific
+- Checking spelling"""
+
+        output = [f"🔍 Search Results for: \"{query}\"\n"]
+        for i, r in enumerate(results, 1):
+            title = r.get('title', 'No title')
+            url = r.get('href', 'No URL')
+            snippet = r.get('body', 'No description')
+            output.append(f"{i}. **{title}**")
+            output.append(f"   URL: {url}")
+            output.append(f"   {snippet}\n")
+        
+        return "\n".join(output)
+    
     except Exception as e:
-        return f"Error during web search: {str(e)}"
+        return f"""⚠️ Web search encountered an error: {str(e)}
+
+This may be due to:
+- Network connectivity issues
+- DuckDuckGo rate limiting
+- Package not installed
+
+Try again or search manually at: https://duckduckgo.com/?q={query.replace(' ', '+')}"""
 
 def write_artifact(path: str, content: str, is_binary: bool = False) -> str:
     """Saves content to a file in the project workspace."""

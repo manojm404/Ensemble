@@ -246,6 +246,51 @@ export interface MarketplacePack {
   author: string;
   download_url: string;
   agent_files: string[];
+  source?: string;  // NEW: Pack source (local, github, etc.)
+  repo?: string;    // NEW: GitHub repository
+}
+
+export interface ConflictInfo {
+  exact_matches: {
+    file: string;
+    existing_agents: {
+      id: string;
+      name: string;
+      namespace: string;
+    }[];
+  }[];
+  similar_agents: {
+    new_name: string;
+    existing_id: string;
+    existing_name: string;
+    similarity: number;
+    recommendation: string;
+  }[];
+}
+
+export interface InstallResult {
+  status: 'success' | 'conflict';
+  pack_id?: string;
+  message?: string;
+  installed_count?: number;
+  skipped_count?: number;
+  similar_agents_found?: number;
+  conflicts?: ConflictInfo;
+  resolution_options?: string[];
+}
+
+export interface AgentSkill {
+  id: string;
+  name: string;
+  description: string;
+  emoji: string;
+  category: string;
+  enabled: boolean;
+  is_native: boolean;
+  namespace?: string;  // NEW: Agent namespace
+  pack_id?: string;    // NEW: Pack membership
+  tags?: string[];     // NEW: Semantic tags
+  version?: string;    // NEW: Agent version
 }
 
 export interface AgentStats {
@@ -260,10 +305,10 @@ export async function getMarketplacePacks(): Promise<MarketplacePack[]> {
   return res.packs || [];
 }
 
-export async function installPack(pack_id: string, download_url: string, version: string): Promise<any> {
+export async function installPack(pack_id: string, download_url: string, version: string, conflict_action?: string): Promise<InstallResult> {
   return await fetchApi('/api/marketplace/install', {
     method: 'POST',
-    body: JSON.stringify({ pack_id, download_url, version })
+    body: JSON.stringify({ pack_id, download_url, version, conflict_action: conflict_action || 'prompt' })
   });
 }
 
@@ -439,4 +484,28 @@ export async function getPipelineStatus(): Promise<PipelineStatus[]> {
     console.warn("Pipeline status API not ready", e);
     return [];
   }
+}
+
+// 🆕 Namespace & Pack Agent Endpoints
+export interface NamespaceStats {
+  [namespace: string]: number;
+}
+
+export interface NamespaceStatsResponse {
+  stats: NamespaceStats;
+  total_agents: number;
+}
+
+export interface PackAgentsResponse {
+  pack_id: string;
+  agent_count: number;
+  agents: AgentSkill[];
+}
+
+export async function getNamespaceStats(): Promise<NamespaceStatsResponse> {
+  return await fetchApi('/api/agents/namespace-stats');
+}
+
+export async function getPackAgents(pack_id: string): Promise<PackAgentsResponse> {
+  return await fetchApi(`/api/marketplace/packs/${pack_id}/agents`);
 }

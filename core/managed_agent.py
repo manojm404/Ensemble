@@ -157,7 +157,7 @@ class ManagedAgent(Agent):
 
         # 1. PRE-RUN: Token Grant & Cost Threshold Check
         estimated_cost = self._estimate_cost(user_input)
-        
+
         # Check budget
         if not self.gov.request_token_grant(self.agent_id, estimated_cost):
             self.audit.log(self.company_id, self.agent_id, "BUDGET_DENIED", {"estimated_cost": estimated_cost})
@@ -168,13 +168,17 @@ class ManagedAgent(Agent):
         messages = [{"role": "system", "content": self.system_prompt}]
         for m in self.memory.get_messages():
             messages.append({"role": m.role, "content": m.content})
-        
+
         user_header = f"--- SESSION STATE ---\nCOMPANY: {self.company_id}\nBUDGET: ${budget['spent']:.4f}\n\n"
         # Only add the user input to memory once
         if not any(m.role == "user" and user_input in m.content for m in self.memory.get_messages()):
             self.memory.add_message("user", user_input)
-        
+
         messages.append({"role": "user", "content": user_header + user_input})
+
+        # 🆕 Get model override for this agent
+        model_override = skill_registry.get_model_override(self.agent_id)
+        use_override = model_override is not None
 
         # --- EXECUTION LOOP (Multi-turn Tool Calling) ---
         max_tool_turns = 10
@@ -183,9 +187,16 @@ class ManagedAgent(Agent):
 
         while current_turn < max_tool_turns:
             current_turn += 1
-            
-            # Call LLM with functional tools
-            response_data = await self.llm.chat(messages, tools=self.tool_schemas)
+
+            # Call LLM with functional tools (use model override if available)
+            if use_override:
+                response_data = await self.llm.chat_with_model(
+                    messages, 
+                    model_override=model_override, 
+                    tools=self.tool_schemas
+                )
+            else:
+                response_data = await self.llm.chat(messages, tools=self.tool_schemas)
             
             # Track cost
             actual_cost = self._calculate_actual_cost(response_data.get("usage", {}))

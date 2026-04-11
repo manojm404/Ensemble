@@ -1,0 +1,34 @@
+{
+  "sources": [
+    {
+      "id": "agency-agents",
+      "name": "agency-agents (wshobson)",
+      "type": "github",
+      "repo": "wshobson/agents",
+      "branch": "main",
+      "plugins_path": "plugins/",
+      "manifest_path": ".claude-plugin/marketplace.json",
+      "polling_interval_seconds": 3600,
+      "auto_update": false,
+      "enabled": true,
+      "description": "Official agency-agents repository with 182 specialized agents across 77 plugins"
+    },
+    {
+      "id": "ensemble-official",
+      "name": "Ensemble Official Packs",
+      "type": "local",
+      "path": "data/marketplace/zips/",
+      "manifest_path": "data/marketplace/packs.json",
+      "enabled": true,
+      "description": "Curated official Ensemble marketplace packs"
+    }
+  ],
+  "settings": {
+    "max_concurrent_downloads": 3,
+    "download_timeout_seconds": 30,
+    "cache_ttl_seconds": 3600,
+    "max_pack_size_mb": 50,
+    "auto_backup_before_update": true,
+    "conflict_resolution_default": "prompt"
+  }
+}

@@ -123,7 +123,6 @@ export default function OrgDashboard() {
       const newTask = createTask(id, {
         title: quickTaskTitle,
         description: "Quick task from dashboard",
-        status: "queued",
         priority: quickTaskPriority,
         agentId: quickTaskAgent,
         departmentId: selectedDept?.id || "",
