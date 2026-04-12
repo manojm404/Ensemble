@@ -219,14 +219,59 @@ Each agent has:
 
 ---
 
+### 12. 🌍 Universal Agent Platform
+**What it does:** Import and run agents in ANY format natively (Markdown, Python, YAML, JSON, Text).
+
+#### Features:
+- **Universal Importer** — Paste ANY GitHub repository URL to automatically discover, analyze, and import agent packs.
+- **Multi-Format Support** — Native execution for:
+  - **Markdown (.md)**: Traditional prompt-based agents.
+  - **Python (.py)**: Complex agents with custom logic (MetaGPT/CrewAI style).
+  - **YAML/JSON**: Configuration-driven agents (LangChain/AutoGen style).
+  - **Plain Text**: Simple prompt files.
+- **Format Detection** — AST-based scanning automatically identifies agent classes and manifests in repositories.
+- **Native Runners** — High-performance execution engines that run agents in their original format without conversion.
+
+---
+
+### 13. 🛡️ Advanced Security Hardening
+**What it does:** Multi-layered defense-in-depth for running untrusted agent code.
+
+| Layer | Component | Protection |
+|---|---|---|
+| **Layer 1** | **Docker Sandboxing** | Ephemeral, hardened containers with no Docker socket access and read-only filesystems. |
+| **Layer 2** | **AST Guard** | Python code analyzer blocks dangerous built-ins (`eval`, `exec`, `__import__`) and modules (`os`, `subprocess`). |
+| **Layer 3** | **Network Policy** | Enforces domain whitelisting via iptables to prevent data exfiltration. |
+| **Layer 4** | **Recursion Guard** | Prevents infinite agent-to-agent call loops (hard limit of 3 levels). |
+| **Layer 5** | **Storage Quotas** | Limits per-user disk usage and blocks expensive/massive dependencies (Tensorflow, etc.). |
+
+---
+
+### 14. 💰 Economic Governance (Cost Control)
+**What it does:** Deterministic limits on AI spending and resource usage.
+
+- **Input Limiter** — Automatically truncates LLM inputs at 8,000 tokens with smart summarization.
+- **Timeout Manager** — Hard enforcement of execution time (default 60s) with precise billing.
+- **Budget Enforcer** — Multi-level escrow system for per-agent, per-workflow, and monthly spending caps.
+- **Concurrency Manager** — Tier-based parallel execution limits with fair-scheduling FIFO queues.
+
+---
+
 ## 🗃️ File Structure
 
 ```
 Ensemble/
 ├── core/                          # Backend engine
-│   ├── governance.py              # FastAPI server + governance logic (2300+ lines)
-│   ├── dag_engine.py              # DAG workflow execution engine (850+ lines)
-│   ├── managed_agent.py           # Agent lifecycle and LLM routing
+│   ├── security/                  # 🛡️ Security Hardening (AST Guard, Network, Sandbox)
+│   ├── cost_control/              # 💰 Economic Governance (Budget, Timeout, Limiter)
+│   ├── parsers/                   # 🌍 Universal Parsers (Python, YAML, JSON)
+│   ├── runners/                   # 🚀 Native Runners (Execution Engines)
+│   ├── universal_importer.py      # Universal Importer Orchestrator
+│   ├── pack_builder.py            # Marketplace Pack Generator
+│   ├── format_detector.py         # AST-based Format Detection
+│   ├── governance.py              # FastAPI server + governance logic
+│   ├── dag_engine.py              # DAG workflow execution engine
+│   ├── managed_agent.py           # Agent lifecycle (Multi-format aware)
 │   ├── llm_provider.py            # Multi-provider LLM abstraction
 │   ├── skill_registry.py          # 186+ specialist agent registry
 │   ├── tools/__init__.py          # Agent tools (search, file I/O, etc.)

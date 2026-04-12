@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Search,
   ShoppingBag,
@@ -53,6 +54,7 @@ import {
   updatePack,
   rollbackPack,
   getAgents,
+  getInstalledPacks,
   MarketplacePack,
   ConflictInfo,
   InstallResult
@@ -212,6 +214,7 @@ const ConflictResolutionDialog = ({
 };
 
 const Marketplace = () => {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [packs, setPacks] = useState<MarketplacePack[]>([]);
   const [installedPackIds, setInstalledPackIds] = useState<Set<string>>(new Set());
@@ -219,38 +222,31 @@ const Marketplace = () => {
   const [activePack, setActivePack] = useState<MarketplacePack | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [packToUninstall, setPackToUninstall] = useState<string | null>(null);
-  
+
   // 🆕 Conflict resolution state
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
   const [pendingConflicts, setPendingConflicts] = useState<ConflictInfo | null>(null);
   const [pendingPack, setPendingPack] = useState<MarketplacePack | null>(null);
-  
-  // 🆕 GitHub Import state
-  const [importUrl, setImportUrl] = useState("");
-  const [importing, setImporting] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     loadData();
+    
+    // 🆕 Reload data when page is focused (e.g. returning from Importer)
+    window.addEventListener('focus', loadData);
+    return () => window.removeEventListener('focus', loadData);
   }, []);
-
   async function loadData() {
     setLoading(true);
     try {
-      const [allPacks, agents] = await Promise.all([
+      const [allPacks, agents, installedPacks] = await Promise.all([
         getMarketplacePacks(),
-        getAgents()
+        getAgents(),
+        getInstalledPacks()
       ]);
       setPacks(allPacks);
 
-      // Infer installed packs from agent IDs or metadata could be added to API
-      // For MVP, we check if any agent's ID contains the pack_id
-      const installed = new Set<string>();
-      allPacks.forEach(p => {
-        if (agents.some(a => a.id.includes(p.id))) {
-          installed.add(p.id);
-        }
-      });
+      // Use the real installed packs list from backend
+      const installed = new Set<string>(installedPacks.map(p => p.pack_id));
       setInstalledPackIds(installed);
     } catch (err) {
       toast.error("Failed to sync with Marketplace repository.");
@@ -258,23 +254,6 @@ const Marketplace = () => {
       setLoading(false);
     }
   }
-
-  // 🆕 GitHub Import Handler
-  const handleImport = async () => {
-    if (!importUrl) return;
-    setImporting(true);
-    try {
-      const res = await importExternalRepo(importUrl);
-      toast.success(`✅ Integrated ${res.repo || 'external repository'}.`);
-      setImportOpen(false);
-      setImportUrl("");
-      loadData();
-    } catch (err: any) {
-      toast.error(err.message || "GitHub Integration failed.");
-    } finally {
-      setImporting(false);
-    }
-  };
 
   const handleInstall = async (pack: MarketplacePack, conflictAction?: "skip" | "replace") => {
     setProcessingId(pack.id);
@@ -384,79 +363,18 @@ const Marketplace = () => {
             Sync
           </Button>
 
-          {/* 🆕 GitHub Import Button */}
-          <Dialog open={importOpen} onOpenChange={setImportOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm" className="h-9 px-4 rounded-xl gap-2 shadow-lg shadow-primary/10">
-                <Github className="h-4 w-4" />
-                <span className="hidden sm:inline">Import</span>
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="glass sm:max-w-md border-primary/20 p-0 overflow-hidden rounded-[1.5rem]">
-              <div className="bg-gradient-to-br from-primary/5 via-transparent to-transparent p-6 pb-4">
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-3 text-xl">
-                    <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center border border-primary/20">
-                      <Github className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <div>Import External Agents</div>
-                      <div className="text-xs text-muted-foreground font-normal mt-0.5">Clone agent packs from any GitHub repository</div>
-                    </div>
-                  </DialogTitle>
-                </DialogHeader>
-              </div>
+          {/* 🆕 GitHub Import Button (Navigates to Universal Importer) */}
+          <Button 
+            size="sm" 
+            className="h-9 px-4 rounded-xl gap-2 shadow-lg shadow-primary/10"
+            onClick={() => navigate("/marketplace/import")}
+          >
+            <Github className="h-4 w-4" />
+            <span className="hidden sm:inline">Universal Importer</span>
+          </Button>
               
-              <div className="p-6 pt-4 space-y-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Repository URL</label>
-                  <Input 
-                    placeholder="https://github.com/user/agent-repo" 
-                    value={importUrl} 
-                    onChange={(e) => setImportUrl(e.target.value)} 
-                    className="bg-secondary/30 border-border/20 h-11"
-                  />
-                </div>
-                
-                <div className="bg-secondary/20 p-3 rounded-lg border border-border/20 space-y-1">
-                  <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Supported Formats</div>
-                  <div className="text-xs text-muted-foreground space-y-1">
-                    <div className="flex items-start gap-2">
-                      <span className="text-primary mt-0.5">•</span>
-                      <span>GitHub repos with <code className="bg-secondary/50 px-1 rounded">skills/</code> directory</span>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <span className="text-primary mt-0.5">•</span>
-                      <span>MetaGPT integrations with <code className="bg-secondary/50 px-1 rounded">metagpt/roles/</code></span>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <span className="text-primary mt-0.5">•</span>
-                      <span>SuperAGI plugins with <code className="bg-secondary/50 px-1 rounded">manifest.json</code></span>
-                    </div>
-                  </div>
-                </div>
-
-                <Button 
-                  className="w-full gap-2 h-11 rounded-xl" 
-                  onClick={handleImport} 
-                  disabled={importing || !importUrl}
-                >
-                  {importing ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      Cloning Repository...
-                    </>
-                  ) : (
-                    <>
-                      <Download className="h-4 w-4" />
-                      Import Agents
-                    </>
-                  )}
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
         </div>
+
 
         <div className="relative max-w-xl">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/40" />
@@ -522,7 +440,7 @@ const Marketplace = () => {
                       <div className="flex items-center gap-4 text-[10px] text-muted-foreground font-medium pt-2">
                         <div className="flex items-center gap-1.5">
                           <Package className="h-3 w-3 text-primary/60" />
-                          {pack.agent_files.length} Specialists
+                          {pack.agent_files ? pack.agent_files.length : 0} Specialists
                         </div>
                         <div className="flex items-center gap-1.5">
                           <ShieldCheck className="h-3 w-3 text-primary/60" />
@@ -587,7 +505,7 @@ const Marketplace = () => {
                       {activePack.name}
                     </DialogTitle>
                     <div className="flex flex-wrap gap-2 mt-2">
-                      <Badge variant="secondary" className="text-[10px] font-bold">BY {activePack.author.toUpperCase()}</Badge>
+                      <Badge variant="secondary" className="text-[10px] font-bold">BY {activePack.author ? activePack.author.toUpperCase() : "UNKNOWN"}</Badge>
                       <Badge variant="outline" className="text-[10px]">VERSION {activePack.version}</Badge>
                     </div>
                   </div>
@@ -602,10 +520,10 @@ const Marketplace = () => {
               </div>
 
               <div className="px-8 flex-1 min-h-0 overflow-hidden flex flex-col pt-4">
-                <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-4">Included Specialists ({activePack.agent_files.length})</h4>
+                <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-4">Included Specialists ({activePack.agent_files ? activePack.agent_files.length : 0})</h4>
                 <ScrollArea className="flex-1 pr-4">
                   <div className="space-y-3 pb-6">
-                    {activePack.agent_files.map((file, idx) => (
+                    {activePack.agent_files && activePack.agent_files.map((file, idx) => (
                       <div key={idx} className="flex items-center gap-3 p-3 rounded-lg bg-background/40 border border-border/20 group hover:border-primary/30 transition-all">
                         <div className="h-8 w-8 rounded-lg bg-secondary/50 flex items-center justify-center">
                           <Bot className="h-4 w-4 text-primary/60" />

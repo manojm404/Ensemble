@@ -51,7 +51,6 @@ export interface TabItem {
 }
 
 export const allApps: AppItem[] = [
-  { id: "personal", title: "Personal", url: "/personal", icon: Sparkles, iconName: "Sparkles", description: "Personal workspace with all native agents" },
   { id: "chat", title: "Chat", url: "/chat", icon: MessageSquare, iconName: "MessageSquare", description: "Conversations with agents" },
   { id: "agents", title: "Agents", url: "/agents", icon: Bot, iconName: "Bot", description: "Manage AI agents" },
   { id: "marketplace", title: "Marketplace", url: "/marketplace", icon: ShoppingBag, iconName: "ShoppingBag", description: "Browse community agent packs" },
@@ -88,28 +87,32 @@ export function TabProvider({ children }: { children: ReactNode }) {
         const parsed = JSON.parse(saved);
         const restoredTabs = parsed.map((t: any) => ({
           ...t,
-          url: t.id === "home" ? "/" : t.id === "personal" ? "/personal" : t.url,
+          url: t.id === "home" ? "/" : t.id === "chat" ? "/chat" : t.url,
           icon: iconMap[t.iconName] || LayoutGrid
         }));
-        // Ensure Personal tab is always present
-        if (!restoredTabs.some((t: any) => t.id === "personal")) {
-          restoredTabs.splice(1, 0, {
-            id: "personal",
-            title: "Personal",
-            url: "/personal",
-            icon: Sparkles,
-            iconName: "Sparkles",
+        
+        // Remove Personal tab if it exists
+        const filteredTabs = restoredTabs.filter((t: any) => t.id !== "personal");
+        
+        // Ensure Chat tab is always present
+        if (!filteredTabs.some((t: any) => t.id === "chat")) {
+          filteredTabs.splice(1, 0, {
+            id: "chat",
+            title: "Chat",
+            url: "/chat",
+            icon: MessageSquare,
+            iconName: "MessageSquare",
             closable: false
           });
         }
-        return restoredTabs;
+        return filteredTabs;
       } catch (e) {
         console.error("Failed to restore tabs:", e);
       }
     }
     return [
       { id: "home", title: "Home", url: "/", icon: MessageSquare, iconName: "MessageSquare", closable: false },
-      { id: "personal", title: "Personal", url: "/personal", icon: Sparkles, iconName: "Sparkles", closable: false },
+      { id: "chat", title: "Chat", url: "/chat", icon: MessageSquare, iconName: "MessageSquare", closable: false },
     ];
   });
 

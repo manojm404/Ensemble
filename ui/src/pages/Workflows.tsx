@@ -293,11 +293,11 @@ const Workflows = () => {
             </DialogHeader>
           </div>
 
-          <div className="flex-1 min-h-0 overflow-auto p-6">
+          <div className="flex-1 min-h-[500px] h-[60vh] overflow-hidden relative">
             {viewingOutput?.lastOutput?.output?.markdown ? (
               <OutputViewer output={viewingOutput.lastOutput.output} />
             ) : (
-              <div className="flex flex-col items-center justify-center h-64 gap-3 text-muted-foreground">
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground py-20">
                 <FileText className="h-12 w-12 opacity-20" />
                 <p className="text-sm font-medium">Loading output...</p>
                 <p className="text-xs">Fetching from server</p>

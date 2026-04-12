@@ -24,13 +24,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Play, Save, Undo, Redo, X, Search, Plus, Settings2, Loader2, CheckCircle2, Wand2, Sparkles, FileText } from "lucide-react";
+import { Play, Save, Undo, Redo, X, Search, Plus, Settings2, Loader2, CheckCircle2, Wand2, Sparkles, FileText, Bot } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { getWorkflow, saveWorkflow, getAgents, type AgentSkill } from "@/lib/api";
-import { getAgentMetadata, categoryColors } from "@/lib/agent-metadata";
+import { categoryColors } from "@/lib/agent-metadata";
 import { MagicWandDialog } from "@/components/workflow/MagicWandDialog";
 import { generateWorkflowFromPrompt } from "@/lib/workflow-generator";
 import { WorkflowExecutionPanel } from "@/components/workflow/WorkflowExecutionPanel";
@@ -199,6 +200,16 @@ function WorkflowEditorInner() {
     (a) => a.name.toLowerCase().includes(search.toLowerCase()) || a.description.toLowerCase().includes(search.toLowerCase())
   );
 
+  const groupedAgents = useMemo(() => {
+    const groups: Record<string, AgentSkill[]> = {};
+    filteredAgents.forEach(agent => {
+      const cat = agent.category || "General";
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(agent);
+    });
+    return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [filteredAgents]);
+
   useEffect(() => {
     const init = async () => {
       try {
@@ -311,7 +322,6 @@ function WorkflowEditorInner() {
 
   const handleAddAgent = useCallback(
     (agent: AgentSkill) => {
-      const meta = getAgentMetadata(agent.id);
       const viewport = reactFlowInstance.getViewport();
       const centerX = (window.innerWidth / 2 - viewport.x) / viewport.zoom;
       const centerY = (window.innerHeight / 2 - viewport.y) / viewport.zoom;
@@ -320,9 +330,9 @@ function WorkflowEditorInner() {
         type: "agentNode",
         position: { x: centerX + (Math.random() - 0.5) * 100, y: centerY + (Math.random() - 0.5) * 100 },
         data: {
-          label: `${meta.emoji} ${agent.name}`,
+          label: `${agent.emoji || "🤖"} ${agent.name}`,
           subtitle: agent.description,
-          model: "gpt-4o",
+          model: "gemini-2.5-flash",
           temperature: 0.5,
           prompt: "",
           // Critical: These fields are read by the DAG engine
@@ -419,91 +429,118 @@ function WorkflowEditorInner() {
               <Button variant="ghost" size="sm" className="gap-1.5 h-8 text-xs text-primary hover:bg-primary/10" onClick={() => setMagicWandOpen(true)}>
                 <Wand2 className="h-3.5 w-3.5" /> AI
               </Button>
-              <Popover open={addOpen} onOpenChange={(isOpen: boolean) => { setAddOpen(isOpen); if (!isOpen) setSearch(""); }}>
-                <PopoverTrigger asChild>
+
+              <Dialog open={addOpen} onOpenChange={(isOpen) => { setAddOpen(isOpen); if (!isOpen) setSearch(""); }}>
+                <DialogTrigger asChild>
                   <Button variant="ghost" size="sm" className="gap-1.5 h-8 text-xs">
                     <Plus className="h-3.5 w-3.5" /> Agent
                   </Button>
-                </PopoverTrigger>
-                <AnimatePresence>
-                  {addOpen && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-                      onClick={() => setAddOpen(false)}
-                    >
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.95, y: 8 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: 8 }}
-                        transition={{ duration: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
-                        className="w-[480px] max-h-[70vh] rounded-2xl glass border border-border/50 shadow-2xl overflow-hidden"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {/* Header */}
-                        <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
-                          <div>
-                            <h3 className="text-sm font-semibold text-foreground">Add Agent</h3>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">Choose an agent to add to your workflow</p>
-                          </div>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => setAddOpen(false)}>
-                            <X className="h-4 w-4" />
-                          </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[520px] p-0 gap-0 glass border-primary/20 bg-card/95 backdrop-blur-2xl rounded-[2.5rem] overflow-hidden shadow-2xl">
+                  {/* Header */}
+                  <div className="relative overflow-hidden pt-8 px-8 pb-6 border-b border-border/30">
+                    <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+                      <Bot className="h-24 w-24" />
+                    </div>
+                    <div className="relative z-10">
+                      <DialogTitle className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
+                        <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30">
+                          <Plus className="h-4 w-4 text-primary" />
                         </div>
+                        Add Specialist
+                      </DialogTitle>
+                      <DialogDescription className="text-xs text-muted-foreground mt-1.5 font-medium">
+                        Search and select an agent to join your workflow pipeline
+                      </DialogDescription>
+                    </div>
 
-                        {/* Search */}
-                        <div className="px-4 py-3 border-b border-border/30">
-                          <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                            <Input
-                              ref={searchRef}
-                              value={search}
-                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
-                              placeholder="Search agents by name or description..."
-                              className="h-9 pl-9 text-sm bg-secondary/50 border-border/50 rounded-lg"
-                              autoFocus
-                            />
+                    {/* Search Bar */}
+                    <div className="relative mt-6">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/40" />
+                      <Input
+                        ref={searchRef}
+                        value={search}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
+                        placeholder="Search agents by name, role or expertise..."
+                        className="h-11 pl-10 pr-10 bg-secondary/30 border-border/40 rounded-xl focus-visible:ring-primary/20 text-sm"
+                        autoFocus
+                      />
+                      {search && (
+                        <button 
+                          onClick={() => setSearch("")}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 flex items-center justify-center rounded-full bg-muted hover:bg-border transition-colors"
+                        >
+                          <X className="h-3 w-3 text-muted-foreground" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Agent List */}
+                  <ScrollArea className="h-[450px] px-4 py-2">
+                    <div className="space-y-6 py-4">
+                      {groupedAgents.map(([category, agents]) => (
+                        <div key={category} className="space-y-2">
+                          <div className="flex items-center gap-2 px-3 mb-1">
+                            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/50">
+                              {category}
+                            </h4>
+                            <div className="h-px flex-1 bg-border/20" />
                           </div>
-                        </div>
-
-                        {/* Agent List */}
-                        <ScrollArea className="max-h-[50vh] px-2 py-2">
-                          <div className="space-y-0.5">
-                            {filteredAgents.map((agent) => {
-                              const meta = getAgentMetadata(agent.id);
-                              return (
-                                <button
-                                  key={agent.id}
-                                  onClick={() => handleAddAgent(agent)}
-                                  className="w-full text-left rounded-lg px-3 py-2.5 transition-all duration-150 hover:bg-primary/10 group flex items-center gap-3"
-                                >
-                                  <span className="text-xl shrink-0">{meta.emoji}</span>
-                                  <div className="min-w-0 flex-1">
-                                    <div className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{agent.name}</div>
-                                    <div className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{agent.description}</div>
+                          <div className="grid grid-cols-1 gap-1.5">
+                            {agents.map((agent) => (
+                              <button
+                                key={agent.id}
+                                onClick={() => handleAddAgent(agent)}
+                                className="w-full text-left rounded-2xl p-3 transition-all duration-200 hover:bg-primary/5 hover:border-primary/20 border border-transparent group flex items-center gap-4"
+                              >
+                                <div className="h-12 w-12 rounded-xl bg-secondary/50 flex items-center justify-center text-2xl shrink-0 group-hover:scale-110 transition-transform border border-border/20 shadow-sm">
+                                  {agent.emoji || "🤖"}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-sm font-bold text-foreground group-hover:text-primary transition-colors flex items-center gap-2">
+                                    {agent.name}
+                                    {agent.is_native && <Badge variant="outline" className="text-[8px] px-1 py-0 uppercase tracking-tighter opacity-50 font-black">Native</Badge>}
                                   </div>
-                                  <Badge variant="secondary" className={`text-[10px] px-2 py-0 shrink-0 ${categoryColors[meta.category] || ""}`}>
-                                    {meta.category}
-                                  </Badge>
-                                </button>
-                              );
-                            })}
+                                  <div className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5 font-medium leading-relaxed italic opacity-80">
+                                    {agent.description}
+                                  </div>
+                                </div>
+                                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20">
+                                    <Plus className="h-3.5 w-3.5 text-primary" />
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
                           </div>
-                          {filteredAgents.length === 0 && (
-                            <div className="flex flex-col items-center justify-center py-8 text-center">
-                              <Search className="h-8 w-8 text-muted-foreground/30 mb-2" />
-                              <p className="text-sm text-muted-foreground">No agents found</p>
-                              <p className="text-xs text-muted-foreground/60 mt-1">Try a different search term</p>
-                            </div>
-                          )}
-                        </ScrollArea>
-                      </motion.div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </Popover>
+                        </div>
+                      ))}
+                    </div>
+
+                    {filteredAgents.length === 0 && (
+                      <div className="flex flex-col items-center justify-center py-20 text-center">
+                        <div className="h-16 w-16 rounded-full bg-secondary/30 flex items-center justify-center mb-4">
+                          <Search className="h-8 w-8 text-muted-foreground/20" />
+                        </div>
+                        <p className="text-sm font-bold text-foreground opacity-60 tracking-tight">No agents found</p>
+                        <p className="text-xs text-muted-foreground mt-1.5">Try a different search term or category</p>
+                      </div>
+                    )}
+                  </ScrollArea>
+
+                  {/* Footer */}
+                  <div className="px-8 py-4 border-t border-border/30 bg-secondary/10 flex items-center justify-between">
+                    <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest flex items-center gap-2">
+                      <Sparkles className="h-3 w-3 text-primary" />
+                      {availableAgents.length} Specialists Available
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => setAddOpen(false)} className="h-8 text-[10px] font-bold uppercase tracking-widest px-4 rounded-lg border border-border/40 hover:bg-white/5">
+                      Cancel
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
               <div className="w-px h-5 bg-border/50" />
               <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => toast.info("Undo", { description: "Nothing to undo" })}><Undo className="h-4 w-4" /></Button>
               <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => toast.info("Redo", { description: "Nothing to redo" })}><Redo className="h-4 w-4" /></Button>

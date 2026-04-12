@@ -1,20 +1,30 @@
-import pickle
+"""
+core/managed_agent.py
+Managed Agent for Ensemble — secure, budget-aware agent wrapper.
+
+Handles LLM execution with input limiting, recursion guards, budget enforcement,
+and timeout management.
+"""
+import asyncio
 from typing import List, Dict, Any, Optional
+
 from core.agent_base import Agent
 from core.llm_provider import LLMProvider
 from core.conversation_memory import Message
 from core.skill_registry import skill_registry
-import re
+from core.tools import read_artifact, search_web, write_artifact, list_artifacts
 
-import json
-import re
+# Security & cost control modules
+from core.security import recursion_guard
+from core.cost_control import input_limiter, budget_enforcer, concurrency_manager
+from core.cost_control.concurrency_manager import ConcurrencyError
+from core.runners import runner_factory
+from core.parsers.agent_data import AgentData, AgentFormat
 
 try:
     import tiktoken
 except ImportError:
     tiktoken = None
-
-from core.tools import read_artifact, search_web, write_artifact, list_artifacts
 
 class ManagedAgent(Agent):
     def __init__(self, agent_id: str, company_id: str, system_prompt: str,
@@ -35,6 +45,7 @@ class ManagedAgent(Agent):
         self._current_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         self._history_loaded = False
         self.tools = []
+        self.workflow_id = "default" # Default workflow_id for budget checks
 
         # Apply specialization AFTER initialization so logging (audit) works
         if skill_name:
@@ -146,8 +157,10 @@ class ManagedAgent(Agent):
             print(f"❌ [ManagedAgent] load_topic_history failed: {e}", flush=True)
 
     async def run(self, user_input: str) -> str:
-        """Override run with governance, auditing, and session memory."""
-        # Load history at the start of the first run step
+        """
+        Override run with enhanced security, cost control, and multi-format support.
+        """
+        # 1. INITIALIZATION & HISTORY
         if not self._history_loaded:
             self._load_history()
 
@@ -155,97 +168,112 @@ class ManagedAgent(Agent):
         if self.step_count > self.max_steps:
             return "Error: Max steps reached."
 
-        # 1. PRE-RUN: Token Grant & Cost Threshold Check
+        # 2. INPUT LIMITING (Cost Control)
+        input_res = input_limiter.prepare_for_llm(user_input)
+        processed_input = input_res.data
+        if input_res.truncated:
+            self.handle_thought(f"⚠️ Input truncated: {input_res.message}")
+
+        # 3. RECURSION GUARD (Security)
+        try:
+            # We use a default estimated cost for the recursion check
+            # and push a frame onto the call stack
+            recursion_guard.enter_call(
+                caller_id="orchestrator",
+                callee_id=self.agent_id,
+                budget_remaining=100.0, # Placeholder
+                estimated_cost=0.001
+            )
+        except RecursionError as e:
+            self.audit.log(self.company_id, self.agent_id, "SECURITY_VIOLATION", {"error": str(e)})
+            return f"Error: {str(e)}"
+
+        # 4. CONCURRENCY MANAGEMENT (Cost Control)
+        # We acquire a slot before proceeding with potentially expensive execution
+        try:
+            # Pass agent_id for proper per-agent slot tracking
+            async with concurrency_manager.slot(self.agent_id):
+                return await self._execute_managed_run(processed_input)
+        except ConcurrencyError as e:
+            return f"Error: {str(e)}"
+        finally:
+            recursion_guard.exit_call(caller_id="orchestrator")
+
+    async def _execute_managed_run(self, user_input: str) -> str:
+        """Internal execution logic wrapped with budget and timeout controls."""
+        # 1. BUDGET ENFORCEMENT (Cost Control)
         estimated_cost = self._estimate_cost(user_input)
+        budget_res = budget_enforcer.check_budget(self.agent_id, self.workflow_id, estimated_cost)
+        
+        if not budget_res.allowed:
+            self.audit.log(self.company_id, self.agent_id, "BUDGET_DENIED", {"reason": budget_res.reason})
+            return f"Error: Budget exhausted. {budget_res.reason}"
 
-        # Check budget
-        if not self.gov.request_token_grant(self.agent_id, estimated_cost):
-            self.audit.log(self.company_id, self.agent_id, "BUDGET_DENIED", {"estimated_cost": estimated_cost})
-            return "Budget exhausted"
+        # 2. TIMEOUT ENFORCEMENT (Cost Control)
+        try:
+            result = await asyncio.wait_for(
+                self._run_with_format_support(user_input),
+                timeout=60.0  # Default 60s timeout
+            )
+            return result
+        except asyncio.TimeoutError:
+            # Release escrow if timed out
+            budget_enforcer.confirm_execution(self.agent_id, 0.0, self.workflow_id)
+            return f"Error: Execution timed out after 60 seconds"
+        except Exception as e:
+            # Release escrow if failed
+            budget_enforcer.confirm_execution(self.agent_id, 0.0, self.workflow_id)
+            return f"Error: {str(e)}"
 
-        # Prepare messages
-        budget = self.gov.get_company_budget_status(self.company_id)
-        messages = [{"role": "system", "content": self.system_prompt}]
-        for m in self.memory.get_messages():
-            messages.append({"role": m.role, "content": m.content})
+    async def _run_with_format_support(self, user_input: str) -> str:
+        """Execute the agent based on its format (Markdown, Python, YAML, etc.)."""
+        # Get agent metadata from registry
+        # We use self.skill_name which was passed during init
+        skill = skill_registry.get_skill(self.agent_id) or {}
+        format_str = skill.get("format", "markdown")
+        
+        try:
+            agent_format = AgentFormat(format_str)
+        except ValueError:
+            agent_format = AgentFormat.MARKDOWN
 
-        user_header = f"--- SESSION STATE ---\nCOMPANY: {self.company_id}\nBUDGET: ${budget['spent']:.4f}\n\n"
-        # Only add the user input to memory once
-        if not any(m.role == "user" and user_input in m.content for m in self.memory.get_messages()):
-            self.memory.add_message("user", user_input)
+        # Create AgentData object for the runner
+        agent_data = AgentData(
+            agent_id=self.agent_id,
+            name=skill.get("name", self.agent_id),
+            description=skill.get("description", ""),
+            system_prompt=skill.get("prompt_text", self.system_prompt),
+            format=agent_format,
+            tools=skill.get("tools", []),
+            source_path=skill.get("filepath", "")
+        )
 
-        messages.append({"role": "user", "content": user_header + user_input})
+        # Get the appropriate runner
+        runner = runner_factory.get_runner(agent_format)
+        
+        # Log start
+        self.handle_thought(f"Executing {agent_format.value} agent: {agent_data.name}")
+        
+        # Execute
+        result = await runner.execute(agent_data, user_input)
+        
+        # Handle result
+        if not result.success:
+            self.audit.log(self.company_id, self.agent_id, "ERROR", {"error": result.error})
+            budget_enforcer.confirm_execution(self.agent_id, 0.0, self.workflow_id)
+            return f"Error: {result.error}"
 
-        # 🆕 Get model override for this agent
-        model_override = skill_registry.get_model_override(self.agent_id)
-        use_override = model_override is not None
+        # Confirm budget usage
+        actual_cost = self._calculate_actual_cost(result.token_usage)
+        budget_enforcer.confirm_execution(self.agent_id, actual_cost, self.workflow_id)
+        self.gov.confirm_cost(self.agent_id, actual_cost)
 
-        # --- EXECUTION LOOP (Multi-turn Tool Calling) ---
-        max_tool_turns = 10
-        current_turn = 0
-        final_text = ""
-
-        while current_turn < max_tool_turns:
-            current_turn += 1
-
-            # Call LLM with functional tools (use model override if available)
-            if use_override:
-                response_data = await self.llm.chat_with_model(
-                    messages, 
-                    model_override=model_override, 
-                    tools=self.tool_schemas
-                )
-            else:
-                response_data = await self.llm.chat(messages, tools=self.tool_schemas)
-            
-            # Track cost
-            actual_cost = self._calculate_actual_cost(response_data.get("usage", {}))
-            self.gov.confirm_cost(self.agent_id, actual_cost)
-            
-            # Extract content and function call
-            text = response_data.get("text", "")
-            func_call = response_data.get("functionCall")
-
-            if not func_call:
-                # No more tools to call, we are done
-                final_text = text
-                break
-            
-            # Handle tool call
-            tool_name = func_call["name"]
-            tool_args = func_call["args"]
-
-            # Log action
-            self.handle_thought(f"Executing tool: {tool_name} with args: {tool_args}")
-            self.audit.log(self.company_id, self.agent_id, "ACTION", {"tool": tool_name, "args": tool_args}, broadcast=True)
-
-            try:
-                # Execute the tool
-                if tool_name in self.functional_tools:
-                    tool_func = self.functional_tools[tool_name]
-                    # Note: These tools are synchronous in core.tools, so we call them normally
-                    result = tool_func(**tool_args)
-                else:
-                    result = f"Error: Tool {tool_name} not found."
-                
-                # Append tool result to messages for the next LLM turn
-                messages.append({"role": "assistant", "content": text, "functionCall": func_call})
-                messages.append({"role": "function", "name": tool_name, "content": str(result)})
-                
-                # Log the result
-                self.audit.log(self.company_id, self.agent_id, "TOOL_RESULT", {"tool": tool_name, "result": str(result)[:500]}, broadcast=True)
-                
-            except Exception as e:
-                error_msg = f"Error executing {tool_name}: {e}"
-                messages.append({"role": "assistant", "content": text, "functionCall": func_call})
-                messages.append({"role": "function", "name": tool_name, "content": error_msg})
-                self.handle_thought(f"Tool execution failed: {error_msg}")
-
-        # Final memory update
+        # Final memory update & audit
+        final_text = str(result.output)
         self.memory.add_message("assistant", final_text)
         self.audit.log(self.company_id, self.agent_id, "RESULT", {"result": final_text}, broadcast=True)
+        
         return final_text
-
     async def run_stream(self, user_input: str):
         """Asynchronous generator that yields response chunks and broadcasts them."""
         if not self._history_loaded:

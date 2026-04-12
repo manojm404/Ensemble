@@ -2,29 +2,30 @@
 core/governance.py
 Governance for Ensemble: budgeting, heartbeats, org charts, and FastAPI endpoints.
 """
+import base64
+import json
+import os
+import shutil
 import sqlite3
 import threading
 import time
-import requests
-import json
-import os
-import yaml
 import uuid
-import asyncio
 import zlib
-import base64
-from typing import Dict, Any, Optional, Callable, List
+import asyncio
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Query
+from typing import Dict, Any, Optional, Callable, List
+
+import requests
+import yaml
+from dotenv import load_dotenv
+from fastapi import (
+    FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Query,
+    UploadFile, File
+)
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-# ... (rest of imports)
 from pydantic import BaseModel
-from dotenv import load_dotenv
-import shutil
-from fastapi.staticfiles import StaticFiles
-from fastapi import UploadFile, File
 
 load_dotenv()
 
@@ -34,11 +35,13 @@ from core.skill_registry import skill_registry
 from core.engine import SOPEngine
 from core.ensemble_space import EnsembleSpace
 from core.llm_provider import LLMProvider
-from core.skill_registry import skill_registry
 from core.dag_engine import DAGWorkflowEngine
-# Ensure adapters are initialized
 import core.adapters
-from core import settings  # Import settings management module
+from core import settings
+
+# Universal importer and pack builder
+from core.universal_importer import universal_importer
+from core.pack_builder import pack_builder
 
 # Load Governance Config from .env (V1 with defaults)
 GOV_CONFIG = {
@@ -54,40 +57,76 @@ app = FastAPI(title="Ensemble Platform API")
 os.makedirs("data/marketplace/zips", exist_ok=True)
 app.mount("/static/marketplace/zips", StaticFiles(directory="data/marketplace/zips"), name="marketplace_zips")
 
-# Add CORS Middleware to allow requests from the UI (localhost:1420)
+# CORS Middleware - handles all responses including errors
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # For V1 dev, allow all. In production, restrict this.
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-WORKSPACE_DIR = "data/workspace/"
-os.makedirs(WORKSPACE_DIR, exist_ok=True)
+# Ensure CORS headers on ALL responses (FastAPI exceptions don't always get CORS headers)
+@app.middleware("http")
+async def ensure_cors_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
 
-# Setup backend service singletons for endpoints
+# Setup backend service singletons
 audit_logger = AuditLogger()
 space = EnsembleSpace()
 llm = LLMProvider()
+gov_instance = None # Will be initialized below
 
-# dict to track background SOP runs: run_id -> status
+# Background SOP run tracking
 sop_runs: Dict[str, Dict[str, Any]] = {}
 
-# Initialize LLM from settings (loads provider/model from data/settings.json)
+# Initialize LLM from settings
 settings.initialize_llm_from_settings(llm)
 
-# Ensure workspace directory exists for uploads
+# Workspace directory and static mounts
 WORKSPACE_DIR = os.getenv("WORKSPACE_DIR", "data/workspace")
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
-
-# Mount the workspace directory for static asset previews (images/files)
 app.mount("/api/assets", StaticFiles(directory=WORKSPACE_DIR), name="workspace_assets")
+app.mount("/api/workspace", StaticFiles(directory=WORKSPACE_DIR), name="workflow_workspace")
 
-# Mount workflow workspaces for HTML preview
-workflow_ws_dir = os.path.join("data", "workspace")
-os.makedirs(workflow_ws_dir, exist_ok=True)
-app.mount("/api/workspace", StaticFiles(directory=workflow_ws_dir), name="workflow_workspace")
+# --- Core Logic Functions ---
+
+def get_all_agents_logic():
+    """Aggregate file-based and DB-persisted agents."""
+    discovery = skill_registry.list_skills()
+    custom = []
+    try:
+        if gov_instance:
+            with sqlite3.connect(gov_instance.db_path) as conn:
+                cursor = conn.execute("SELECT id, name, emoji, description, instruction, category, model, temperature FROM custom_agents")
+                for r in cursor.fetchall():
+                    custom.append({
+                        "id": r[0], "name": r[1], "emoji": r[2], "description": r[3],
+                        "instruction": r[4], "category": r[5], "model": r[6],
+                        "temperature": r[7], "source": "custom"
+                    })
+    except Exception as e:
+        print(f"⚠️ [Governance] Failed to read custom agents: {e}")
+    return discovery + custom
+
+# --- API Endpoints ---
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "timestamp": time.time()}
+
+@app.get("/api/skills")
+async def get_skills():
+    return get_all_agents_logic()
+
+@app.get("/api/registry/sync")
+async def sync_registry_api():
+    count = skill_registry.sync_all()
+    return {"status": "success", "total": count, "agents": get_all_agents_logic()}
 
 @app.post("/api/upload")
 async def upload_file_endpoint(file: UploadFile = File(...)):
@@ -95,14 +134,12 @@ async def upload_file_endpoint(file: UploadFile = File(...)):
     try:
         file_id = f"{int(time.time())}_{file.filename}"
         file_path = os.path.join(WORKSPACE_DIR, file.filename)
-        
-        # Save file to disk
-        # We use shutil for fast buffered copying to the persistent storage
+
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-            
+
         print(f"📁 [Upload API] Saved: {file.filename} -> {file_path}")
-        
+
         return {
             "id": file_id,
             "name": file.filename,
@@ -564,24 +601,111 @@ async def create_custom_agent(req: Dict[str, Any]):
 
 @app.post("/api/registry/import")
 async def import_external_repo(data: Dict[str, str]):
-    """Clones an external GitHub repo into the integrations folder."""
+    """
+    Deprecated endpoint. Redirects to Universal Importer.
+    """
     repo_url = data.get("url")
     if not repo_url:
         raise HTTPException(status_code=400, detail="Missing repository URL")
     
-    repo_name = repo_url.split("/")[-1].replace(".git", "")
-    target_path = os.path.join("integrations", repo_name)
-    
-    if os.path.exists(target_path):
-        raise HTTPException(status_code=400, detail="Repository already integrated")
-        
-    import subprocess
     try:
-        subprocess.run(["git", "clone", repo_url, target_path], check=True)
-        count = skill_registry.sync_all()
-        return {"status": "success", "repo": repo_name, "total_agents": count}
+        job = universal_importer.start_job(repo_url)
+        return {"status": "success", "message": "Import started via Universal Importer", "job_id": job.job_id}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Git Clone Failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+# --- UNIVERSAL AGENT IMPORTER ENDPOINTS ---
+
+class ImportRepoRequest(BaseModel):
+    url: str
+
+@app.post("/api/marketplace/import-repo")
+async def import_repo_endpoint(req: ImportRepoRequest):
+    """Start a background job to import and analyze a GitHub repository."""
+    try:
+        job = universal_importer.start_job(req.url)
+        return {"status": "started", "job_id": job.job_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+
+@app.get("/api/marketplace/import-status/{job_id}")
+async def get_import_status(job_id: str):
+    """Check the status of a background import job."""
+    status = universal_importer.check_status(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Import job not found")
+    return status
+
+@app.get("/api/marketplace/import-result/{job_id}")
+async def get_import_result(job_id: str):
+    """Get the result of a completed import job."""
+    result = universal_importer.get_result(job_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Import result not found or job still running")
+    return result
+
+@app.post("/api/marketplace/import-install/{pack_id}")
+async def install_imported_pack(pack_id: str, job_id: str = Query(...)):
+    """Install a pack generated from an import job by extracting it to agents/custom/."""
+    try:
+        import zipfile
+        
+        # Find the ZIP file for this pack
+        zip_path = os.path.join("data/marketplace/zips", f"{pack_id}.zip")
+        if not os.path.exists(zip_path):
+            raise HTTPException(status_code=404, detail=f"Pack ZIP not found: {pack_id}")
+        
+        # Extract to agents/custom/{pack_id}/
+        install_dir = os.path.join("data/agents/custom", pack_id)
+        os.makedirs(install_dir, exist_ok=True)
+        
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            # Extract all files from the ZIP
+            for member in zf.namelist():
+                # Skip directories
+                if member.endswith('/'):
+                    continue
+                # Skip non-agent files (we only want .md, .py, .yaml, .json, .txt files)
+                if not any(member.endswith(ext) for ext in ['.md', '.py', '.yaml', '.json', '.txt']):
+                    continue
+                # Extract to install dir, preserving subdirectory structure
+                target_path = os.path.join(install_dir, member)
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                with zf.open(member) as src, open(target_path, 'wb') as dst:
+                    dst.write(src.read())
+        
+        # Create pack metadata
+        meta = {
+            "pack_id": pack_id,
+            "installed_at": str(datetime.now()),
+            "version": "1.0.0",
+            "source": "universal_importer",
+            "job_id": job_id,
+            "agent_count": len([f for f in os.listdir(install_dir) if f.endswith(".md")])
+        }
+        with open(os.path.join(install_dir, ".pack_meta.json"), "w") as f:
+            json.dump(meta, f, indent=2)
+        
+        # Sync registry to pick up new agents
+        count = skill_registry.sync_all()
+        
+        return {"status": "success", "message": f"Pack {pack_id} installed", "total_agents": count}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Installation failed: {str(e)}")
+
+@app.get("/api/marketplace/import-formats")
+async def get_supported_formats():
+    """List all supported agent formats for the Universal Importer."""
+    return {
+        "formats": [
+            {"id": "markdown", "name": "Markdown + Frontmatter", "description": "Native Ensemble format"},
+            {"id": "python", "name": "Python Classes", "description": "MetaGPT/CrewAI roles"},
+            {"id": "yaml", "name": "YAML Configs", "description": "LangChain/AutoGen configurations"},
+            {"id": "json", "name": "JSON Manifests", "description": "SuperAGI/OpenAI manifests"},
+            {"id": "text", "name": "Plain Text", "description": "Simple prompt files"}
+        ]
+    }
 
 @app.get("/health")
 async def health():
@@ -1687,36 +1811,49 @@ async def generate_workflow_api(request: Request):
         
         # Get available skills to help the architect select agents
         all_skills = skill_registry.list_skills()
-        skills_context = "\n".join([f"- {s['id']}: {s['description']}" for s in all_skills])
+        
+        # Group agents by category for a more compact and organized context
+        categories = {}
+        for s in all_skills:
+            cat = s.get('category', 'General')
+            if cat not in categories:
+                categories[cat] = []
+            categories[cat].append(f"{s['id']} ({s['name']})")
+        
+        skills_context = ""
+        for cat, agents in sorted(categories.items()):
+            skills_context += f"### {cat}\n" + ", ".join(agents) + "\n\n"
 
         system_prompt = f"""
 You are the Ensemble Workflow Architect. Convert the user's requirement into a professional multi-agent DAG.
 
-AVAILABLE AGENTS:
+AVAILABLE AGENTS (grouped by category):
 {skills_context}
 
 OUTPUT RULES:
 - Return ONLY strict JSON. No markdown fences.
-- Create 3-5 nodes representing a logical automated mission.
+- Create 3-7 nodes representing a logical automated mission.
 - 'data.role' MUST match an Agent ID from the list above.
 - 'data.model' should be 'gemini-2.5-flash'.
 - Position nodes logically in a pipeline (node 1 at x:100, y:100, node 2 at x:400, y:100 etc).
+- CRITICAL: The graph MUST be a Directed Acyclic Graph (DAG). There can be NO CYCLES or loops.
+- CRITICAL: Use TWO separate nodes if an agent needs to delegate and later summarize (e.g., 'ceo_delegate' and 'ceo_summarize'). Do NOT point arrows back to the original node.
 
 JSON SCHEMA:
 {{
   "name": "Mission Title",
   "nodes": [
-    {{ 
-      "id": "step1", 
-      "type": "agentNode", 
+    {{
+      "id": "step1",
+      "type": "agentNode",
       "position": {{ "x": 100, "y": 100 }},
-      "data": {{ 
-        "label": "Step Name", 
-        "role": "pm", 
+      "data": {{
+        "label": "Step Name",
+        "role": "native_ceo",
         "instruction": "Agent Mission",
         "model": "gemini-2.5-flash",
         "temperature": 0.7
-      }} 
+      }}
     }}
   ],
   "edges": [
@@ -1727,16 +1864,40 @@ JSON SCHEMA:
         response = await llm.chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
-        ])
+        ], temperature=0.1)  # Lower temperature for more stable JSON
 
         # Extract and parse JSON
-        clean_text = response["text"].strip()
-        if "```json" in clean_text:
-            clean_text = clean_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in clean_text:
-            clean_text = clean_text.split("```")[1].split("```")[0].strip()
+        text = response["text"].strip()
         
-        return json.loads(clean_text)
+        # Robust JSON extraction
+        json_str = text
+        if "```" in text:
+            # Try to find JSON block
+            import re
+            match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', text)
+            if match:
+                json_str = match.group(1)
+            else:
+                # Fallback to simple split
+                try:
+                    json_str = text.split("```")[-2].strip()
+                    if json_str.startswith("json"):
+                        json_str = json_str[4:].strip()
+                except:
+                    pass
+        
+        # Final cleanup: ensure it starts with { and ends with }
+        start_idx = json_str.find('{')
+        end_idx = json_str.rfind('}')
+        if start_idx != -1 and end_idx != -1:
+            json_str = json_str[start_idx:end_idx+1]
+
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError as e:
+            print(f"❌ [Workflow Generation] JSON Parse Error: {e}\nRaw Text: {text[:500]}...", flush=True)
+            raise Exception(f"AI returned invalid workflow JSON: {str(e)}")
+
     except Exception as e:
         print(f"❌ [Workflow Generation] ERROR: {str(e)}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -1830,45 +1991,6 @@ async def get_workflow_preview(workflow_id: str):
 
     raise HTTPException(status_code=404, detail="No HTML preview found for this workflow")
 
-def get_all_agents_logic():
-    """Shared logic to aggregate file-based and DB-based agents."""
-    # 1. Get discovery agents from folders
-    discovery = skill_registry.list_skills()
-    
-    # 2. Get custom agents from database
-    custom = []
-    try:
-        with sqlite3.connect(gov_instance.db_path) as conn:
-            cursor = conn.execute("SELECT id, name, emoji, description, instruction, category, model, temperature FROM custom_agents")
-            for r in cursor.fetchall():
-                custom.append({
-                    "id": r[0],
-                    "name": r[1],
-                    "emoji": r[2],
-                    "description": r[3],
-                    "instruction": r[4],
-                    "category": r[5],
-                    "model": r[6],
-                    "temperature": r[7],
-                    "source": "custom"
-                })
-    except Exception as e:
-        print(f"⚠️ [Governance] Failed to read custom agents from DB: {e}")
-    
-    return discovery + custom
-
-@app.get("/api/skills")
-async def get_skills():
-    """List all agents (File-based + DB-persisted)."""
-    return get_all_agents_logic()
-
-@app.get("/api/registry/sync")
-async def sync_registry_api():
-    """Manually trigger a scan of all agent sources and return UNIFIED list."""
-    count = skill_registry.sync_all()
-    all_agents = get_all_agents_logic()
-    return {"status": "success", "total": count, "agents": all_agents}
-
 @app.patch("/api/registry/agents/{agent_id}/status")
 async def toggle_agent_status(agent_id: str, data: Dict[str, bool]):
     """Enable or disable a specific agent in the manifest."""
@@ -1887,7 +2009,7 @@ async def list_marketplace_packs():
     if not os.path.exists(MARKETPLACE_MANIFEST):
         # Fallback empty for now
         return {"packs": []}
-    
+
     with open(MARKETPLACE_MANIFEST, "r") as f:
         data = json.load(f)
     return data
@@ -1903,13 +2025,13 @@ async def install_pack(req: Dict[str, Any]):
         raise HTTPException(status_code=400, detail="Missing pack_id or download_url")
 
     pack_dir = os.path.join("data/agents/custom", pack_id)
-    
+
     # 🆕 Step 0: Extract to temp dir first for conflict checking
     import zipfile
     import io
     import requests
     from pathlib import Path
-    
+
     temp_dir = f"data/agents/temp/{pack_id}"
     os.makedirs(temp_dir, exist_ok=True)
 
@@ -1918,7 +2040,15 @@ async def install_pack(req: Dict[str, Any]):
 
         content = None
         # DEADLOCK PROTECTION: If it's a local static URL, read from disk directly
-        if "127.0.0.1:8089/static/marketplace/zips/" in download_url:
+        # Handle both port 8089 (legacy) and 8088 (current)
+        is_local_url = any(p in download_url for p in [
+            "127.0.0.1:8089/static/marketplace/zips/",
+            "127.0.0.1:8088/static/marketplace/zips/",
+            "localhost:8089/static/marketplace/zips/",
+            "localhost:8088/static/marketplace/zips/"
+        ])
+        
+        if is_local_url:
             zip_name = download_url.split("/")[-1]
             local_path = os.path.join("data/marketplace/zips", zip_name)
             if os.path.exists(local_path):
@@ -1955,7 +2085,7 @@ async def install_pack(req: Dict[str, Any]):
                                     meta = yaml.safe_load(parts[1]) or {}
                                 except:
                                     pass
-                    
+
                     new_agents.append({
                         "filepath": filepath,
                         "name": meta.get("name", Path(f).stem),
@@ -1963,7 +2093,7 @@ async def install_pack(req: Dict[str, Any]):
                         "tags": meta.get("tags", []),
                         "force_replace": conflict_action == "replace"
                     })
-        
+
         conflicts = skill_registry.detect_conflicts(new_agents)
         
         # 🆕 Step 3: If conflicts exist and action is 'prompt', return conflict info
@@ -2065,6 +2195,35 @@ async def install_pack(req: Dict[str, Any]):
             shutil.rmtree(temp_dir)
         raise HTTPException(status_code=500, detail=f"Installation failed: {str(e)}")
 
+@app.get("/api/marketplace/installed")
+async def list_installed_packs():
+    """List all packs actually installed in data/agents/custom/"""
+    custom_dir = "data/agents/custom"
+    if not os.path.exists(custom_dir):
+        return {"installed_packs": []}
+    
+    installed = []
+    for item in os.listdir(custom_dir):
+        item_path = os.path.join(custom_dir, item)
+        if os.path.isdir(item_path):
+            # Check if it has pack metadata or .md files
+            meta_path = os.path.join(item_path, ".pack_meta.json")
+            md_files = [f for f in os.listdir(item_path) if f.endswith(".md")]
+            if os.path.exists(meta_path) or md_files:
+                agent_count = len(md_files)
+                meta = {}
+                if os.path.exists(meta_path):
+                    with open(meta_path) as f:
+                        meta = json.load(f)
+                installed.append({
+                    "pack_id": item,
+                    "agent_count": agent_count,
+                    "installed_at": meta.get("installed_at", "unknown"),
+                    "source": meta.get("source", "unknown")
+                })
+    
+    return {"installed_packs": installed}
+
 @app.post("/api/marketplace/uninstall")
 async def uninstall_pack(req: Dict[str, str]):
     """Remove a pack and sync registry."""
@@ -2077,18 +2236,23 @@ async def uninstall_pack(req: Dict[str, str]):
         # 🆕 Archive before uninstall for safety
         archive_dir = f"data/agents/archive/{pack_id}/uninstalled"
         os.makedirs(archive_dir, exist_ok=True)
-        
-        # Copy pack to archive
+
+        # Copy pack to archive (handles both files and subdirectories)
         for item in os.listdir(pack_dir):
             if item == ".pack_meta.json":
                 continue
-            shutil.copy2(os.path.join(pack_dir, item), archive_dir)
-        
+            src = os.path.join(pack_dir, item)
+            dst = os.path.join(archive_dir, item)
+            if os.path.isdir(src):
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, dst)
+
         shutil.rmtree(pack_dir)
         skill_registry.sync_all()
         return {"status": "success", "message": f"Pack '{pack_id}' removed and archived.", "archive_path": archive_dir}
     else:
-        raise HTTPException(status_code=404, detail="Pack not found locally.")
+        raise HTTPException(status_code=404, detail=f"Pack '{pack_id}' is not installed.")
 
 @app.get("/api/marketplace/packs/{pack_id}/agents")
 async def get_pack_agents(pack_id: str):

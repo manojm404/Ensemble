@@ -319,6 +319,11 @@ export async function uninstallPack(pack_id: string): Promise<any> {
   });
 }
 
+export async function getInstalledPacks(): Promise<Array<{pack_id: string, agent_count: number, installed_at: string, source: string}>> {
+  const res = await fetchApi('/api/marketplace/installed');
+  return res.installed_packs || [];
+}
+
 export async function updatePack(pack_id: string): Promise<any> {
   return await fetchApi(`/api/marketplace/update/${pack_id}`, {
     method: 'POST'
@@ -508,4 +513,43 @@ export async function getNamespaceStats(): Promise<NamespaceStatsResponse> {
 
 export async function getPackAgents(pack_id: string): Promise<PackAgentsResponse> {
   return await fetchApi(`/api/marketplace/packs/${pack_id}/agents`);
+}
+
+// 🆕 Universal Agent Importer Functions
+
+export interface ImportJobStatus {
+  id: string;
+  status: "cloning" | "analyzing" | "parsing" | "packaging" | "complete" | "failed";
+  progress: number;
+  message: string;
+  repo_url: string;
+  started_at: string;
+  completed_at?: string;
+  error?: string;
+  packs?: any[];
+}
+
+export async function startImportJob(url: string): Promise<{ job_id: string }> {
+  return await fetchApi('/api/marketplace/import-repo', {
+    method: 'POST',
+    body: JSON.stringify({ url })
+  });
+}
+
+export async function getImportStatus(jobId: string): Promise<ImportJobStatus> {
+  return await fetchApi(`/api/marketplace/import-status/${jobId}`);
+}
+
+export async function getImportResult(jobId: string): Promise<any> {
+  return await fetchApi(`/api/marketplace/import-result/${jobId}`);
+}
+
+export async function installImportedPack(packId: string, jobId: string): Promise<any> {
+  return await fetchApi(`/api/marketplace/import-install/${packId}?job_id=${jobId}`, {
+    method: 'POST'
+  });
+}
+
+export async function getImportFormats(): Promise<{ formats: any[] }> {
+  return await fetchApi('/api/marketplace/import-formats');
 }

@@ -36,7 +36,12 @@ const Agents = () => {
 
   const dynamicCategories = ["All", ...Array.from(new Set(agents.map(a => a.category))).sort()];
 
-  useEffect(() => { loadAgents(); }, []);
+  useEffect(() => {
+    loadAgents();
+    // 🆕 Reload agents when page is focused (e.g. returning from Marketplace or Importer)
+    window.addEventListener('focus', loadAgents);
+    return () => window.removeEventListener('focus', loadAgents);
+  }, []);
 
   async function loadAgents() {
     setLoading(true);

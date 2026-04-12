@@ -8,7 +8,6 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Chat from "./pages/Chat";
-import PersonalWorkspace from "./pages/PersonalWorkspace";
 import ExternalApp from "./pages/ExternalApp";
 import Launcher from "./pages/Launcher";
 import Agents from "./pages/Agents";
@@ -21,6 +20,7 @@ import Permissions from "./pages/Permissions";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 import Marketplace from "./pages/Marketplace";
+import ImportAgents from "./pages/ImportAgents";
 import OrgDashboard from "./pages/OrgDashboard";
 import OrgList from "./pages/OrgList";
 import OrgDepartments from "./pages/OrgDepartments";
@@ -46,11 +46,11 @@ const App = () => (
               <Route element={<AppLayout />}>
                 <Route path="/" element={<Index />} />
                 <Route path="/chat" element={<Chat />} />
-                <Route path="/personal" element={<PersonalWorkspace />} />
                 <Route path="/launcher" element={<Launcher />} />
                 <Route path="/app/:appId" element={<ExternalApp />} />
                 <Route path="/agents" element={<Agents />} />
                 <Route path="/marketplace" element={<Marketplace />} />
+                <Route path="/marketplace/import" element={<ImportAgents />} />
               <Route path="/workflows" element={<Workflows />} />
               <Route path="/workflows/:id" element={<WorkflowEditor />} />
               <Route path="/workflow-output/:id" element={<WorkflowOutput />} />

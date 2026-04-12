@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -244,6 +244,16 @@ export default function OrgDepartmentDetail() {
     a.description.toLowerCase().includes(hireSearch.toLowerCase())
   );
 
+  const groupedRegistryAgents = useMemo(() => {
+    const groups: Record<string, AgentSkill[]> = {};
+    filteredRegistryAgents.forEach(agent => {
+      const cat = agent.category || "General";
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(agent);
+    });
+    return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [filteredRegistryAgents]);
+
   return (
     <div className="min-h-screen bg-background text-foreground p-4 md:p-6 space-y-6">
       {/* HEADER */}
@@ -465,56 +475,95 @@ export default function OrgDepartmentDetail() {
 
       {/* HIRE AGENT DIALOG */}
       <Dialog open={hireDialogOpen} onOpenChange={setHireDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto glass border-border/40">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold">Hire Agent into {dept.name}</DialogTitle>
-            <DialogDescription className="text-xs">Select an agent from the registry to join this department</DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 pt-4">
-            {/* Search */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50" />
-              <Input 
-                value={hireSearch} 
-                onChange={(e) => setHireSearch(e.target.value)} 
-                placeholder="Search agents by name or description..." 
-                className="pl-9 h-9" 
-              />
+        <DialogContent className="max-w-4xl p-0 gap-0 glass border-primary/20 bg-card/95 backdrop-blur-2xl rounded-[2.5rem] overflow-hidden shadow-2xl">
+          <div className="relative overflow-hidden pt-8 px-8 pb-6 border-b border-border/30">
+            <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
+              <Users className="h-24 w-24" />
+            </div>
+            <div className="relative z-10">
+              <DialogTitle className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
+                <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30">
+                  <Plus className="h-4 w-4 text-primary" />
+                </div>
+                Hire Specialist into {dept.name}
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground mt-1.5 font-medium italic opacity-70">
+                Select an expert from the global registry to join this department
+              </DialogDescription>
             </div>
 
-            {/* Agent Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[50vh] overflow-y-auto pr-2">
-              {filteredRegistryAgents.map(agent => (
-                <button
-                  key={agent.id}
-                  onClick={() => handleHireAgent(agent)}
-                  disabled={hiringId === agent.id}
-                  className="p-4 bg-white/5 border border-border/30 rounded-xl hover:border-primary/40 hover:bg-white/10 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group"
+            {/* Search */}
+            <div className="relative mt-6">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50" />
+              <Input
+                value={hireSearch}
+                onChange={(e) => setHireSearch(e.target.value)}
+                placeholder="Search agents by name, role or expertise..."
+                className="pl-10 h-11 bg-secondary/30 border-border/40 rounded-xl focus-visible:ring-primary/20 text-sm"
+              />
+              {hireSearch && (
+                <button 
+                  onClick={() => setHireSearch("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 flex items-center justify-center rounded-full bg-muted hover:bg-border transition-colors"
                 >
-                  <div className="flex items-start gap-3">
-                    <div className="h-10 w-10 rounded-lg bg-secondary/50 flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
-                      {agent.emoji}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-sm font-bold truncate group-hover:text-primary transition-colors">{agent.name}</h4>
-                      <p className="text-[10px] text-muted-foreground line-clamp-2 mt-1">{agent.description}</p>
-                      <Badge variant="outline" className="text-[8px] mt-2 px-1.5 py-0">{agent.category}</Badge>
-                    </div>
-                  </div>
-                  {hiringId === agent.id && (
-                    <div className="mt-2 text-[10px] text-primary flex items-center gap-1">
-                      <Loader2 className="h-3 w-3 animate-spin" /> Hiring...
-                    </div>
-                  )}
+                  <X className="h-3 w-3 text-muted-foreground" />
                 </button>
-              ))}
-              {filteredRegistryAgents.length === 0 && (
-                <div className="col-span-full py-8 text-center text-muted-foreground">
-                  <p>No agents found matching your search</p>
-                </div>
               )}
             </div>
+          </div>
+
+          <div className="px-4 py-2">
+            {/* Agent Grid */}
+            <ScrollArea className="h-[500px] pr-4">
+              <div className="space-y-8 py-4">
+                {groupedRegistryAgents.map(([category, agents]) => (
+                  <div key={category} className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 whitespace-nowrap">
+                        {category}
+                      </h4>
+                      <div className="h-px w-full bg-border/40" />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {agents.map(agent => (
+                        <button
+                          key={agent.id}
+                          onClick={() => handleHireAgent(agent)}
+                          disabled={hiringId === agent.id}
+                          className="p-4 bg-white/5 border border-border/30 rounded-2xl hover:border-primary/40 hover:bg-white/10 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="h-10 w-10 rounded-xl bg-secondary/50 flex items-center justify-center text-xl group-hover:scale-110 transition-transform border border-border/20">
+                              {agent.emoji}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-sm font-bold truncate group-hover:text-primary transition-colors">{agent.name}</h4>
+                              <p className="text-[10px] text-muted-foreground line-clamp-2 mt-1 font-medium">{agent.description}</p>
+                            </div>
+                          </div>
+                          {hiringId === agent.id && (
+                            <div className="absolute inset-0 bg-background/60 backdrop-blur-[2px] flex items-center justify-center">
+                              <div className="flex items-center gap-2 px-3 py-1.5 bg-primary rounded-full shadow-lg shadow-primary/20">
+                                <Loader2 className="h-3 w-3 animate-spin text-white" />
+                                <span className="text-[10px] font-bold text-white uppercase tracking-wider">Hiring</span>
+                              </div>
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {filteredRegistryAgents.length === 0 && (
+                <div className="py-20 text-center text-muted-foreground">
+                  <div className="h-12 w-12 rounded-full bg-secondary/50 flex items-center justify-center mx-auto mb-3">
+                    <Search className="h-6 w-6 opacity-20" />
+                  </div>
+                  <p className="font-medium">No agents found matching your search</p>
+                </div>
+              )}
+            </ScrollArea>
           </div>
         </DialogContent>
       </Dialog>

@@ -51,3 +51,4 @@ deliverables/run_*/
 .gemini/
 .antigravity/
 .ipynb_checkpoints/
+integrations/agents/

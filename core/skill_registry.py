@@ -1,8 +1,25 @@
-import os, yaml, json, re
+"""
+core/skill_registry.py
+Skill Registry for Ensemble — discovers, parses, and manages agent definitions.
+
+Supports multiple formats: .md (primary), .py, .yaml, .json, .txt
+All marketplace packs are normalized to .md during import for consistency.
+"""
+import os
+import json
+import re
 from enum import Enum
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from difflib import SequenceMatcher
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
+from core.parsers.agent_data import AgentFormat
+
 
 class SkillSource(Enum):
     """Namespace isolation for skill agents."""
@@ -61,33 +78,86 @@ class SkillRegistry:
         if not os.path.exists(path): return
         for root, dirs, files in os.walk(path):
             for f in files:
+                # For packs, ONLY load .md files (all agents are converted to .md during import)
+                if source == SkillSource.PACK:
+                    if f.startswith('.') or f in ['pack.json', '.ensemble_pack', '.pack_meta.json']:
+                        continue
+                    # Skip non-.md files in packs - they should all be .md now
+                    if not f.endswith(".md"):
+                        continue
+
+                filepath = os.path.join(root, f)
                 if f.endswith(".md"):
-                    self._parse_md_agent(os.path.join(root, f), source)
+                    self._parse_md_agent(filepath, source)
+                elif f.endswith(".py"):
+                    self._parse_native_agent(filepath, source, AgentFormat.PYTHON)
+                elif f.endswith(".yaml") or f.endswith(".yml"):
+                    self._parse_native_agent(filepath, source, AgentFormat.YAML)
+                elif f.endswith(".json"):
+                    self._parse_native_agent(filepath, source, AgentFormat.JSON)
+                elif f.endswith(".txt") or f.endswith(".prompt"):
+                    self._parse_native_agent(filepath, source, AgentFormat.TEXT)
+
+    def _parse_native_agent(self, filepath: str, source: SkillSource, format: AgentFormat):
+        """Parse an agent in its native format without conversion."""
+        full_id = self._generate_skill_id(filepath, source)
+        pack_id = self._extract_pack_id(filepath, source)
+        category = self._determine_category(source, pack_id, filepath, {})
+
+        self.skills[full_id] = {
+            "id": full_id,
+            "name": self._filename_to_name(filepath),
+            "source": source.value,
+            "namespace": source.value,
+            "category": category,
+            "enabled": self.status_map.get(full_id, True),
+            "tools": ["search_web", "read_url"],
+            "emoji": self._get_emoji_for_format(format),
+            "description": f"Native {format.value} agent",
+            "filepath": filepath,
+            "pack_id": pack_id,
+            "format": format.value,
+            "version": "1.0.0",
+        }
+
+    def _get_emoji_for_format(self, format: AgentFormat) -> str:
+        if format == AgentFormat.PYTHON: return "🐍"
+        if format == AgentFormat.YAML: return "📄"
+        if format == AgentFormat.JSON: return "📋"
+        if format == AgentFormat.TEXT: return "📝"
+        return "🤖"
 
     def _parse_md_agent(self, filepath: str, source: SkillSource):
-        with open(filepath, 'r', encoding='utf-8') as f: content = f.read()
+        """Parse a markdown agent file with YAML frontmatter."""
+        # Skip non-agent files (metadata, config, etc.)
+        filename = Path(filepath).name
+        if filename.startswith('.') or filename in ['pack.json', '.ensemble_pack']:
+            return
+
+        with open(filepath, 'r', encoding='utf-8') as f:
+            content = f.read()
+
         meta = {}
         body = content
         if content.startswith("---"):
             parts = content.split("---", 2)
             if len(parts) >= 3:
                 try:
-                    meta = yaml.safe_load(parts[1]) or {}
+                    meta = yaml.safe_load(parts[1]) or {} if yaml else {}
                     body = parts[2]
-                except: pass
+                except Exception:
+                    pass
 
-        # 🆕 Generate namespaced ID
         full_id = self._generate_skill_id(filepath, source)
-        
-        # 🆕 Extract pack_id if this is a marketplace pack
         pack_id = self._extract_pack_id(filepath, source)
+        category = self._determine_category(source, pack_id, filepath, meta)
 
         self.skills[full_id] = {
             "id": full_id,
             "name": meta.get("name") or self._filename_to_name(filepath),
             "source": source.value,
-            "namespace": source.value,  # 🆕 Explicit namespace for UI
-            "category": meta.get("category", "General"),
+            "namespace": source.value,
+            "category": category,
             "enabled": self.status_map.get(full_id, True),
             "tools": meta.get("tools", ["search_web", "read_url"]),
             "emoji": meta.get("emoji", "🤖"),
@@ -95,66 +165,83 @@ class SkillRegistry:
             "description": meta.get("description", "Ensemble Agent"),
             "prompt_text": body.strip(),
             "filepath": filepath,
-            "pack_id": pack_id,  # 🆕 Pack membership tracking
-            "model_override": meta.get("model_override"),  # 🆕 Per-agent model config
-            "tags": meta.get("tags", []),  # 🆕 Semantic tags for deduplication
-            "version": meta.get("version", "1.0.0"),  # 🆕 Agent version tracking
+            "pack_id": pack_id,
+            "format": AgentFormat.MARKDOWN.value,
+            "model_override": meta.get("model_override"),
+            "tags": meta.get("tags", []),
+            "version": meta.get("version", "1.0.0"),
         }
+
+    def _determine_category(self, source: SkillSource, pack_id: Optional[str],
+                           filepath: str, meta: Dict[str, Any]) -> str:
+        """Determine human-readable category based on source and metadata."""
+        if source == SkillSource.PACK and pack_id:
+            return pack_id.replace("-", " ").replace("_", " ").title()
+        elif source == SkillSource.INTEGRATION:
+            rel_path = os.path.relpath(filepath, self.integrations_dir)
+            parts = Path(rel_path).parts
+            return parts[0].replace("-", " ").replace("_", " ").title() if parts else "Integration"
+        return meta.get("category", "General")
     
     def _generate_skill_id(self, filepath: str, source: SkillSource) -> str:
         """Generate unique skill ID with namespace isolation."""
         rel_path = os.path.relpath(filepath)
-        
+
         if source == SkillSource.NATIVE:
             rel_to_native = os.path.relpath(filepath, self.native_dir)
             clean_id = rel_to_native.replace("/", "_").replace(".md", "").replace("\\", "_")
             return f"native_{clean_id}"
-        
+
         elif source == SkillSource.CORE:
             rel_to_legacy = os.path.relpath(filepath, self.legacy_skills_dir)
             clean_id = rel_to_legacy.replace("/", "_").replace(".md", "").replace("\\", "_")
             return f"core_{clean_id}"
-        
+
         elif source in [SkillSource.PACK, SkillSource.CUSTOM]:
             # Check if file is inside a pack subdirectory
             rel_to_custom = os.path.relpath(filepath, self.custom_dir)
             parts = Path(rel_to_custom).parts
-            
+
             if len(parts) > 1 and self._is_pack_directory(parts[0]):
                 # This is a marketplace pack agent
+                # ID format: pack_{pack_id}_{agent_filename}
                 pack_id = parts[0]
-                filename = parts[-1].replace(".md", "")
-                category = parts[-2] if len(parts) > 2 else "general"
-                return f"pack_{pack_id}_{category}_{filename}"
+                filename = Path(parts[-1]).stem  # Just the filename without .md
+                # Clean up the filename: remove subdirectory info
+                return f"pack_{pack_id}_{filename}"
             else:
                 # This is a user-created custom agent
                 filename = rel_to_custom.replace("/", "_").replace(".md", "").replace("\\", "_")
                 return f"custom_{filename}"
-        
+
         elif source == SkillSource.INTEGRATION:
             rel_to_int = os.path.relpath(filepath, self.integrations_dir)
             clean_id = rel_to_int.replace("/", "_").replace(".md", "").replace("\\", "_")
             return f"integration_{clean_id}"
-        
+
         # Fallback
         clean_id = rel_path.replace("/", "_").replace(".md", "").replace("\\", "_")
         return f"{source.value}_{clean_id}"
     
     def _is_pack_directory(self, dirname: str) -> bool:
-        """Check if a directory is a marketplace pack (not a category)."""
-        # Packs typically contain multiple .md files or have .pack_meta.json
+        """Check if a directory is a marketplace pack."""
         pack_path = os.path.join(self.custom_dir, dirname)
-        if os.path.exists(pack_path):
-            # Check for pack metadata or multiple agent files
-            if os.path.exists(os.path.join(pack_path, ".pack_meta.json")):
-                return True
-            # Check if it has subdirectories (categories) or just files
-            items = os.listdir(pack_path)
-            has_subdirs = any(os.path.isdir(os.path.join(pack_path, item)) for item in items)
-            has_md_files = any(item.endswith(".md") for item in items)
-            # If it has .md files directly, it's a pack
-            return has_md_files and not has_subdirs
-        return False
+        if not os.path.exists(pack_path):
+            return False
+        
+        # Definitive indicators of a marketplace pack
+        if os.path.exists(os.path.join(pack_path, ".pack_meta.json")):
+            return True
+        if os.path.exists(os.path.join(pack_path, ".ensemble_pack")):
+            return True
+        
+        # Check for agent files (directly or in agents/ subdirectory)
+        has_md = any(f.endswith(".md") for f in os.listdir(pack_path) 
+                     if os.path.isfile(os.path.join(pack_path, f)))
+        agents_dir = os.path.join(pack_path, "agents")
+        has_agents = (os.path.isdir(agents_dir) and 
+                      any(f.endswith(".md") for f in os.listdir(agents_dir)))
+        return has_md or has_agents
     
     def _extract_pack_id(self, filepath: str, source: SkillSource) -> Optional[str]:
         """Extract pack_id from filepath if this is a pack agent."""
@@ -344,7 +431,7 @@ class SkillRegistry:
         return [
             {
                 "id": k, "name": v["name"], "description": v["description"],
-                "emoji": v["emoji"], "color": v["color"], "category": v["category"],
+                "emoji": v.get("emoji", "🤖"), "color": v.get("color", "blue"), "category": v.get("category", "General"),
                 "source": v["source"], "namespace": v.get("namespace", v["source"]),
                 "enabled": v["enabled"], "is_native": v["source"] == SkillSource.NATIVE.value,
                 "pack_id": v.get("pack_id"), "tags": v.get("tags", []),
