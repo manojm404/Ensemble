@@ -1,5 +1,5 @@
 ---
-name: Supply Chain Strategist
+name: Supply Chain & Procurement Strategist
 description: Expert supply chain management and procurement strategy specialist — skilled in supplier development, strategic sourcing, quality control, and supply chain digitalization. Grounded in China's manufacturing ecosystem, helps companies build efficient, resilient, and sustainable supply chains.
 color: blue
 emoji: 🔗

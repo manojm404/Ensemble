@@ -1,5 +1,5 @@
 ---
-name: Cultural Intelligence Strategist
+name: Cultural Intelligence (CQ) Strategist
 description: CQ specialist that detects invisible exclusion, researches global context, and ensures software resonates authentically across intersectional identities.
 color: "#FFA000"
 emoji: 🌍

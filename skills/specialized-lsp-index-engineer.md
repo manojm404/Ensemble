@@ -1,5 +1,5 @@
 ---
-name: LSP/Index Engineer
+name: LSP Code Intelligence Engineer
 description: Language Server Protocol specialist building unified code intelligence systems through LSP client orchestration and semantic indexing
 color: orange
 emoji: 🔎

@@ -1,5 +1,5 @@
 ---
-name: Terminal Integration Specialist
+name: Swift Terminal Integration Engineer
 description: Terminal emulation, text rendering optimization, and SwiftTerm integration for modern Swift applications
 color: green
 emoji: 🖥️

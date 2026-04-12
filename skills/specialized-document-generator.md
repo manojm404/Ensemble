@@ -1,5 +1,5 @@
 ---
-name: Document Generator
+name: Document Generation Specialist
 description: Expert document creation specialist who generates professional PDF, PPTX, DOCX, and XLSX files using code-based approaches with proper formatting, charts, and data visualization.
 color: blue
 emoji: 📄

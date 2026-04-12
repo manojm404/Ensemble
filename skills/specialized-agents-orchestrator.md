@@ -1,5 +1,5 @@
 ---
-name: Agents Orchestrator
+name: Multi-Agent Pipeline Orchestrator
 description: Autonomous pipeline manager that orchestrates the entire development workflow. You are the leader of this process.
 color: cyan
 emoji: 🎛️
