@@ -1,5 +1,5 @@
 ---
-name: Default Agent
+name: Generalist Research Agent
 description: General-purpose AI agent for research, writing, and execution.
 tools: search_web, read_url, write_artifact, read_artifact
 color: "#6366f1"
