@@ -572,12 +572,20 @@ class DAGWorkflowEngine:
         agent_id = f"{role.lower().replace(' ', '_')}_{node_id}_{int(time.time())}"
 
         # Enforce code output for coding agents
-        coding_keywords = ['develop', 'frontend', 'coder', 'developer', 'implement', 'write code', 'create the']
+        coding_keywords = ['develop', 'frontend', 'coder', 'developer', 'implement', 'write code', 'create the', 'html formatter', 'format html', 'build the page']
         is_coding_task = any(kw in instruction.lower() for kw in coding_keywords)
 
         enhanced_instruction = instruction
+        
+        # ROLE ISOLATION: Prevent agents from performing tasks assigned to other agents
+        role_isolation = (
+            f"\n\nIMPORTANT — ROLE ISOLATION: You are ONLY the {role}. "
+            f"Do NOT perform tasks assigned to other agents in this workflow. "
+            f"Output only what your specific role requires."
+        )
+        
         if is_coding_task:
-            enhanced_instruction = instruction + (
+            enhanced_instruction = instruction + role_isolation + (
                 "\n\nIMPORTANT: You MUST output ALL code files inside fenced code blocks. "
                 "For each file, use:\n"
                 "```html\n...full HTML code...\n```\n"
@@ -585,6 +593,12 @@ class DAGWorkflowEngine:
                 "```js\n...full JavaScript code...\n```\n"
                 "Do NOT describe code in prose. Output complete, working files. "
                 "Each file must be in its own fenced code block with the language specified."
+            )
+        else:
+            # Non-coding agents: explicitly prevent code/HTML output
+            enhanced_instruction = instruction + role_isolation + (
+                "\n\nDO NOT include code blocks, HTML, CSS, JavaScript, or any formatted code output "
+                "unless your role explicitly requires it. Output plain text only."
             )
 
         agent = ManagedAgent(
