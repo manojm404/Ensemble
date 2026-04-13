@@ -520,6 +520,8 @@ class DAGWorkflowEngine:
             instruction = self._load_skill_instruction(role)
             if instruction:
                 print(f"📋 [DAG Engine] Loaded skill prompt for {role}", flush=True)
+        else:
+            print(f"🎯 [DAG Engine] Using node instruction for role='{role}', instruction length={len(instruction)}, is_custom={node_data.get('is_custom', False)}", flush=True)
 
         # GLOBAL PANIC CHECK
         if self.gov.is_panic:

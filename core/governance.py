@@ -1959,6 +1959,11 @@ async def run_workflow(request: Request):
 
         print(f"🚀 [Workflow Execution] Starting run {workflow_id} with {len(nodes)} agents...", flush=True)
 
+        # Debug: Log each node's role and instruction
+        for n in nodes:
+            nd = n.get("data", {})
+            print(f"  📦 Node: {nd.get('label', 'Unknown')}, role={nd.get('role', 'N/A')}, is_custom={nd.get('is_custom', False)}, instruction_len={len(nd.get('instruction', ''))}", flush=True)
+
         # Initialize and Run the DAG Engine with global singletons
         engine = DAGWorkflowEngine(
             space=space,

@@ -229,10 +229,9 @@ function extractCustomAgentsFromPrompt(prompt: string, maxCount?: number): Agent
   const emojis = ['🔍', '📝', '✍️', '📋', '🎯', '🔬', '📊', '💡', '🛠️', '⚙️', '🪶', '✏️', '📚', '💻', '🎨', '🧠', '🎬'];
   let emojiIndex = 0;
 
-  // ── Phase 1: Explicit agent definitions ────────────────────────────────
+  // ── Phase 1a: Explicit agent definitions with markdown bold ───────────
   // Pattern: "**Agent 1: Research Agent (Web Researcher)**"
   const agentPattern = /\*\*Agent\s+\d+:\s*([^(*]+?)(?:\s*\([^)]*\))?\*\*/g;
-  const simplePattern = /Agent\s+\d+:\s*([^\n-]+)/g;
   const foundAgents = new Set<string>();
   let match;
 
@@ -253,7 +252,9 @@ function extractCustomAgentsFromPrompt(prompt: string, maxCount?: number): Agent
     }
   }
 
+  // ── Phase 1b: Simple "Agent N: Name" format ───────────────────────────
   if (agents.length === 0) {
+    const simplePattern = /Agent\s+\d+:\s*([^\n-]+)/g;
     while ((match = simplePattern.exec(prompt)) !== null) {
       const name = match[1].trim().split('\n')[0];
       if (name && !foundAgents.has(name)) {
@@ -269,6 +270,48 @@ function extractCustomAgentsFromPrompt(prompt: string, maxCount?: number): Agent
         });
         emojiIndex++;
       }
+    }
+  }
+
+  // ── Phase 1c: Numbered list format "1. 🧠 Agent Name - description" ──
+  // This is the most common format users write: "1. 🧠 Marketing Strategist - Do X"
+  if (agents.length === 0) {
+    // Match: "1. 🧠 Agent Name - description..." or "1. Agent Name - description..."
+    const numberedPattern = /^(\d+)\.\s*(.+?)\s*[-–—:]\s*(.+)$/gm;
+    const lines = prompt.split('\n');
+    const numberedAgents: { name: string; instruction: string; emoji: string }[] = [];
+
+    while ((match = numberedPattern.exec(prompt)) !== null) {
+      const rawName = match[2].trim();
+      const instruction = match[3].trim();
+
+      // Extract emoji if present (first 1-2 characters)
+      const emojiMatch = rawName.match(/^(\p{Emoji_Presentation}|\p{Emoji}\uFE0F)\s*/u);
+      const emoji = emojiMatch ? emojiMatch[1] : emojis[emojiIndex % emojis.length];
+      const cleanName = rawName.replace(/^\p{Emoji}*\s*/u, '').trim();
+
+      if (cleanName && cleanName.length > 1 && cleanName.length < 50 && !foundAgents.has(cleanName)) {
+        foundAgents.add(cleanName);
+        numberedAgents.push({ name: cleanName, instruction, emoji });
+        emojiIndex++;
+      }
+    }
+
+    // Only use this if we found 2+ agents in numbered format
+    if (numberedAgents.length >= 2) {
+      for (const a of numberedAgents) {
+        agents.push({
+          id: a.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, ''),
+          name: a.name,
+          description: a.instruction,
+          emoji: a.emoji,
+          category: "Custom",
+          enabled: true,
+          is_custom: true,
+          instruction: a.instruction,
+        });
+      }
+      return agents; // Return immediately — we found explicit agents
     }
   }
 
