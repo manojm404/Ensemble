@@ -277,6 +277,7 @@ export function WorkflowExecutionPanel({ nodes, edges, onClose, initialTask = ""
       })));
 
       // 3. Harvest generated artifacts (Word, Excel, PDF, code files)
+      let nonHtmlFiles: any[] = [];
       try {
         const artifacts = await fetchApi(`/api/workflows/${runId}/artifacts`, {}, true);
 
@@ -284,29 +285,30 @@ export function WorkflowExecutionPanel({ nodes, edges, onClose, initialTask = ""
         const stepFiles = result.steps.flatMap((s: any) => s.files || []);
 
         // Filter out HTML files from the files list — they belong in the Preview tab
-        const nonHtmlFiles = [...stepFiles, ...(artifacts || [])].filter((f: any) => {
+        nonHtmlFiles = [...stepFiles, ...(artifacts || [])].filter((f: any) => {
           const ext = (f.language || f.type || '').toLowerCase();
           return ext !== 'html' && ext !== 'htm';
         });
       } catch {
         // Artifacts fetch failed — continue without them
         const stepFiles = result.steps.flatMap((s: any) => s.files || []);
-        var nonHtmlFiles = stepFiles.filter((f: any) => {
+        nonHtmlFiles = stepFiles.filter((f: any) => {
           const ext = (f.language || f.type || '').toLowerCase();
           return ext !== 'html' && ext !== 'htm';
         });
       }
 
       // 4. Build final results object — include Agent Team Roster
-      const allMarkdown = result.steps.map((s: any) => `\n\n---\n\n### ${s.agent_name}\n\n${s.output}`).join("");
+      const steps = result.steps || [];
+      const allMarkdown = steps.map((s: any) => `\n\n---\n\n### ${s.agent_name}\n\n${s.output}`).join("");
 
       // Build Agent Team table so users can see WHO worked on their task
-      const agentTable = result.steps.map((s: any, i: number) => {
+      const agentTable = steps.map((s: any, i: number) => {
         const emoji = s.agent_name.match(/^\p{Emoji}/u)?.[0] || '🤖';
         const name = s.agent_name.replace(/^\p{Emoji}*\s*/u, '').trim();
         return `| ${i + 1} | ${emoji} | ${name} | ${s.duration || 0}s |`;
       }).join('\n');
-      const totalDuration = result.steps.reduce((sum: number, s: any) => sum + (s.duration || 0), 0);
+      const totalDuration = steps.reduce((sum: number, s: any) => sum + (s.duration || 0), 0);
 
       const finalResult: WorkflowOutput = {
         markdown: `# Workflow Results\n\n**Task:** ${taskInput}\n\n### 🤖 Agent Team\n\n| # | | Agent | Time |\n|---|---|---|---|\n${agentTable}\n\n**Total:** ${totalDuration}s\n${allMarkdown}`,
@@ -323,13 +325,13 @@ export function WorkflowExecutionPanel({ nodes, edges, onClose, initialTask = ""
       setFinalOutput(finalResult);
       setPhase("complete");
 
-      toast.success(`Workflow completed — ${result.steps.length} agent(s) executed`);
+      toast.success(`Workflow completed — ${steps.length} agent(s) executed`);
 
       // 5. Commit to Global Output Store
       setOutput(runId, {
         title: workflowName,
         task: taskInput,
-        agentCount: result.steps.length,
+        agentCount: steps.length,
         output: finalResult,
         completedAt: new Date(),
         workflowId: runId,
