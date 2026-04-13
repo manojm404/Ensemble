@@ -2,6 +2,9 @@
 
 > **Build, orchestrate, and govern teams of AI agents with a no-code visual studio, local LLMs, and human-in-the-loop controls.**
 
+**Current Version**: v1.5  
+**Last Updated**: April 2026
+
 ---
 
 ## 🏢 What is Ensemble?

@@ -4,7 +4,7 @@ python-dotenv
 httpx
 PyYAML
 requests
-pydantic
+pydantic[email]
 tiktoken
 sentence-transformers
 numpy
@@ -17,3 +17,34 @@ metagpt
 
 # Search
 duckduckgo_search
+
+# ============================================================
+# Phase 1: Supabase Integration & Authentication
+# ============================================================
+
+# Supabase Python client (database, auth, realtime)
+supabase>=2.0.0
+
+# JWT validation (for Supabase token verification)
+python-jose[cryptography]>=3.3.0
+
+# API key encryption (AES-256 via Fernet)
+cryptography>=41.0.0
+
+# Rate limiting middleware
+slowapi>=0.1.9
+
+# Input sanitization (XSS prevention)
+bleach>=6.1.0
+
+# ============================================================
+# Phase 9: Testing
+# ============================================================
+
+# Test framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+
+# Load testing
+locust>=2.20.0

@@ -23,7 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Copy, Download, ExternalLink, FileText, FolderTree, Eye, ChevronRight, ChevronDown, File, Folder } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { API_BASE_URL } from "@/lib/api";
+import { API_BASE_URL, fetchApi } from "@/lib/api";
 
 export interface OutputFile {
   path: string;
@@ -491,12 +491,8 @@ function LivePreview({ workflowId }: { workflowId?: string }) {
     if (!workflowId) return;
     setLoading(true);
     setError(null);
-    fetch(`${API_BASE_URL}/api/workflows/${workflowId}/preview`)
-      .then(res => {
-        if (!res.ok) throw new Error("No preview found");
-        return res.json();
-      })
-      .then(data => {
+    fetchApi(`/api/workflows/${workflowId}/preview`, {}, true)
+      .then((data: any) => {
         setHtmlContent(data.html);
         setLoading(false);
       })

@@ -25,7 +25,6 @@ import { allApps, useTabContext } from "@/lib/tab-context";
 import { useAIApps } from "@/lib/ai-apps";
 import { AddCustomAppDialog } from "@/components/home/AddCustomAppDialog";
 import { aiLogoMap } from "@/components/icons/ai-logos";
-import { OrgSwitcher } from "./OrgSwitcher";
 
 export function TopBar() {
   const navigate = useNavigate();
@@ -69,9 +68,7 @@ export function TopBar() {
         <AIAppsPopover open={aiAppsOpen} onClose={() => setAiAppsOpen(false)} />
       </div>
 
-      {/* Org Switcher */}
-      <OrgSwitcher />
-
+      {/* Tabs */}
       <AnimatePresence mode="popLayout">
         {tabs.map((tab) => {
           const active = activeTabId === tab.id;

@@ -57,7 +57,7 @@ export const allApps: AppItem[] = [
   { id: "workflows", title: "Workflows", url: "/workflows", icon: GitBranch, iconName: "GitBranch", description: "Automation pipelines" },
   { id: "macros", title: "Macros", url: "/macros", icon: Blocks, iconName: "Blocks", description: "Reusable sequences" },
   { id: "permissions", title: "Permissions", url: "/permissions", icon: Shield, iconName: "Shield", description: "Access control" },
-  { id: "orgs", title: "Organization", url: "/orgs", icon: LayoutGrid, iconName: "LayoutGrid", description: "Corporate management OS" },
+  { id: "companies", title: "Companies", url: "/companies", icon: LayoutGrid, iconName: "LayoutGrid", description: "AI-powered business entities" },
   { id: "settings", title: "Settings", url: "/settings/general", icon: Settings, iconName: "Settings", description: "App configuration" },
 ];
 

@@ -2,16 +2,96 @@
  * API Client functions.
  */
 
-export const API_BASE_URL = 'http://127.0.0.1:8088';
-export const WS_BASE_URL = 'ws://127.0.0.1:8088';
+export const API_BASE_URL = 'http://127.0.0.1:8000';
+export const WS_BASE_URL = 'ws://127.0.0.1:8000';
 
-export async function fetchApi(endpoint: string, options: RequestInit = {}) {
+/**
+ * Check if the current access token is expired or about to expire (within 5 min).
+ * If so, try to refresh it using the stored refresh token.
+ * Returns true if the token is valid or was successfully refreshed.
+ * Returns false and clears tokens if refresh failed.
+ */
+async function ensureValidToken(): Promise<boolean> {
+  const expiresAt = localStorage.getItem('ensemble_token_expires_at');
+  const refreshToken = localStorage.getItem('ensemble_refresh_token');
+
+  // No token stored — not logged in
+  if (!localStorage.getItem('ensemble_auth_token')) {
+    return false;
+  }
+
+  // Check if token is expiring within the next 5 minutes
+  const now = Date.now();
+  const expiryMargin = 5 * 60 * 1000; // 5 minutes
+  if (expiresAt && parseInt(expiresAt) - now > expiryMargin) {
+    return true; // Token still valid
+  }
+
+  // Token is expired or expiring — try to refresh
+  if (!refreshToken) {
+    clearAuthTokens();
+    return false;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!response.ok) {
+      clearAuthTokens();
+      return false;
+    }
+
+    const data = await response.json();
+    if (data.token) {
+      localStorage.setItem('ensemble_auth_token', data.token);
+      if (data.refresh_token) localStorage.setItem('ensemble_refresh_token', data.refresh_token);
+      if (data.expires_in) {
+        const expiresAt = Date.now() + (data.expires_in * 1000);
+        localStorage.setItem('ensemble_token_expires_at', expiresAt.toString());
+      }
+      return true;
+    }
+
+    clearAuthTokens();
+    return false;
+  } catch {
+    clearAuthTokens();
+    return false;
+  }
+}
+
+function clearAuthTokens() {
+  localStorage.removeItem('ensemble_auth_token');
+  localStorage.removeItem('ensemble_refresh_token');
+  localStorage.removeItem('ensemble_token_expires_at');
+}
+
+export async function fetchApi(endpoint: string, options: RequestInit = {}, silent = false) {
+  // Try to ensure we have a valid token before making the request
+  await ensureValidToken();
+
   const token = localStorage.getItem('ensemble_auth_token');
   const headers: HeadersInit = { 'Content-Type': 'application/json', ...options.headers };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
   if (!response.ok) {
+    if (response.status === 401) {
+      // Token is invalid even after refresh attempt
+      if (!silent) {
+        if (window.location.pathname !== '/auth') {
+          console.warn(`API request to ${endpoint} returned 401 — redirecting to login`);
+          localStorage.setItem('ensemble_auth_redirect', window.location.pathname);
+          clearAuthTokens();
+          window.location.href = '/auth';
+        }
+      }
+      throw new Error('Authentication required. Please log in.');
+    }
     const errorData = await response.json().catch(() => null);
     throw new Error(errorData?.detail || `API request failed: ${response.statusText}`);
   }
@@ -553,3 +633,22 @@ export async function installImportedPack(packId: string, jobId: string): Promis
 export async function getImportFormats(): Promise<{ formats: any[] }> {
   return await fetchApi('/api/marketplace/import-formats');
 }
+
+// ─── Company Endpoints ───
+
+export async function generateCompany(mission: string): Promise<any> {
+  return await fetchApi('/api/companies/generate', {
+    method: 'POST',
+    body: JSON.stringify({ mission }),
+  });
+}
+
+export async function createIssueAPI(companyId: string, issue: any): Promise<any> {
+  return await fetchApi(`/api/companies/${companyId}/issues`, {
+    method: 'POST',
+    body: JSON.stringify(issue),
+  });
+}
+
+// Re-export skill_registry access via API (the Python registry is accessed via /api/skills)
+// Consumers should call `getAgents()` to get the skill registry list.

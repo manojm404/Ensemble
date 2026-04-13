@@ -12,11 +12,19 @@ const agentKeywords: Record<string, string[]> = {
   "engineering-engineering-software-architect": ["architect", "design", "system", "scale", "infrastructure", "microservice", "database", "schema"],
   "support-support-analytics-reporter": ["data", "analytics", "analysis", "insight", "dashboard", "metrics", "report", "statistics", "csv", "sql"],
   "design-design-ui-designer": ["ui", "ux", "design", "interface", "layout", "frontend", "component", "figma", "mockup", "wireframe"],
-  "marketing-marketing-content-creator": ["copy", "marketing", "content", "blog", "email", "seo", "social media", "ad", "campaign", "landing page"],
+  "marketing-marketing-content-creator": ["copy", "marketing", "content", "blog", "email", "seo", "social media", "ad", "campaign", "landing page", "article", "write", "post", "publish", "copywriting", "editorial"],
   "engineering-engineering-devops-automator": ["deploy", "ci/cd", "pipeline", "devops", "docker", "kubernetes", "cloud", "aws", "server", "hosting"],
   "product-product-manager": ["strategy", "business", "plan", "roadmap", "market", "competitor", "growth", "product", "pricing"],
   "design-design-visual-storyteller": ["illustration", "icon", "visual", "asset", "graphic", "image", "banner", "logo", "brand"],
   "game-development-narrative-designer": ["story", "narrative", "creative", "writing", "fiction", "script", "scenario", "persona"],
+};
+
+// Keyword mapping for blog/content creation roles
+const roleKeywords: Record<string, string[]> = {
+  "research_agent": ["research", "web research", "search", "gather", "statistics", "data collection", "source", "cite", "find"],
+  "outline_agent": ["outline", "structure", "organize", "content strategist", "planning", "h1", "h2", "h3", "heading", "section"],
+  "writing_agent": ["write", "draft", "compose", "author", "copy", "content", "blog post", "article", "prose", "narrative"],
+  "editor_agent": ["edit", "review", "polish", "proofread", "grammar", "readability", "quality", "fact-check", "seo meta"],
 };
 
 // Common workflow templates for well-known patterns
@@ -35,6 +43,13 @@ function scoreAgent(agentId: string, promptLower: string): number {
   for (const kw of keywords) {
     if (promptLower.includes(kw)) {
       score += kw.length; // longer keyword matches = higher relevance
+    }
+  }
+  // Also check role keywords for custom agent roles
+  const roleKw = roleKeywords[agentId] || [];
+  for (const kw of roleKw) {
+    if (promptLower.includes(kw)) {
+      score += kw.length * 2; // Higher weight for role-specific matches
     }
   }
   return score;
@@ -140,6 +155,169 @@ function generateTaskPrompt(agentId: string, userPrompt: string): string {
   return taskMap[agentId] || `Handle your part of: "${userPrompt}"`;
 }
 
+// ─── Task-intent → agent inference ───────────────────────────────────────
+// Maps task keywords to sensible default agent teams
+const intentAgents: Record<string, { name: string; instruction: string; emoji: string }[]> = {
+  poem: [
+    { name: "Poet", instruction: "Write creative, evocative poetry with vivid imagery, rhythm, and emotion. Avoid clichés.", emoji: "🪶" },
+    { name: "Poetry Editor", instruction: "Review and polish the poem for meter, rhyme, imagery, word choice, and emotional impact.", emoji: "✏️" },
+    { name: "Subject Researcher", instruction: "Research the poem's subject for authentic details, facts, and references.", emoji: "📚" },
+  ],
+  blog: [
+    { name: "Research Agent", instruction: "Conduct thorough web research on the assigned topic. Gather facts, statistics, quotes, and sources.", emoji: "🔍" },
+    { name: "Content Strategist", instruction: "Create a detailed, SEO-friendly blog outline with logical section flow and content mapping.", emoji: "📋" },
+    { name: "Blog Writer", instruction: "Write a complete, engaging blog post following the outline. Use a natural, conversational tone.", emoji: "✍️" },
+    { name: "Editor", instruction: "Review and polish the blog post for clarity, grammar, SEO, readability, and fact accuracy.", emoji: "📝" },
+  ],
+  code: [
+    { name: "Developer", instruction: "Write clean, well-structured, production-quality code following best practices.", emoji: "💻" },
+    { name: "Code Reviewer", instruction: "Review the code for bugs, security issues, performance, and code quality. Suggest improvements.", emoji: "🔬" },
+    { name: "Tester", instruction: "Write comprehensive test cases covering normal flow, edge cases, and error handling.", emoji: "🧪" },
+  ],
+  research: [
+    { name: "Researcher", instruction: "Conduct thorough research on the topic. Gather facts, data, expert opinions, and current trends.", emoji: "🔍" },
+    { name: "Analyst", instruction: "Analyze the research findings. Identify patterns, insights, contradictions, and implications.", emoji: "📊" },
+    { name: "Report Writer", instruction: "Write a polished research report with executive summary, findings, analysis, and recommendations.", emoji: "📝" },
+  ],
+  design: [
+    { name: "UI Designer", instruction: "Design a beautiful, intuitive user interface with attention to layout, typography, and color.", emoji: "🎨" },
+    { name: "UX Researcher", instruction: "Research user needs, pain points, and behaviors. Provide UX recommendations.", emoji: "🧠" },
+    { name: "Frontend Developer", instruction: "Implement the UI design as clean, responsive HTML/CSS/JS code.", emoji: "💻" },
+  ],
+  marketing: [
+    { name: "Strategist", instruction: "Develop a comprehensive marketing strategy including target audience, channels, and messaging.", emoji: "🧠" },
+    { name: "Copywriter", instruction: "Write compelling marketing copy for campaigns, ads, or landing pages.", emoji: "✍️" },
+    { name: "Analyst", instruction: "Analyze campaign performance metrics and provide data-driven optimization recommendations.", emoji: "📊" },
+  ],
+  video: [
+    { name: "Script Writer", instruction: "Write an engaging video script with hook, body, and call-to-action.", emoji: "📝" },
+    { name: "Video Editor", instruction: "Plan video editing including transitions, effects, pacing, music, and visual enhancements.", emoji: "🎬" },
+  ],
+  default: [
+    { name: "Planner", instruction: "Break down the task into clear, actionable steps. Create a structured plan.", emoji: "📋" },
+    { name: "Executor", instruction: "Execute the plan thoroughly and produce high-quality deliverables.", emoji: "⚡" },
+    { name: "Reviewer", instruction: "Review the output for quality, accuracy, completeness, and suggest improvements.", emoji: "🔍" },
+  ],
+};
+
+// ─── Agent count parser ──────────────────────────────────────────────────
+function parseAgentCount(prompt: string): number | null {
+  const m = prompt.match(/(?:use|exactly|with|create|make|need|want)\s+(?:exactly\s+)?(\d+)\s+agent/i);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// ─── Intent detection ────────────────────────────────────────────────────
+function detectIntent(promptLower: string): string {
+  const intentMap: Record<string, string[]> = {
+    poem: ["poem", "poetry", "verse", "sonnet", "haiku", "rhyme", "write a poem"],
+    blog: ["blog", "article", "post", "write a blog", "blog post", "content creation"],
+    code: ["code", "develop", "software", "app", "program", "function", "api", "website", "html", "css", "javascript", "python"],
+    research: ["research", "analyze", "report", "study", "investigate", "survey"],
+    design: ["design", "ui", "ux", "interface", "frontend", "layout", "mockup", "wireframe"],
+    marketing: ["marketing", "campaign", "ad", "seo", "social media", "email marketing", "growth"],
+    video: ["video", "script", "youtube", "reel", "shorts"],
+  };
+  for (const [intent, keywords] of Object.entries(intentMap)) {
+    if (keywords.some(kw => promptLower.includes(kw))) return intent;
+  }
+  return "default";
+}
+
+// Extracts custom agent roles from user prompt by detecting patterns like "Agent X: description" or inferring from task intent
+function extractCustomAgentsFromPrompt(prompt: string, maxCount?: number): AgentSkill[] {
+  const agents: AgentSkill[] = [];
+  const emojis = ['🔍', '📝', '✍️', '📋', '🎯', '🔬', '📊', '💡', '🛠️', '⚙️', '🪶', '✏️', '📚', '💻', '🎨', '🧠', '🎬'];
+  let emojiIndex = 0;
+
+  // ── Phase 1: Explicit agent definitions ────────────────────────────────
+  // Pattern: "**Agent 1: Research Agent (Web Researcher)**"
+  const agentPattern = /\*\*Agent\s+\d+:\s*([^(*]+?)(?:\s*\([^)]*\))?\*\*/g;
+  const simplePattern = /Agent\s+\d+:\s*([^\n-]+)/g;
+  const foundAgents = new Set<string>();
+  let match;
+
+  while ((match = agentPattern.exec(prompt)) !== null) {
+    const name = match[1].trim();
+    if (name && !foundAgents.has(name)) {
+      foundAgents.add(name);
+      agents.push({
+        id: name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, ''),
+        name,
+        description: `Custom agent for ${name.toLowerCase()}`,
+        emoji: emojis[emojiIndex % emojis.length],
+        category: "Custom",
+        enabled: true,
+        is_custom: true,
+      });
+      emojiIndex++;
+    }
+  }
+
+  if (agents.length === 0) {
+    while ((match = simplePattern.exec(prompt)) !== null) {
+      const name = match[1].trim().split('\n')[0];
+      if (name && !foundAgents.has(name)) {
+        foundAgents.add(name);
+        agents.push({
+          id: name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, ''),
+          name,
+          description: `Custom agent for ${name.toLowerCase()}`,
+          emoji: emojis[emojiIndex % emojis.length],
+          category: "Custom",
+          enabled: true,
+          is_custom: true,
+        });
+        emojiIndex++;
+      }
+    }
+  }
+
+  // ── Phase 2: Keyword-based role inference ──────────────────────────────
+  if (agents.length === 0) {
+    const promptLower = prompt.toLowerCase();
+    const intent = detectIntent(promptLower);
+    const team = intentAgents[intent] || intentAgents.default;
+
+    // Apply maxCount limit if specified
+    const count = maxCount ? Math.min(maxCount, team.length) : team.length;
+    for (let i = 0; i < count; i++) {
+      const a = team[i];
+      agents.push({
+        id: a.name.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+        name: a.name,
+        instruction: a.instruction,
+        description: `Specialized ${a.name.toLowerCase()} for this task`,
+        emoji: a.emoji,
+        category: "Custom",
+        enabled: true,
+        is_custom: true,
+      });
+    }
+  }
+
+  // ── Phase 3: Fallback to roleKeywords mapping ──────────────────────────
+  if (agents.length === 0) {
+    const promptLower = prompt.toLowerCase();
+    for (const [roleId, keywords] of Object.entries(roleKeywords)) {
+      if (keywords.some(kw => promptLower.includes(kw))) {
+        const roleName = roleId.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        agents.push({
+          id: roleId,
+          name: roleName,
+          description: `Custom agent for ${roleName.toLowerCase()}`,
+          emoji: emojis[emojiIndex % emojis.length],
+          category: "Custom",
+          enabled: true,
+          is_custom: true,
+        });
+        emojiIndex++;
+      }
+    }
+  }
+
+  return agents;
+}
+
 export interface GeneratedWorkflow {
   name: string;
   nodes: Node[];
@@ -151,10 +329,38 @@ export async function generateWorkflowFromPrompt(
   allAgents: AgentSkill[]
 ): Promise<GeneratedWorkflow> {
   const promptLower = prompt.toLowerCase().trim();
-  
+  const requestedCount = parseAgentCount(prompt);
+
+  // 1. PRIORITY: Extract or infer custom agents from the user's prompt
+  const customAgents = extractCustomAgentsFromPrompt(prompt, requestedCount || undefined);
+  if (customAgents.length >= 2) {
+    console.log(`✅ [Workflow Generator] Using ${customAgents.length} custom agents from prompt:`, customAgents.map(a => a.name).join(", "));
+    return buildWorkflow(
+      prompt.split(/\s+/).slice(0, 4).join(" "),
+      customAgents,
+      prompt
+    );
+  }
+
+  // 2. If registry is empty, skip unreliable API — use synthetic agents
+  if (allAgents.length === 0) {
+    const count = requestedCount || 2;
+    const synthetic: AgentSkill[] = [
+      { id: "synth-planner", name: "Task Planner", description: "Plans and organizes the workflow", emoji: "📋", category: "General", enabled: true, is_native: true },
+      { id: "synth-executor", name: "Task Executor", description: "Executes the planned tasks", emoji: "⚡", category: "General", enabled: true, is_native: true },
+    ];
+    console.log(`⚠️ [Workflow Generator] Registry empty, using ${Math.min(count, synthetic.length)} synthetic agents`);
+    return buildWorkflow(
+      prompt.split(/\s+/).slice(0, 4).join(" "),
+      synthetic.slice(0, count),
+      prompt
+    );
+  }
+
+  // 3. Try backend API (only when registry has agents)
   try {
     const apiResult = await generateWorkflowAPI(prompt);
-    if (apiResult && apiResult.nodes && apiResult.edges) {
+    if (apiResult && Array.isArray(apiResult.nodes) && apiResult.nodes.length > 0 && Array.isArray(apiResult.edges) && apiResult.edges.length > 0) {
        return {
          name: apiResult.name || prompt.split(/\s+/).slice(0, 4).join(" "),
          nodes: apiResult.nodes,
@@ -165,7 +371,7 @@ export async function generateWorkflowFromPrompt(
     console.warn("Failed to generate workflow via API, falling back to local generation", e);
   }
 
-  // 1. Check for template matches first
+  // 4. Check for template matches
   for (const [pattern, template] of Object.entries(workflowTemplates)) {
     if (promptLower.includes(pattern)) {
       const matchedAgents = template.agents
@@ -178,7 +384,7 @@ export async function generateWorkflowFromPrompt(
     }
   }
 
-  // 2. Score all agents and pick the top relevant ones
+  // 3. Score all agents and pick the top relevant ones
   const scored = allAgents
     .map((agent) => ({ agent, score: scoreAgent(agent.id, promptLower) }))
     .filter((s) => s.score > 0)
@@ -194,6 +400,58 @@ export async function generateWorkflowFromPrompt(
         const agent = allAgents.find((a) => a.id === id);
         if (agent) selectedAgents.push(agent);
         if (selectedAgents.length >= 3) break;
+      }
+    }
+  }
+
+  // 4. If still fewer than 2, pick from categories matching prompt keywords
+  if (selectedAgents.length < 2 && allAgents.length > 0) {
+    const categoryKeywords: Record<string, string[]> = {
+      content: ["content", "blog", "article", "write", "post", "publish", "copy"],
+      research: ["research", "search", "analyze", "data", "report", "study"],
+      engineering: ["code", "develop", "build", "software", "app", "engineer", "program"],
+      testing: ["test", "qa", "quality", "verify", "bug", "debug"],
+      design: ["design", "ui", "ux", "interface", "visual", "frontend"],
+      marketing: ["marketing", "seo", "campaign", "social", "email", "growth"],
+      strategy: ["strategy", "plan", "manage", "coordinate", "orchestrate"],
+      data: ["data", "analytics", "ml", "machine learning", "prediction"],
+      devops: ["deploy", "infrastructure", "ci/cd", "pipeline", "cloud", "server"],
+      security: ["security", "vulnerability", "audit", "compliance", "threat"],
+    };
+
+    for (const [category, keywords] of Object.entries(categoryKeywords)) {
+      if (selectedAgents.length >= 3) break;
+      if (keywords.some(kw => promptLower.includes(kw))) {
+        const categoryAgents = allAgents.filter(a =>
+          a.category?.toLowerCase().includes(category) &&
+          !selectedAgents.find(s => s.id === a.id)
+        );
+        for (const agent of categoryAgents.slice(0, 3 - selectedAgents.length)) {
+          selectedAgents.push(agent);
+        }
+      }
+    }
+  }
+
+  // 5. If STILL no agents, pick first available from registry
+  if (selectedAgents.length < 2 && allAgents.length > 0) {
+    for (const agent of allAgents) {
+      if (!selectedAgents.find(s => s.id === agent.id)) {
+        selectedAgents.push(agent);
+        if (selectedAgents.length >= 3) break;
+      }
+    }
+  }
+
+  // 6. Last resort: create synthetic generic agents
+  if (selectedAgents.length < 2) {
+    const synthetic: AgentSkill[] = [
+      { id: "synth-planner", name: "Task Planner", description: "Plans and organizes the workflow", emoji: "📋", category: "General", enabled: true, is_native: true },
+      { id: "synth-executor", name: "Task Executor", description: "Executes the planned tasks", emoji: "⚡", category: "General", enabled: true, is_native: true },
+    ];
+    for (const s of synthetic) {
+      if (selectedAgents.length < 2 && !selectedAgents.find((a) => a.id === s.id)) {
+        selectedAgents.push(s);
       }
     }
   }
@@ -214,7 +472,18 @@ function buildWorkflow(
   const nodes: Node[] = agents.map((agent, i) => {
     const meta = getAgentMetadata(agent.id);
     const nodeId = `${agent.id}-${Date.now()}-${i}`;
-    const taskPrompt = generateTaskPrompt(agent.id, userPrompt);
+
+    const isCustom = (agent as any).is_custom || agent.id.startsWith('synth-') || !agent.id.includes('-');
+    const customInstruction = (agent as any).instruction;
+
+    // Custom agents use their pre-defined instruction + full prompt context
+    // Registered agents use the task-specific prompt map
+    const taskPrompt = isCustom
+      ? customInstruction
+        ? `${customInstruction}\n\nYour specific task: ${userPrompt}`
+        : `You are the ${agent.name}. Process this task: ${userPrompt}`
+      : generateTaskPrompt(agent.id, userPrompt);
+
     return {
       id: nodeId,
       type: "agentNode",
@@ -228,6 +497,7 @@ function buildWorkflow(
         // Critical: These fields are read by the DAG engine to execute agents
         role: agent.id,
         instruction: taskPrompt,
+        is_custom: isCustom,
       },
     };
   });

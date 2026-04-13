@@ -131,10 +131,18 @@ const Workflows = () => {
   const handleRerun = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     const wf = workflows.find(w => w.id === id);
-    if (wf) updateCurrentTabUrl(`/workflows/${id}`, wf.name);
-    sessionStorage.setItem(`rerun_${id}`, "true");
-    navigate(`/workflows/${id}`);
-    toast.info("🔄 Opening workflow for rerun");
+    if (wf) {
+      // Store previous task details so the editor can pre-fill them
+      const prevTask = {
+        title: wf.name,
+        lastOutput: wf.lastOutput?.task || "",
+        completedAt: wf.lastOutput?.completedAt || "",
+      };
+      sessionStorage.setItem(`rerun_${id}`, JSON.stringify(prevTask));
+      updateCurrentTabUrl(`/workflows/${id}`, wf.name);
+      navigate(`/workflows/${id}`);
+      toast.info(`🔄 Opening "${wf.name}" for rerun with previous details`);
+    }
   };
 
   const handleViewOutput = (e: React.MouseEvent, wf: Workflow) => {
@@ -236,14 +244,30 @@ const Workflows = () => {
                           <span className="hidden sm:inline">Output</span>
                         </button>
                       )}
-                      <button
-                        onClick={(e) => handleRerun(e, wf.id)}
-                        className="h-8 px-3 flex items-center gap-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-xs font-medium transition-all hover:scale-105 group/btn"
-                        title="Rerun workflow"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5 transition-transform group-hover/btn:-rotate-180 duration-500" />
-                        <span className="hidden sm:inline">Rerun</span>
-                      </button>
+                      {wf.runStatus === "none" ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            updateCurrentTabUrl(`/workflows/${wf.id}`, wf.name);
+                            navigate(`/workflows/${wf.id}`);
+                            toast.info(`Opening "${wf.name}" to run`);
+                          }}
+                          className="h-8 px-3 flex items-center gap-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-xs font-medium transition-all hover:scale-105 group/btn"
+                          title="Run workflow"
+                        >
+                          <Play className="h-3.5 w-3.5 transition-transform group-hover/btn:scale-110 duration-300" />
+                          <span className="hidden sm:inline">Run</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => handleRerun(e, wf.id)}
+                          className="h-8 px-3 flex items-center gap-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-xs font-medium transition-all hover:scale-105 group/btn"
+                          title="Rerun workflow"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5 transition-transform group-hover/btn:-rotate-180 duration-500" />
+                          <span className="hidden sm:inline">Rerun</span>
+                        </button>
+                      )}
                       <button
                         onClick={(e) => handleDelete(e, wf.id, wf.name)}
                         className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"

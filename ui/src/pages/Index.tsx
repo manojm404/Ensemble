@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useTabContext, allApps } from "@/lib/tab-context";
@@ -27,7 +27,9 @@ import {
   LayoutGrid,
   Building2,
   Zap,
-  Loader2
+  Loader2,
+  X,
+  Calendar
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +48,25 @@ import {
   type AgentStat,
   type PipelineStatus
 } from "@/lib/api";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { toast } from "sonner";
 
 import InboxView from "./Inbox";
 
@@ -100,6 +121,89 @@ const Index = () => {
     }
   };
 
+  // New Issue dialog state
+  const [issueDialogOpen, setIssueDialogOpen] = useState(false);
+  const [issueForm, setIssueForm] = useState({
+    title: "",
+    description: "",
+    priority: "medium" as "low" | "medium" | "high" | "critical",
+    labels: "",
+    assignee: "",
+    dueDate: "",
+    companyId: "",
+  });
+
+  const handleNewIssue = useCallback(() => {
+    setIssueForm({ title: "", description: "", priority: "medium", labels: "", assignee: "", dueDate: "", companyId: "" });
+    setIssueDialogOpen(true);
+  }, []);
+
+  const handleIssueSubmit = useCallback(async () => {
+    if (!issueForm.title.trim()) {
+      toast.error("Issue title is required");
+      return;
+    }
+    // Save issue to company-data localStorage
+    try {
+      const STORAGE_KEY = "ensemble_companies";
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const data: Record<string, any> = raw ? JSON.parse(raw) : {};
+
+      // Find or use default company
+      let companyId = issueForm.companyId || Object.keys(data)[0];
+      if (!companyId || !data[companyId]) {
+        // Create default company if none exists
+        companyId = "default_company";
+        data[companyId] = {
+          company: { id: companyId, name: "Default Company", mission: "Build great products", emoji: "🏢", status: "Active" as const, memberCount: 1, agentCount: 0, teamCount: 1 },
+          teams: [{ id: "team_1", companyId, name: "Engineering", description: "Core engineering team", emoji: "⚙️", agentCount: 0, completedIssueCount: 0 }],
+          agents: [],
+          issues: [],
+          activity: []
+        };
+      }
+
+      const newIssue = {
+        id: `issue_${Date.now()}`,
+        companyId,
+        teamId: "team_1",
+        teamName: "Engineering",
+        title: issueForm.title,
+        description: issueForm.description,
+        status: "queued" as const,
+        priority: issueForm.priority,
+        agentId: "",
+        agentName: "Unassigned",
+        agentEmoji: "🤖",
+        emoji: issueForm.priority === "critical" ? "🔴" : issueForm.priority === "high" ? "🟠" : issueForm.priority === "medium" ? "🟡" : "🟢",
+        labels: issueForm.labels.split(",").map(l => l.trim()).filter(Boolean),
+        assignee: issueForm.assignee,
+        dueDate: issueForm.dueDate,
+        created: new Date().toISOString(),
+      };
+
+      if (!data[companyId].issues) data[companyId].issues = [];
+      data[companyId].issues.unshift(newIssue);
+
+      // Add activity
+      if (!data[companyId].activity) data[companyId].activity = [];
+      data[companyId].activity.unshift({
+        id: `activity_${Date.now()}`,
+        companyId,
+        type: "issue" as const,
+        action: `New issue created: ${issueForm.title}`,
+        time: new Date().toISOString(),
+      });
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      toast.success(`Issue "${issueForm.title}" created successfully`);
+      setIssueDialogOpen(false);
+    } catch (err) {
+      console.error("Failed to create issue:", err);
+      toast.error("Failed to create issue");
+    }
+  }, [issueForm]);
+
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
@@ -150,23 +254,23 @@ const Index = () => {
         {/* SIDEBAR NAVIGATION (Within Tab) */}
         <aside className="w-64 hidden xl:flex flex-col gap-8 shrink-0">
           <div className="space-y-4">
-             <Button variant="default" className="w-full justify-start gap-3 h-10 px-4 rounded-xl shadow-lg border border-primary/20">
+             <Button variant="default" className="w-full justify-start gap-3 h-10 px-4 rounded-xl shadow-lg border border-primary/20" onClick={handleNewIssue}>
                 <Plus className="h-4 w-4" />
                 <span className="text-xs font-bold uppercase tracking-widest">New Issue</span>
              </Button>
 
               <div className="space-y-1">
                 <NavButton
-                  icon={Inbox}
-                  label="Inbox"
-                  active={activeSubTab === "inbox"}
-                  onClick={() => setActiveSubTab("inbox")}
-                />
-                <NavButton
                   icon={LayoutGrid}
                   label="Dashboard"
                   active={activeSubTab === "dashboard"}
                   onClick={() => setActiveSubTab("dashboard")}
+                />
+                <NavButton
+                  icon={Inbox}
+                  label="Inbox"
+                  active={activeSubTab === "inbox"}
+                  onClick={() => setActiveSubTab("inbox")}
                 />
               </div>
           </div>
@@ -181,26 +285,38 @@ const Index = () => {
           </div>
 
           <div className="space-y-3">
+             <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/30 px-3">Resources</h3>
+              <div className="space-y-1">
+                <button
+                   onClick={() => handleAppOpen("workflows")}
+                   className="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-xs font-bold text-muted-foreground/60 hover:text-foreground hover:bg-white/5 transition-all group"
+                >
+                   <GitBranch className="h-4 w-4" />
+                   <span>Workflows</span>
+                </button>
+                <button
+                   onClick={() => handleAppOpen("agents")}
+                   className="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-xs font-bold text-muted-foreground/60 hover:text-foreground hover:bg-white/5 transition-all group"
+                >
+                   <Bot className="h-4 w-4" />
+                   <span>Agents</span>
+                </button>
+              </div>
+          </div>
+
+          <div className="space-y-3">
              <div className="flex items-center justify-between px-3">
-                <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/30">Your Projects</h3>
-                <Plus className="h-3 w-3 text-muted-foreground/40 cursor-pointer hover:text-primary transition-colors" />
+                <h3 className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground/50 px-3">Organizations</h3>
+                <Plus className="h-3.5 w-3.5 text-muted-foreground/40 cursor-pointer hover:text-primary transition-colors" onClick={() => handleAppOpen("companies")} />
              </div>
              <div className="space-y-0.5">
-                {[
-                  { name: "Code Review Bot", color: "bg-emerald-400" },
-                  { name: "Content Pipeline", color: "bg-blue-400" },
-                  { name: "Bug Triage", color: "bg-orange-400" },
-                  { name: "ORG", color: "bg-primary", isOrg: true },
-                ].map(p => (
-                   <button
-                    key={p.name}
-                    onClick={() => p.isOrg ? handleAppOpen("orgs") : {}}
-                    className="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-xs font-bold text-muted-foreground/60 hover:text-foreground hover:bg-white/5 transition-all group"
-                   >
-                      <div className={`h-2 w-2 rounded-full ${p.color}`} />
-                      <span className="truncate">{p.name}</span>
-                   </button>
-                ))}
+                <button
+                   onClick={() => handleAppOpen("companies")}
+                   className="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-xs font-bold text-muted-foreground/60 hover:text-foreground hover:bg-white/5 transition-all group"
+                >
+                   <div className="h-2 w-2 rounded-full bg-primary" />
+                   <span className="truncate">Manage Organizations</span>
+                </button>
              </div>
           </div>
         </aside>
@@ -290,9 +406,9 @@ const Index = () => {
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.4, delay: 0.3 }}
-                  className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-5"
+                  className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-5 flex flex-col"
                 >
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center justify-between mb-4 shrink-0">
                     <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                       <Workflow className="h-4 w-4 text-primary" />
                       {pipelines.length > 0 ? "Live Pipelines" : "Pipelines"}
@@ -318,7 +434,7 @@ const Index = () => {
                       <p className="text-xs text-muted-foreground/60 mt-0.5">Run a workflow to see live status here</p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="flex-1 overflow-y-auto space-y-3 activity-feed-scroll">
                       {pipelines.slice(0, 5).map((pipeline) => (
                         <button
                           key={pipeline.id}
@@ -347,9 +463,9 @@ const Index = () => {
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.4, delay: 0.35 }}
-                  className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-5"
+                  className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-5 flex flex-col"
                 >
-                  <h2 className="text-sm font-semibold text-foreground mb-4">Recent Activity</h2>
+                  <h2 className="text-sm font-semibold text-foreground mb-4 shrink-0">Recent Activity</h2>
                   {loading ? (
                     <div className="space-y-2">
                       {[...Array(5)].map((_, i) => (
@@ -369,7 +485,7 @@ const Index = () => {
                       <p className="text-xs text-muted-foreground/60 mt-0.5">Agent actions will appear here in real-time</p>
                     </div>
                   ) : (
-                    <div className="max-h-[240px] overflow-y-auto pr-1 space-y-1">
+                    <div className="overflow-y-auto space-y-1 activity-feed-scroll">
                       {activityFeed.map((item, idx) => {
                         const Icon = getActivityIcon(item.action_type);
                         const iconColor = getActivityIconColor(item.action_type);
@@ -603,6 +719,113 @@ const Index = () => {
           )}
         </div>
       </div>
+
+      {/* New Issue Dialog */}
+      <Dialog open={issueDialogOpen} onOpenChange={setIssueDialogOpen}>
+        <DialogContent className="sm:max-w-[525px]">
+          <DialogHeader>
+            <DialogTitle>Create New Issue</DialogTitle>
+            <DialogDescription>
+              Fill in the details for the new issue. All fields except title are optional.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="issue-title">Title <span className="text-destructive">*</span></Label>
+              <Input
+                id="issue-title"
+                placeholder="Brief description of the issue"
+                value={issueForm.title}
+                onChange={(e) => setIssueForm(prev => ({ ...prev, title: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="issue-description">Description</Label>
+              <Textarea
+                id="issue-description"
+                placeholder="Detailed description of the issue"
+                value={issueForm.description}
+                onChange={(e) => setIssueForm(prev => ({ ...prev, description: e.target.value }))}
+                rows={3}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="issue-priority">Priority</Label>
+                <Select value={issueForm.priority} onValueChange={(val) => setIssueForm(prev => ({ ...prev, priority: val as any }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">🟢 Low</SelectItem>
+                    <SelectItem value="medium">🟡 Medium</SelectItem>
+                    <SelectItem value="high">🟠 High</SelectItem>
+                    <SelectItem value="critical">🔴 Critical</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="issue-assignee">Assignee</Label>
+                <Input
+                  id="issue-assignee"
+                  placeholder="Assignee name"
+                  value={issueForm.assignee}
+                  onChange={(e) => setIssueForm(prev => ({ ...prev, assignee: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="issue-labels">Labels</Label>
+                <Input
+                  id="issue-labels"
+                  placeholder="bug, frontend, urgent"
+                  value={issueForm.labels}
+                  onChange={(e) => setIssueForm(prev => ({ ...prev, labels: e.target.value }))}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="issue-due-date">Due Date</Label>
+                <div className="relative">
+                  <Input
+                    id="issue-due-date"
+                    type="date"
+                    value={issueForm.dueDate}
+                    onChange={(e) => setIssueForm(prev => ({ ...prev, dueDate: e.target.value }))}
+                    className="pr-8"
+                  />
+                  <Calendar className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="issue-company">Company</Label>
+              <Select value={issueForm.companyId} onValueChange={(val) => setIssueForm(prev => ({ ...prev, companyId: val }))}>
+                <SelectTrigger><SelectValue placeholder="Select a company" /></SelectTrigger>
+                <SelectContent>
+                  {(() => {
+                    try {
+                      const raw = localStorage.getItem("ensemble_companies");
+                      const data: Record<string, any> = raw ? JSON.parse(raw) : {};
+                      const companies = Object.values(data).map((d: any) => d.company).filter(Boolean);
+                      if (companies.length === 0) {
+                        return <SelectItem value="default_company">Default Company</SelectItem>;
+                      }
+                      return companies.map((c: any) => (
+                        <SelectItem key={c.id} value={c.id}>{c.emoji} {c.name}</SelectItem>
+                      ));
+                    } catch {
+                      return <SelectItem value="default_company">Default Company</SelectItem>;
+                    }
+                  })()}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIssueDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleIssueSubmit}>Create Issue</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

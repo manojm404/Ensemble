@@ -141,7 +141,7 @@ function NodeInspector({ node, onClose, onUpdate }: NodeInspectorProps) {
 }
 
 // --- Empty State ---
-function CanvasEmptyState({ onAddAgent, onMagicGenerate }: { onAddAgent: () => void; onMagicGenerate: () => void }) {
+function CanvasEmptyState({ onAddAgent, onMagicGenerate, agentsLoading }: { onAddAgent: () => void; onMagicGenerate: () => void; agentsLoading?: boolean }) {
   return (
     <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
       <motion.div
@@ -163,7 +163,7 @@ function CanvasEmptyState({ onAddAgent, onMagicGenerate }: { onAddAgent: () => v
           <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={onAddAgent}>
             <Plus className="h-3.5 w-3.5" /> Add Agent
           </Button>
-          <Button size="sm" className="gap-1.5 h-9" onClick={onMagicGenerate}>
+          <Button size="sm" className="gap-1.5 h-9" onClick={onMagicGenerate} disabled={agentsLoading}>
             <Wand2 className="h-3.5 w-3.5" /> AI Generate
           </Button>
         </div>
@@ -180,6 +180,7 @@ function WorkflowEditorInner() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [availableAgents, setAvailableAgents] = useState<AgentSkill[]>([]);
+  const [agentsLoading, setAgentsLoading] = useState(true);
   const [workflowName, setWorkflowName] = useState("New Workflow");
   const [addOpen, setAddOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -215,6 +216,7 @@ function WorkflowEditorInner() {
       try {
         const agents = await getAgents();
         setAvailableAgents(agents);
+        setAgentsLoading(false);
         if (routeId && routeId !== "new") {
           const wf = await getWorkflow(routeId);
           setWorkflowName(wf.name);
@@ -222,9 +224,23 @@ function WorkflowEditorInner() {
           setNodes(graph.nodes || []);
           setEdges(graph.edges || []);
           restoreStoredOutput(routeId);
+
+          // Check if this is a rerun — pre-fill previous task details
+          try {
+            const rerunData = sessionStorage.getItem(`rerun_${routeId}`);
+            if (rerunData) {
+              const prev = JSON.parse(rerunData);
+              if (prev.lastOutput) {
+                setInitialTask(prev.lastOutput);
+              }
+              setExecutionPanelOpen(true);
+              sessionStorage.removeItem(`rerun_${routeId}`);
+            }
+          } catch { /* ignore if no rerun data */ }
         }
       } catch (e) {
         console.error("Failed to load workflow data:", e);
+        setAgentsLoading(false);
       }
     };
     init();
@@ -379,7 +395,7 @@ function WorkflowEditorInner() {
         {/* Canvas */}
         <div className="flex-1 relative">
           {nodes.length === 0 && (
-            <CanvasEmptyState onAddAgent={() => setAddOpen(true)} onMagicGenerate={() => setMagicWandOpen(true)} />
+            <CanvasEmptyState onAddAgent={() => setAddOpen(true)} onMagicGenerate={() => setMagicWandOpen(true)} agentsLoading={agentsLoading} />
           )}
           <ReactFlow
             nodes={nodes}
@@ -426,7 +442,7 @@ function WorkflowEditorInner() {
                 className="bg-transparent border-none font-semibold text-sm focus-visible:ring-0 w-[140px] px-2 h-8"
               />
               <div className="w-px h-5 bg-border/50" />
-              <Button variant="ghost" size="sm" className="gap-1.5 h-8 text-xs text-primary hover:bg-primary/10" onClick={() => setMagicWandOpen(true)}>
+              <Button variant="ghost" size="sm" className="gap-1.5 h-8 text-xs text-primary hover:bg-primary/10" onClick={() => setMagicWandOpen(true)} disabled={agentsLoading || availableAgents.length === 0} title={agentsLoading ? "Loading agents..." : "AI Workflow Generator"}>
                 <Wand2 className="h-3.5 w-3.5" /> AI
               </Button>
 

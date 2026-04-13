@@ -13,11 +13,12 @@ from core.audit import AuditLogger
 from core.llm_provider import LLMProvider
 
 class SOPEngine:
-    def __init__(self, space: EnsembleSpace, audit: AuditLogger, llm: LLMProvider, gov: Any):
+    def __init__(self, space: EnsembleSpace, audit: AuditLogger, llm: LLMProvider, gov: Any, user_id: str = None):
         self.space = space
         self.audit = audit
         self.llm = llm
         self.gov = gov
+        self.user_id = user_id  # Phase 3: Multi-tenant user scoping
         self.current_state = None
         self.company_id = "company_alpha"
         self.last_response = ""
@@ -85,7 +86,8 @@ class SOPEngine:
                 audit=self.audit,
                 llm=self.llm,
                 skill_name=role_name,
-                topic_id=self.current_topic_id
+                topic_id=self.current_topic_id,
+                user_id=self.user_id,  # Phase 3: Pass user_id
             )
             self.gov.register_agent(agent.agent_id, self.company_id, role_name)
             

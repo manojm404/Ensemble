@@ -6,6 +6,9 @@
 .env.*.local
 *.pem
 *.key
+*.secret
+credentials.json
+service-account*.json
 
 # Python Environments & Artifacts
 venv/
@@ -37,13 +40,15 @@ saved_states/
 
 # Logs & Temporary Files
 *.log
+nohup.out
 /tmp/
 temp/
 .DS_Store
 Thumbs.db
 
 # Ensemble Execution Artifacts
-deliverables/run_*/
+deliverables/
+Issues
 
 # IDE & Tooling
 .vscode/

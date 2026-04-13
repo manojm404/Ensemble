@@ -1,6 +1,7 @@
 """
 core/ensemble_space.py
 EnsembleSpace with content-addressable storage (CAS) and artifact manifest.
+Phase 3: Added user_id scoping for multi-tenant isolation.
 """
 import os
 import hashlib
@@ -17,6 +18,15 @@ class EnsembleSpace(Space):
         os.makedirs(base_dir, exist_ok=True)
         self._init_manifest()
 
+    def _get_user_dir(self, user_id: str = None) -> str:
+        """Get user-scoped storage directory."""
+        if user_id:
+            user_dir = os.path.join(self.base_dir, "users", user_id)
+        else:
+            user_dir = self.base_dir
+        os.makedirs(user_dir, exist_ok=True)
+        return user_dir
+
     def _init_manifest(self):
         with sqlite3.connect(self.manifest_db) as conn:
             conn.execute("""
@@ -26,31 +36,36 @@ class EnsembleSpace(Space):
                     hash TEXT,
                     state_name TEXT,
                     company_id TEXT,
+                    user_id TEXT,
                     created_at TEXT
                 )
             """)
+            # Add user_id column if it doesn't exist (migration)
+            try:
+                conn.execute("ALTER TABLE artifacts ADD COLUMN user_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
-    def write(self, content: bytes, symbolic_name: str, state_name: str = None, company_id: str = None) -> str:
-        """Store content in CAS and record in manifest."""
+    def write(self, content: bytes, symbolic_name: str, state_name: str = None, company_id: str = None, user_id: str = None) -> str:
+        """Store content in CAS and record in manifest. Phase 3: user_id scoping."""
+        user_dir = self._get_user_dir(user_id)
         content_hash = hashlib.sha256(content).hexdigest()
-        blob_path = os.path.join(self.base_dir, content_hash)
-        
+        blob_path = os.path.join(user_dir, content_hash)
+
         # Store blob
         with open(blob_path, "wb") as f:
             f.write(content)
-            
+
         # Update manifest
         timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         with sqlite3.connect(self.manifest_db) as conn:
             conn.execute("""
-                INSERT INTO artifacts (symbolic_name, hash, state_name, company_id, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (symbolic_name, content_hash, state_name, company_id, timestamp))
-            
+                INSERT INTO artifacts (symbolic_name, hash, state_name, company_id, user_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (symbolic_name, content_hash, state_name, company_id, user_id, timestamp))
+
         # --- RAG Indexing Hook ---
-        # Index text content for semantic search
         try:
-            # Try to decode as text. If it fails (e.g. binary/image), skip indexing for now.
             text_content = content.decode('utf-8')
             from core.rag import get_vector_store
             store = get_vector_store()
@@ -58,43 +73,68 @@ class EnsembleSpace(Space):
                 "symbolic_name": symbolic_name,
                 "state_name": state_name,
                 "company_id": company_id,
+                "user_id": user_id,
                 "hash": content_hash
             })
         except (UnicodeDecodeError, ImportError, Exception) as e:
-            # Log failure but don't break the write operation
             print(f"RAG Indexing skipped for {symbolic_name}: {e}")
 
         return content_hash
 
-    def read(self, symbolic_name: str) -> Optional[bytes]:
-        """Retrieve latest artifact content by symbolic name."""
+    def read(self, symbolic_name: str, user_id: str = None) -> Optional[bytes]:
+        """Retrieve latest artifact content by symbolic name. Phase 3: user-scoped."""
+        user_dir = self._get_user_dir(user_id)
+
         with sqlite3.connect(self.manifest_db) as conn:
-            cursor = conn.execute("""
-                SELECT hash FROM artifacts WHERE symbolic_name = ? ORDER BY created_at DESC LIMIT 1
-            """, (symbolic_name,))
+            query = "SELECT hash FROM artifacts WHERE symbolic_name = ?"
+            params = [symbolic_name]
+
+            if user_id:
+                query += " AND (user_id = ? OR user_id IS NULL)"
+                params.append(user_id)
+
+            query += " ORDER BY created_at DESC LIMIT 1"
+
+            cursor = conn.execute(query, params)
             row = cursor.fetchone()
             if row:
                 content_hash = row[0]
-                blob_path = os.path.join(self.base_dir, content_hash)
+                blob_path = os.path.join(user_dir, content_hash)
                 if os.path.exists(blob_path):
                     with open(blob_path, "rb") as f:
                         return f.read()
         return None
 
-    def list_artifacts(self, state_name: str = None) -> List[str]:
-        """List symbolic names of artifacts, optionally filtered by state."""
+    def list_artifacts(self, state_name: str = None, user_id: str = None) -> List[str]:
+        """List symbolic names, optionally filtered by state and user."""
         query = "SELECT DISTINCT symbolic_name FROM artifacts"
         params = []
+        conditions = []
+
         if state_name:
-            query += " WHERE state_name = ?"
+            conditions.append("state_name = ?")
             params.append(state_name)
-            
+        if user_id:
+            conditions.append("(user_id = ? OR user_id IS NULL)")
+            params.append(user_id)
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
         with sqlite3.connect(self.manifest_db) as conn:
             cursor = conn.execute(query, params)
             return [row[0] for row in cursor.fetchall()]
 
-    def exists(self, symbolic_name: str) -> bool:
-        """Check if an artifact exists by its symbolic name."""
+    def exists(self, symbolic_name: str, user_id: str = None) -> bool:
+        """Check if an artifact exists. Phase 3: user-scoped."""
         with sqlite3.connect(self.manifest_db) as conn:
-            cursor = conn.execute("SELECT 1 FROM artifacts WHERE symbolic_name = ? LIMIT 1", (symbolic_name,))
+            query = "SELECT 1 FROM artifacts WHERE symbolic_name = ?"
+            params = [symbolic_name]
+
+            if user_id:
+                query += " AND (user_id = ? OR user_id IS NULL)"
+                params.append(user_id)
+
+            query += " LIMIT 1"
+            cursor = conn.execute(query, params)
             return cursor.fetchone() is not None

@@ -21,16 +21,27 @@ const Auth = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch('http://127.0.0.1:8088/auth/login', {
+      const res = await fetch('http://127.0.0.1:8000/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
       });
       if (!res.ok) throw new Error("Login failed");
       const data = await res.json();
-      if (data.token) localStorage.setItem('ensemble_auth_token', data.token);
+      if (data.token) {
+        localStorage.setItem('ensemble_auth_token', data.token);
+        // Store refresh token and expiration time for auto-refresh
+        if (data.refresh_token) localStorage.setItem('ensemble_refresh_token', data.refresh_token);
+        if (data.expires_in) {
+          const expiresAt = Date.now() + (data.expires_in * 1000);
+          localStorage.setItem('ensemble_token_expires_at', expiresAt.toString());
+        }
+      }
       toast.success("Successfully logged in");
-      navigate("/");
+      // Navigate to the stored redirect or home
+      const redirect = localStorage.getItem('ensemble_auth_redirect');
+      localStorage.removeItem('ensemble_auth_redirect');
+      navigate(redirect || "/");
     } catch (err: any) {
       toast.error(err.message || "Failed to login");
     } finally {
@@ -42,16 +53,26 @@ const Auth = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch('http://127.0.0.1:8088/auth/signup', {
+      const res = await fetch('http://127.0.0.1:8000/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, name })
+        body: JSON.stringify({ email, password, full_name: name })
       });
       if (!res.ok) throw new Error("Signup failed");
       const data = await res.json();
-      if (data.token) localStorage.setItem('ensemble_auth_token', data.token);
+      if (data.token) {
+        localStorage.setItem('ensemble_auth_token', data.token);
+        // Store refresh token and expiration time for auto-refresh
+        if (data.refresh_token) localStorage.setItem('ensemble_refresh_token', data.refresh_token);
+        if (data.expires_in) {
+          const expiresAt = Date.now() + (data.expires_in * 1000);
+          localStorage.setItem('ensemble_token_expires_at', expiresAt.toString());
+        }
+      }
       toast.success("Account created successfully");
-      navigate("/");
+      const redirect = localStorage.getItem('ensemble_auth_redirect');
+      localStorage.removeItem('ensemble_auth_redirect');
+      navigate(redirect || "/");
     } catch (err: any) {
       toast.error(err.message || "Failed to sign up");
     } finally {

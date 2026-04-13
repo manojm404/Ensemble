@@ -123,4 +123,14 @@
     background-image: linear-gradient(135deg, hsl(195, 90%, 50%), hsl(210, 80%, 55%));
   }
 
+  /* Hide scrollbar for activity feed and other scrollable areas */
+  .activity-feed-scroll,
+  .hide-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .activity-feed-scroll::-webkit-scrollbar,
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
 }

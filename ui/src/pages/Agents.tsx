@@ -9,7 +9,7 @@ import { MotionCard, StaggerContainer, StaggerItem } from "@/components/ui/motio
 import { useInspector } from "@/components/layout/InspectorPanel";
 import { toast } from "sonner";
 import { getAgents, syncRegistry, toggleAgentStatus, AgentSkill, AgentStats } from "@/lib/api";
-import { hireAgent } from "@/lib/org-data";
+import { hireAgent } from "@/lib/company-data";
 import { Switch } from "@/components/ui/switch";
 import { NamespaceBadge } from "@/components/ui/namespace-badge";
 

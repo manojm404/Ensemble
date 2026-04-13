@@ -24,7 +24,7 @@
  * - AnimatePresence mode="wait" on message area (prevents flash)
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { ConversationList } from "./ConversationList";
 import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
@@ -63,7 +63,6 @@ export interface Conversation {
 /**
  * Fetch topics and messages using real API endpoints
  */
-const companyId = "company_alpha";
 
 export function ChatView() {
   const { open: openInspector } = useInspector();
@@ -79,6 +78,9 @@ export function ChatView() {
   const [selectedModelId, setSelectedModelId] = useState<string>("gemini-2.5-flash");
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeProvider, setActiveProvider] = useState<{ provider: string; model: string } | null>(null);
+  const [userHasMessaged, setUserHasMessaged] = useState<Set<string>>(new Set());
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Fetch Topics
@@ -99,7 +101,7 @@ export function ChatView() {
       .catch(console.error);
 
     /** Fetch Available Models and active provider */
-    getModels().then(setAvailableModels).catch(console.error);
+    getModels().then(setAvailableModels).catch((err) => console.warn("Failed to fetch models:", err));
 
     // Load active provider from backend
     fetchApi('/api/settings/provider')
@@ -109,7 +111,7 @@ export function ChatView() {
           setActiveProvider({ provider: config.provider, model: config.model });
         }
       })
-      .catch(console.error);
+      .catch((err) => console.warn("Failed to fetch provider:", err));
 
     /** Fetch Real Agents */
     getAgents().then(data => {
@@ -122,15 +124,31 @@ export function ChatView() {
       toast.error("Failed to sync agents from backend");
     });
 
-    // Setup WebSocket
-    const ws = new WebSocket(`${WS_BASE_URL.replace('http', 'ws')}/ws/${companyId}`);
-    ws.onmessage = (event) => {
+    // WebSocket connection — non-critical, silently skip if unavailable
+    // Only attempt if user is authenticated (has a token)
+    const hasToken = localStorage.getItem('ensemble_auth_token');
+    if (hasToken) {
       try {
-        const payload = JSON.parse(event.data);
-        // Handle WebSocket message
-      } catch (e) {}
-    };
-    return () => ws.close();
+        const wsUrl = `${WS_BASE_URL.replace('http', 'ws')}/ws/default`;
+        const ws = new WebSocket(wsUrl);
+        ws.onopen = () => {};
+        ws.onmessage = (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            // Handle WebSocket message
+          } catch (e) {}
+        };
+        ws.onerror = () => {};
+        ws.onclose = () => {};
+        return () => {
+          if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+            ws.close();
+          }
+        };
+      } catch (err) {
+        // WebSocket not supported or connection failed — continue without it
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -145,6 +163,8 @@ export function ChatView() {
               timestamp: new Date(m.timestamp)
             }));
             setMessages(loadedMsgs);
+            // Mark that user has already messaged in this conversation (if it has history)
+            setUserHasMessaged(prev => new Set(prev).add(activeConversation));
           }
         })
         .catch(console.error);
@@ -152,6 +172,11 @@ export function ChatView() {
       setMessages([]);
     }
   }, [activeConversation]);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   /** Creates a new conversation with the specified (or current) agent */
   const handleNewChat = useCallback((agent?: AgentInfo) => {
@@ -167,14 +192,8 @@ export function ChatView() {
     };
     setConversations((prev) => [newConv, ...prev]);
     setActiveConversation(newConv.id);
-    setMessages([
-      {
-        id: "welcome",
-        role: "assistant",
-        content: `Hello, I'm ${a.name}. ${a.description}. You can start chatting with me right away!`,
-        timestamp: new Date(),
-      },
-    ]);
+    setMessages([]);
+    setUserHasMessaged(prev => new Set(prev).add(newConv.id));
   }, [currentAgent]);
 
   /** Switches active agent — shows toast confirmation */
@@ -204,8 +223,12 @@ export function ChatView() {
     let topicId = activeConversation;
     const isNew = !topicId;
 
+    // Mark that user has messaged in this conversation
+    const convId = topicId || Date.now().toString();
+    setUserHasMessaged(prev => new Set(prev).add(convId));
+
     if (isNew) {
-      topicId = Date.now().toString(); // Temporary local ID, or better use real UUID. Let's let the backend accept it.
+      topicId = convId;
       const newConv: Conversation = {
         id: topicId,
         title: content.slice(0, 40),
@@ -227,7 +250,9 @@ export function ChatView() {
             assistant_id: currentAgent.id
           })
         });
-      } catch (err) { }
+      } catch (err) {
+        console.warn("Failed to create topic remotely:", err);
+      }
     }
 
     const msgId = Date.now().toString();
@@ -252,7 +277,9 @@ export function ChatView() {
           agent_id: currentAgent.id
         })
       });
-    } catch (err) { }
+    } catch (err) {
+      console.warn("Failed to save user message:", err);
+    }
 
     if (!isNew && messages.length <= 1) {
       setConversations((prev) =>
@@ -265,11 +292,11 @@ export function ChatView() {
     try {
       const selectedModel = availableModels.find(m => m.id === selectedModelId) || { id: selectedModelId, provider: 'gemini' };
       const chatContext = messages.map(m => ({
-        role: m.role, 
+        role: m.role,
         content: m.content + (m.attachments?.map(a => `\n[Attached File: ${a.name} at ${a.url}]`).join('') || '')
       }));
-      chatContext.push({ 
-        role: "user", 
+      chatContext.push({
+        role: "user",
         content: content + (attachments?.map(a => `\n[Attached File: ${a.name} at ${a.url}]`).join('') || '')
       });
 
@@ -331,37 +358,33 @@ export function ChatView() {
 
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* 
+        {/*
           Agent name bar — centered.
           - Click opens settings (for Ensemble) or does nothing (for specialized agents)
           - Right side: "Back to Ensemble" button + model badge + settings gear
           DO NOT CHANGE: The relative/absolute positioning pattern here
         */}
-        <div className="flex items-center justify-center px-4 py-2.5 border-b border-border/50 bg-card/30 relative">
+        <div className="flex items-center justify-center px-4 py-3 border-b border-border/30 bg-card/20 backdrop-blur-sm relative">
           <button
             onClick={() => currentAgent.id === "ensemble" ? setSettingsOpen(true) : null}
-            className="flex items-center gap-2 px-3 py-1 rounded-lg hover:bg-muted/40 transition-colors group"
+            className="flex items-center gap-2.5 px-4 py-1.5 rounded-lg hover:bg-muted/30 transition-colors group"
           >
-            <span className="text-base">{displayEmoji}</span>
-            <h2 className="text-sm font-medium transition-all group-hover:text-primary">
+            <span className="text-lg">{displayEmoji}</span>
+            <h2 className="text-sm font-semibold transition-all group-hover:text-primary">
               {displayName}
             </h2>
             {currentAgent.id === "ensemble" && (
-              <ChevronDown className="h-3 w-3 text-muted-foreground group-hover:text-foreground transition-colors" />
+              <ChevronDown className="h-3 w-3 text-muted-foreground/50 group-hover:text-foreground transition-colors" />
             )}
           </button>
 
-          <div className="absolute right-3 flex items-center gap-1.5">
+          <div className="absolute right-3 flex items-center gap-2">
             {/* Active provider badge */}
             {activeProvider && (
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-primary/10 border border-primary/20">
-                <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-                <span className="text-[10px] font-medium text-primary">
-                  {activeProvider.provider === "gemini" ? "Gemini" : activeProvider.provider === "ollama" ? "Ollama" : activeProvider.provider}
-                </span>
-                <span className="text-[10px] text-primary/60">•</span>
-                <span className="text-[10px] text-primary/80 font-mono">
-                  {activeProvider.model}
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/5 border border-primary/10">
+                <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-[10px] font-medium text-muted-foreground">
+                  {activeProvider.provider === "gemini" ? "Gemini" : activeProvider.provider === "ollama" ? "Ollama" : activeProvider.provider === "openai" ? "OpenAI" : activeProvider.provider === "anthropic" ? "Anthropic" : activeProvider.provider}
                 </span>
               </div>
             )}
@@ -370,9 +393,9 @@ export function ChatView() {
             {currentAgent.id !== "ensemble" && (
               <button
                 onClick={() => { setCurrentAgent(defaultAgent); toast.success("Switched back to Ensemble AI Assistant"); }}
-                className="text-[10px] text-muted-foreground bg-muted/30 px-2 py-0.5 rounded-full hover:bg-muted/50 transition-colors"
+                className="text-[10px] text-muted-foreground bg-muted/20 px-2.5 py-1 rounded-full hover:bg-muted/40 transition-colors font-medium"
               >
-                ← Back to Ensemble
+                ← Ensemble
               </button>
             )}
             {/* Settings gear — only for default Ensemble agent */}
@@ -381,7 +404,7 @@ export function ChatView() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                  className="h-7 w-7 text-muted-foreground/60 hover:text-foreground"
                   onClick={() => openInspector("Workspace", <WorkspaceFileTree />)}
                 >
                   <FolderTree className="h-4 w-4" />
@@ -389,7 +412,7 @@ export function ChatView() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                  className="h-7 w-7 text-muted-foreground/60 hover:text-foreground"
                   onClick={() => setSettingsOpen(true)}
                 >
                   <Settings2 className="h-4 w-4" />
@@ -461,18 +484,23 @@ export function ChatView() {
               key="messages"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="flex-1 overflow-y-auto px-4 py-6 space-y-1"
+              className="flex-1 overflow-hidden flex flex-col"
             >
-              {messages.map((msg, i) => (
-                <motion.div
-                  key={msg.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i > messages.length - 3 ? 0.05 : 0, duration: 0.25 }}
-                >
-                  <ChatMessage message={msg} agentEmoji={displayEmoji} />
-                </motion.div>
-              ))}
+              <ScrollArea ref={scrollAreaRef} className="flex-1 px-4 py-6">
+                <div className="space-y-1">
+                  {messages.map((msg, i) => (
+                    <motion.div
+                      key={msg.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i > messages.length - 3 ? 0.05 : 0, duration: 0.25 }}
+                    >
+                      <ChatMessage message={msg} agentEmoji={displayEmoji} />
+                    </motion.div>
+                  ))}
+                  <div ref={messagesEndRef} />
+                </div>
+              </ScrollArea>
             </motion.div>
           )}
         </AnimatePresence>

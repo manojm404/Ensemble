@@ -22,7 +22,7 @@ from fastapi import (
     FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Query,
     UploadFile, File
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -38,6 +38,13 @@ from core.llm_provider import LLMProvider
 from core.dag_engine import DAGWorkflowEngine
 import core.adapters
 from core import settings
+
+# Phase 1: Supabase Integration
+from core.supabase_client import supabase, supabase_admin, verify_connection
+from core.auth import get_current_user, require_auth, is_public_path, PUBLIC_PATHS
+from core.auth_routes import router as auth_router, health_router
+from core.models.user import UserCreate, UserLogin, ProfileUpdate
+from core.models.api import HealthResponse
 
 # Universal importer and pack builder
 from core.universal_importer import universal_importer
@@ -57,22 +64,166 @@ app = FastAPI(title="Ensemble Platform API")
 os.makedirs("data/marketplace/zips", exist_ok=True)
 app.mount("/static/marketplace/zips", StaticFiles(directory="data/marketplace/zips"), name="marketplace_zips")
 
-# CORS Middleware - handles all responses including errors
+# CORS Middleware - configurable origins
+# Default includes common local dev origins. Set CORS_ORIGINS env var for production.
+cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
+if cors_origins_env:
+    cors_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+else:
+    cors_origins = [
+        "http://localhost:5173",
+        "http://localhost:8080",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:8080",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Phase 1: JWT Authentication Middleware
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """
+    Validate JWT token on all protected endpoints.
+    Skips authentication for public paths (auth endpoints, health, static files).
+    Also skips for OPTIONS requests (CORS preflight).
+
+    Dev Mode: If SUPABASE_URL is not configured or ENFORCE_AUTH=false,
+    authentication is bypassed for all requests (local development).
+    """
+    # Allow CORS preflight requests to bypass auth
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    if is_public_path(request.url.path):
+        return await call_next(request)
+
+    # Dev mode bypass: check if Supabase is configured and auth enforcement is enabled
+    import os
+    supabase_url = os.environ.get("SUPABASE_URL", "").strip()
+    enforce_auth = os.environ.get("ENFORCE_AUTH", "true").lower() in ("true", "1", "yes")
+
+    if enforce_auth and (not supabase_url or supabase_url == ""):
+        # Supabase not configured — bypass auth for local development
+        request.state.user = {
+            "id": "dev_user",
+            "email": "dev@localhost",
+            "full_name": "Local Developer",
+            "tier": "free",
+        }
+        return await call_next(request)
+
+    if not enforce_auth:
+        # Explicitly disabled — bypass auth
+        request.state.user = {
+            "id": "dev_user",
+            "email": "dev@localhost",
+            "full_name": "Local Developer",
+            "tier": "free",
+        }
+        return await call_next(request)
+
+    authorization = request.headers.get("Authorization", "")
+    if not authorization:
+        return JSONResponse(
+            status_code=401,
+            content={"status": "error", "error": "unauthorized", "message": "Authentication required. Include 'Authorization: Bearer <token>' in your request."},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        from core.auth import extract_bearer_token, verify_token_with_supabase
+        token = extract_bearer_token(authorization)
+        if not token:
+            return JSONResponse(
+                status_code=401,
+                content={"status": "error", "error": "invalid_token", "message": "Invalid Authorization header format. Use 'Bearer <token>'."},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        user_data = await verify_token_with_supabase(token)
+
+        # Fetch user profile for tier info
+        try:
+            profile_result = supabase_admin.client.table("profiles").select("*").eq("id", user_data["id"]).execute()
+            profile = profile_result.data[0] if profile_result.data else {}
+        except Exception:
+            profile = {}
+
+        request.state.user = {
+            "id": user_data["id"],
+            "email": user_data.get("email", ""),
+            "full_name": profile.get("full_name"),
+            "tier": profile.get("tier", "free"),
+        }
+    except HTTPException as e:
+        return JSONResponse(
+            status_code=e.status_code,
+            content={"status": "error", "error": "unauthorized", "message": e.detail},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=401,
+            content={"status": "error", "error": "unauthorized", "message": f"Authentication failed: {str(e)}"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return await call_next(request)
+
+
+# Phase 7: Security Headers Middleware
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Add security headers to all responses."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    # Only add CSP for non-API responses (APIs return JSON, not HTML)
+    if not request.url.path.startswith("/api/"):
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    return response
+
+
+# Phase 1/7: Rate Limiting (enabled by default for security)
+rate_limit_enabled = os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true"
+rate_limit_per_minute = int(os.getenv("RATE_LIMIT_PER_MINUTE", "100"))
+
+if rate_limit_enabled:
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+
+    limiter = Limiter(key_func=get_remote_address, default_limits=[f"{rate_limit_per_minute}/minute"])
+    app.state.limiter = limiter
+
+    @app.exception_handler(RateLimitExceeded)
+    async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+        return JSONResponse(
+            status_code=429,
+            content={"status": "error", "error": "rate_limited", "message": "Too many requests. Please slow down and try again in a moment."},
+        )
+
 # Ensure CORS headers on ALL responses (FastAPI exceptions don't always get CORS headers)
 @app.middleware("http")
 async def ensure_cors_headers(request: Request, call_next):
     response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "*"
+    origin = request.headers.get("origin", "")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    else:
+        response.headers["Access-Control-Allow-Origin"] = "*"
     return response
 
 # Setup backend service singletons
@@ -92,6 +243,14 @@ WORKSPACE_DIR = os.getenv("WORKSPACE_DIR", "data/workspace")
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
 app.mount("/api/assets", StaticFiles(directory=WORKSPACE_DIR), name="workspace_assets")
 app.mount("/api/workspace", StaticFiles(directory=WORKSPACE_DIR), name="workflow_workspace")
+
+# ============================================================
+# Phase 1: Register Auth Routes & Health Check
+# ============================================================
+# These replace the stub /auth/* endpoints and add /health
+app.include_router(auth_router)
+app.include_router(health_router)
+# ============================================================
 
 # --- Core Logic Functions ---
 
@@ -548,6 +707,9 @@ class Governance:
 gov_instance = Governance()
 engine = SOPEngine(space, audit_logger, llm, gov_instance)
 
+# Phase 3: Set engine user_id from request context at runtime (per-request)
+# This is done in the SOP execution endpoints below
+
 # --- FastAPI REST Endpoints ---
 
 @app.get("/api/models")
@@ -741,6 +903,15 @@ The Ensemble governance engine has intercepted a panic signal. All active agent 
 async def generate_chat_response_endpoint(req: Dict[str, Any]):
     """Bridge for UI chat requests to the central LLM controller."""
     messages = req.get("messages", [])
+
+    # Support simpler format: {message: str, system_prompt: str} from company issue pages
+    simple_message = req.get("message")
+    system_prompt = req.get("system_prompt")
+    if simple_message and not messages:
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": simple_message})
+
     model = req.get("model")
     provider = req.get("provider")
     agent_id = req.get("agent_id")
@@ -973,14 +1144,10 @@ async def save_workflow(update: WorkflowUpdate):
         """, (workflow_id, update.name, update.graph_json))
     return {"status": "success", "id": workflow_id}
 
-@app.post("/auth/signup")
-async def signup(request: Request):
-    return {"status": "success", "message": "User created successfully", "user_id": "user_dev_123"}
-
-@app.post("/auth/login")
-async def login(request: Request):
-    data = await request.json()
-    return {"status": "success", "token": "dev_token_ensemble_v1", "user": {"id": "user_dev_123", "email": data.get("email")}}
+# ============================================================
+# Phase 1: Old stub /auth endpoints REMOVED
+# Auth is now handled by core/auth_routes.py (registered above)
+# ============================================================
 
 @app.get("/audit/events")
 async def get_audit_events(company_id: str = "company_alpha", limit: int = 50, offset: int = 0):
@@ -1061,6 +1228,26 @@ async def get_audit_events(company_id: str = "company_alpha", limit: int = 50, o
 
 @app.post("/sop/run")
 async def run_sop(request: Request):
+    # Phase 7: Free tier SOP run limit enforcement
+    user_id = _get_user_id_from_request(request)
+    if user_id:
+        from core.supabase_client import supabase_admin
+        # Check monthly SOP run limit for free tier
+        profile_result = supabase_admin.query("profiles", "select", columns="tier,sop_run_count", eq="id", eq_value=user_id)
+        if profile_result.data and profile_result.data[0].get("tier") == "free":
+            # Check monthly run count from daily_token_usage
+            usage_result = supabase_admin.query(
+                "daily_token_usage", "select",
+                columns="sop_runs",
+                eq="user_id", eq_value=user_id,
+            )
+            total_runs = sum(r.get("sop_runs", 0) for r in (usage_result.data or []))
+            if total_runs >= 100:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Free tier limit exceeded: 100 SOP runs per month. Upgrade to Pro for unlimited runs.",
+                )
+
     data = await request.json()
     sop_path = data.get("sop_path")
     yaml_content = data.get("yaml")
@@ -1218,12 +1405,65 @@ async def validate_sop(request: Request):
 
 @app.websocket("/ws/{company_id}")
 async def websocket_endpoint(websocket: WebSocket, company_id: str):
-    await ws_manager.connect(websocket, company_id)
+    """
+    WebSocket endpoint with JWT authentication.
+
+    Connect with: ws://host/ws/{company_id}?token=YOUR_JWT_TOKEN
+    The token is validated against Supabase Auth.
+    """
+    from core.auth import verify_token_with_supabase
+    from fastapi import status as ws_status
+
+    # Extract token from query params
+    token = websocket.query_params.get("token", "")
+    if not token:
+        await websocket.close(code=ws_status.WS_1008_POLICY_VIOLATION, reason="Missing token. Connect with: ws://host/ws/{company_id}?token=JWT_TOKEN")
+        return
+
+    # Validate JWT
+    try:
+        user_data = await verify_token_with_supabase(token)
+        user = {
+            "id": user_data["id"],
+            "email": user_data.get("email", ""),
+            "tier": "free",  # Default, will be overridden if profile exists
+        }
+
+        # Fetch user's tier from profile
+        try:
+            from core.supabase_client import supabase_admin
+            profile_result = supabase_admin.client.table("profiles").select("tier").eq("id", user_data["id"]).execute()
+            if profile_result.data:
+                user["tier"] = profile_result.data[0].get("tier", "free")
+        except Exception:
+            pass
+
+        await websocket.accept()
+        await ws_manager.connect(websocket, user)
+        logger.info("🔌 [WS] User %s connected to company %s", user["id"][:8], company_id)
+    except HTTPException:
+        await websocket.close(code=ws_status.WS_1008_POLICY_VIOLATION, reason="Invalid or expired token")
+        return
+    except Exception as e:
+        logger.warning("⚠️ [WS] Connection failed: %s", e)
+        await websocket.close(code=ws_status.WS_1011_INTERNAL_ERROR, reason="Authentication failed")
+        return
+
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        await ws_manager.disconnect(websocket, company_id)
+        await ws_manager.disconnect(websocket, user.get("id"))
+    except Exception as e:
+        logger.warning("⚠️ [WS] Connection error: %s", e)
+        await ws_manager.disconnect(websocket, user.get("id"))
+
+
+@app.get("/api/ws/stats")
+async def get_ws_stats():
+    """Get WebSocket connection statistics."""
+    return ws_manager.get_stats()
+
 
 # --- Chat Management Endpoints ---
 @app.get("/api/chat/topics")
@@ -1833,7 +2073,9 @@ AVAILABLE AGENTS (grouped by category):
 OUTPUT RULES:
 - Return ONLY strict JSON. No markdown fences.
 - Create 3-7 nodes representing a logical automated mission.
-- 'data.role' MUST match an Agent ID from the list above.
+- 'data.role' should be an Agent ID from the list above IF a matching agent exists.
+- CRITICAL: If the user's prompt defines specific agent roles (like "Research Agent", "Outline Agent", etc.) that are NOT in the available agents list above, you MUST create custom agent nodes using the role descriptions from the user's prompt. Use the role name as the 'data.role' value (e.g., "research_agent", "outline_agent", "writing_agent", "editor_agent").
+- For custom agents, set 'data.is_custom': true and include the role description in 'data.instruction'.
 - 'data.model' should be 'gemini-2.5-flash'.
 - Position nodes logically in a pipeline (node 1 at x:100, y:100, node 2 at x:400, y:100 etc).
 - CRITICAL: The graph MUST be a Directed Acyclic Graph (DAG). There can be NO CYCLES or loops.
@@ -1859,6 +2101,22 @@ JSON SCHEMA:
   "edges": [
     {{ "id": "e1-2", "source": "step1", "target": "step2", "animated": true }}
   ]
+}}
+
+EXAMPLE - Custom Agents from User Prompt:
+If user defines "Research Agent: search web for data", create:
+{{
+  "id": "step1",
+  "type": "agentNode",
+  "position": {{ "x": 100, "y": 100 }},
+  "data": {{
+    "label": "Research Agent",
+    "role": "research_agent",
+    "is_custom": true,
+    "instruction": "Search web for data on the assigned topic. Gather statistics, expert opinions, case studies, and recent developments. Output a structured research brief with verified findings and source URLs.",
+    "model": "gemini-2.5-flash",
+    "temperature": 0.7
+  }}
 }}
 """
         response = await llm.chat([
@@ -1943,8 +2201,40 @@ async def get_workflow_preview(workflow_id: str):
     """
     Serves the index.html or preview.html from the workflow's workspace for preview.
     Returns the actual HTML content so the frontend can render it in an iframe via srcdoc.
+    Automatically inlines style.css and script.js into the HTML so they work in srcdoc.
     """
     workflow_ws_dir = os.path.join("data", "workspace", f"workflow_{workflow_id}")
+
+    def _inline_assets(html_content: str, base_dir: str) -> str:
+        """Inline style.css and script.js into the HTML so srcdoc works."""
+        # Inline CSS: replace <link rel="stylesheet" href="style.css"> with <style>...</style>
+        css_path = os.path.join(base_dir, "style.css")
+        if os.path.exists(css_path):
+            with open(css_path, "r", encoding="utf-8") as f:
+                css_content = f.read()
+            # Replace the link tag
+            import re
+            html_content = re.sub(
+                r'<link[^>]*href=["\']style\.css["\'][^>]*/?>',
+                f'<style>{css_content}</style>',
+                html_content,
+                flags=re.IGNORECASE
+            )
+
+        # Inline JS: replace <script src="script.js"></script> with <script>...</script>
+        js_path = os.path.join(base_dir, "script.js")
+        if os.path.exists(js_path):
+            with open(js_path, "r", encoding="utf-8") as f:
+                js_content = f.read()
+            import re
+            html_content = re.sub(
+                r'<script\s+src=["\']script\.js["\'][^>]*></script>',
+                f'<script>{js_content}</script>',
+                html_content,
+                flags=re.IGNORECASE
+            )
+
+        return html_content
 
     # First check workflow-specific directory
     if os.path.exists(workflow_ws_dir):
@@ -1956,6 +2246,8 @@ async def get_workflow_preview(workflow_id: str):
                 if os.path.exists(index_path):
                     with open(index_path, "r", encoding="utf-8") as f:
                         html_content = f.read()
+                    # Inline CSS and JS from the same directory
+                    html_content = _inline_assets(html_content, node_path)
                     return {
                         "html": html_content,
                         "node": node_dir,
@@ -1967,6 +2259,7 @@ async def get_workflow_preview(workflow_id: str):
         if os.path.exists(preview_path):
             with open(preview_path, "r", encoding="utf-8") as f:
                 html_content = f.read()
+            html_content = _inline_assets(html_content, workflow_ws_dir)
             return {"html": html_content, "node": "legacy", "path": "preview.html"}
 
     # Fallback: look for HTML files in the global workspace that may have been generated
@@ -1987,6 +2280,7 @@ async def get_workflow_preview(workflow_id: str):
             latest_path, _, latest_name = html_files[0]
             with open(latest_path, "r", encoding="utf-8") as f:
                 html_content = f.read()
+            html_content = _inline_assets(html_content, os.path.dirname(latest_path))
             return {"html": html_content, "node": "global", "path": latest_name}
 
     raise HTTPException(status_code=404, detail="No HTML preview found for this workflow")
@@ -2945,7 +3239,7 @@ async def run_org_task(org_id: str, task_id: str, request: Request):
         task_title = data.get("title", "Task")
         task_desc = data.get("description", "")
         agent_id = data.get("agent_id", "")
-        
+
         # Call the LLM with the task
         response = await llm.chat(
             messages=[{"role": "user", "content": f"{task_title}\n\n{task_desc}\n\nPlease complete this task."}],
@@ -2953,7 +3247,7 @@ async def run_org_task(org_id: str, task_id: str, request: Request):
             provider=data.get("provider", "gemini"),
             agent_name=agent_id or "Ensemble specialist"
         )
-        
+
         return {
             "success": True,
             "task_id": task_id,
@@ -2962,3 +3256,395 @@ async def run_org_task(org_id: str, task_id: str, request: Request):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Task execution failed: {str(e)}")
+
+
+# ============================================================
+# Companies — Mission-Based Company Generation & Issue Routing
+# ============================================================
+
+_company_store: Dict[str, Dict[str, Any]] = {}
+
+# Keyword → company structure mapping for mission decoding
+_MISSION_PATTERNS = [
+    {
+        "keywords": ["saas", "platform", "web app", "analytics", "dashboard"],
+        "structure": {
+            "name": "SaaS Platform",
+            "emoji": "☁️",
+            "teams": [
+                {"name": "Engineering", "emoji": "⚙️", "description": "Build and maintain the platform", "agents": [
+                    {"name": "Backend Architect", "role": "Backend Systems Architect", "emoji": "🏗️", "model": "gemini-2.5-flash", "skills": ["API Design", "System Architecture"]},
+                    {"name": "Frontend Developer", "role": "Frontend Experience Developer", "emoji": "🖥️", "model": "gemini-2.5-flash", "skills": ["React", "TypeScript"]},
+                ]},
+                {"name": "Design", "emoji": "🎨", "description": "UI/UX and brand identity", "agents": [
+                    {"name": "UI Designer", "role": "UI Systems Designer", "emoji": "🎨", "model": "gemini-2.5-flash", "skills": ["Design Systems", "Visual Design"]},
+                ]},
+                {"name": "Marketing", "emoji": "📣", "description": "Growth and content", "agents": [
+                    {"name": "Content Strategist", "role": "Multi-Platform Content Strategist", "emoji": "✍️", "model": "gemini-2.5-flash", "skills": ["Content Strategy", "SEO"]},
+                ]},
+            ],
+        },
+    },
+    {
+        "keywords": ["ecommerce", "e-commerce", "shop", "store", "retail"],
+        "structure": {
+            "name": "E-Commerce Company",
+            "emoji": "🛒",
+            "teams": [
+                {"name": "Engineering", "emoji": "⚙️", "description": "Platform and integrations", "agents": [
+                    {"name": "Full-Stack Developer", "role": "Senior Full-Stack Developer", "emoji": "💎", "model": "gemini-2.5-flash", "skills": ["E-Commerce", "Payment Integration"]},
+                ]},
+                {"name": "Marketing", "emoji": "📣", "description": "Customer acquisition", "agents": [
+                    {"name": "SEO Lead", "role": "Technical SEO Lead", "emoji": "🔍", "model": "gemini-2.5-flash", "skills": ["SEO", "Analytics"]},
+                ]},
+            ],
+        },
+    },
+    {
+        "keywords": ["game", "gaming", "unity", "unreal", "gamedev"],
+        "structure": {
+            "name": "Game Studio",
+            "emoji": "🎮",
+            "teams": [
+                {"name": "Engineering", "emoji": "⚙️", "description": "Game engine and systems", "agents": [
+                    {"name": "Gameplay Programmer", "role": "Godot Gameplay Programmer", "emoji": "🎯", "model": "gemini-2.5-flash", "skills": ["GDScript", "Game Architecture"]},
+                ]},
+                {"name": "Game Design", "emoji": "🎮", "description": "Mechanics and narrative", "agents": [
+                    {"name": "Game Designer", "role": "Game Systems Designer", "emoji": "🎮", "model": "gemini-2.5-flash", "skills": ["Mechanics Design", "Level Design"]},
+                    {"name": "Narrative Architect", "role": "Game Narrative Architect", "emoji": "📖", "model": "gemini-2.5-flash", "skills": ["Story Design", "Dialogue"]},
+                ]},
+            ],
+        },
+    },
+    {
+        "keywords": ["mobile", "ios", "android", "app"],
+        "structure": {
+            "name": "Mobile App Studio",
+            "emoji": "📱",
+            "teams": [
+                {"name": "Engineering", "emoji": "⚙️", "description": "Mobile development", "agents": [
+                    {"name": "Mobile Developer", "role": "Cross-Platform Mobile Developer", "emoji": "📲", "model": "gemini-2.5-flash", "skills": ["React Native", "Flutter"]},
+                ]},
+            ],
+        },
+    },
+]
+
+
+def _build_company_from_mission(mission: str) -> Dict[str, Any]:
+    """Match a mission statement to a company structure using keyword scoring."""
+    lower = mission.lower()
+    best_match = _MISSION_PATTERNS[0]["structure"]
+    best_score = 0
+
+    for pattern in _MISSION_PATTERNS:
+        score = sum(1 for k in pattern["keywords"] if k in lower)
+        if score > best_score:
+            best_score = score
+            best_match = pattern["structure"]
+
+    if best_score == 0:
+        words = " ".join(w.capitalize() for w in mission.split()[:4])
+        best_match = {
+            "name": f"{words} Co.",
+            "emoji": "🏢",
+            "teams": [
+                {"name": "Engineering", "emoji": "⚙️", "description": "Build and ship the product", "agents": [
+                    {"name": "Senior Developer", "role": "Senior Full-Stack Developer", "emoji": "💎", "model": "gemini-2.5-flash", "skills": ["Full-Stack Development", "Architecture"]},
+                ]},
+            ],
+        }
+    return best_match
+
+
+@app.get("/api/companies")
+async def list_companies():
+    """List all companies."""
+    return list(_company_store.values())
+
+
+@app.post("/api/companies")
+async def create_company(request: Request):
+    """Create a company manually or from mission."""
+    try:
+        data = await request.json()
+        company_id = data.get("id") or f"comp-{uuid.uuid4().hex[:10]}"
+        company = {
+            "id": company_id,
+            "name": data.get("name", "New Company"),
+            "mission": data.get("mission", ""),
+            "emoji": data.get("emoji", "🏢"),
+            "status": data.get("status", "Active"),
+            "created_at": datetime.now().isoformat(),
+        }
+        _company_store[company_id] = company
+        return {"success": True, **company}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create company: {str(e)}")
+
+
+@app.post("/api/companies/generate")
+async def generate_company(request: Request):
+    """
+    Generate a company from a mission statement.
+    Returns the full structure: CEO + teams + agents.
+    """
+    try:
+        data = await request.json()
+        mission = data.get("mission", "")
+        if not mission:
+            raise HTTPException(status_code=400, detail="Mission is required")
+
+        structure = _build_company_from_mission(mission)
+        # Always include CEO at the top
+        return {
+            "name": structure["name"],
+            "emoji": structure["emoji"],
+            "teams": structure["teams"],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate company: {str(e)}")
+
+
+@app.get("/api/companies/{company_id}")
+async def get_company(company_id: str):
+    """Get a specific company."""
+    company = _company_store.get(company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return company
+
+
+@app.delete("/api/companies/{company_id}")
+async def delete_company(company_id: str):
+    """Delete a company."""
+    if company_id not in _company_store:
+        raise HTTPException(status_code=404, detail="Company not found")
+    del _company_store[company_id]
+    return {"success": True, "message": f"Company {company_id} deleted"}
+
+
+@app.post("/api/companies/{company_id}/issues")
+async def create_company_issue(company_id: str, request: Request):
+    """Create and auto-route an issue within a company."""
+    if company_id not in _company_store:
+        raise HTTPException(status_code=404, detail="Company not found")
+    try:
+        data = await request.json()
+        return {
+            "success": True,
+            "company_id": company_id,
+            "issue": {
+                "title": data.get("title"),
+                "team_id": data.get("teamId"),
+                "agent_id": data.get("agentId"),
+                "priority": data.get("priority", "medium"),
+            },
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create issue: {str(e)}")
+
+
+# ============================================================
+# Phase 3: Multi-Tenant Settings & API Key Management
+# ============================================================
+
+def _get_user_id_from_request(request: Request) -> Optional[str]:
+    """Extract user_id from request state (set by auth middleware)."""
+    if hasattr(request.state, "user") and request.state.user:
+        user_data = request.state.user
+        if isinstance(user_data, dict):
+            return user_data.get("id")
+        return getattr(user_data, "id", None)
+    return None
+
+
+@app.get("/api/settings")
+async def get_user_settings_endpoint(request: Request):
+    """Get the current user's settings from Supabase."""
+    user_id = _get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        from core.settings import get_user_settings
+        settings_data = get_user_settings(user_id)
+        return {"status": "success", "settings": settings_data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load settings: {str(e)}")
+
+
+@app.put("/api/settings")
+async def save_user_settings_endpoint(request: Request):
+    """Save the current user's settings to Supabase."""
+    user_id = _get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        data = await request.json()
+        from core.settings import save_user_settings
+        saved = save_user_settings(user_id, data)
+        return {"status": "success", "settings": saved}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save settings: {str(e)}")
+
+
+@app.get("/api/settings/api-keys")
+async def list_api_keys(request: Request):
+    """List user's API keys (masked, never show full key)."""
+    user_id = _get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        from core.supabase_client import supabase_admin
+        from core.security.crypto import mask_key
+
+        client = supabase_admin.client
+        result = client.table("user_api_keys").select("id,provider,key_suffix,is_active,last_used_at,created_at").eq("user_id", user_id).execute()
+
+        return {
+            "status": "success",
+            "keys": [{"id": k["id"], "provider": k["provider"], "key_suffix": k["key_suffix"], "is_active": k["is_active"], "last_used_at": k.get("last_used_at"), "created_at": k.get("created_at")} for k in (result.data or [])],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list API keys: {str(e)}")
+
+
+@app.post("/api/settings/api-keys")
+async def add_api_key(request: Request):
+    """Add a new API key (encrypted before storage)."""
+    user_id = _get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        data = await request.json()
+        provider = data.get("provider", "").lower()
+        api_key = data.get("api_key", "")
+
+        if not provider or not api_key:
+            raise HTTPException(status_code=400, detail="provider and api_key are required")
+
+        from core.supabase_client import supabase_admin
+        from core.security.crypto import encrypt_api_key, mask_key
+
+        encrypted = encrypt_api_key(api_key)
+        suffix = mask_key(api_key, 6)
+
+        result = supabase_admin.query("user_api_keys", "upsert", data={
+            "user_id": user_id,
+            "provider": provider,
+            "encrypted_key": encrypted,
+            "key_suffix": suffix,
+            "is_active": True,
+        }, on_conflict="user_id,provider")
+
+        if result.data and len(result.data) > 0:
+            return {
+                "status": "success",
+                "key": {"id": result.data[0]["id"], "provider": provider, "key_suffix": suffix, "is_active": True},
+            }
+        raise HTTPException(status_code=500, detail=f"Failed to save API key: {result.error}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to add API key: {str(e)}")
+
+
+@app.get("/api/settings/api-keys")
+async def list_api_keys(request: Request):
+    """List user's API keys (masked, never show full key)."""
+    user_id = _get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        from core.supabase_client import supabase_admin
+
+        result = supabase_admin.query("user_api_keys", "select", columns="id,provider,key_suffix,is_active,last_used_at,created_at", eq="user_id", eq_value=user_id)
+
+        return {
+            "status": "success",
+            "keys": [{"id": k["id"], "provider": k["provider"], "key_suffix": k["key_suffix"], "is_active": k["is_active"], "last_used_at": k.get("last_used_at"), "created_at": k.get("created_at")} for k in (result.data or [])],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list API keys: {str(e)}")
+
+
+@app.delete("/api/settings/api-keys/{key_id}")
+async def delete_api_key(key_id: str, request: Request):
+    """Remove an API key."""
+    user_id = _get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        from core.supabase_client import supabase_admin
+
+        result = supabase_admin.query("user_api_keys", "delete", eq="id", eq_value=key_id)
+
+        if result.data and len(result.data) > 0:
+            return {"status": "success", "message": "API key removed"}
+        raise HTTPException(status_code=404, detail="API key not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete API key: {str(e)}")
+
+
+@app.post("/api/settings/api-keys/test")
+async def test_api_key(request: Request):
+    """Test an API key by sending a simple prompt."""
+    user_id = _get_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        data = await request.json()
+        provider = data.get("provider", "gemini")
+        api_key = data.get("api_key", "")
+
+        if not api_key:
+            # Try to use stored key
+            from core.supabase_client import supabase_admin
+            from core.security.crypto import decrypt_api_key
+
+            client = supabase_admin.client
+            result = client.table("user_api_keys").select("encrypted_key").eq("user_id", user_id).eq("provider", provider).eq("is_active", True).execute()
+
+            if result.data:
+                api_key = decrypt_api_key(result.data[0]["encrypted_key"])
+            else:
+                raise HTTPException(status_code=400, detail=f"No active {provider} API key found")
+
+        # Test the key
+        import httpx
+        async with httpx.AsyncClient(timeout=15) as hc:
+            if provider == "gemini":
+                resp = await hc.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+                    json={"contents": [{"parts": [{"text": "Reply OK"}]}]},
+                )
+            elif provider == "openai":
+                resp = await hc.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Reply OK"}]},
+                )
+            else:
+                raise HTTPException(status_code=400, detail=f"Unsupported provider for testing: {provider}")
+
+        if resp.status_code == 200:
+            return {"status": "success", "message": f"{provider} API key is valid", "success": True}
+        else:
+            return {"status": "error", "message": f"API key test failed: {resp.text[:200]}", "success": False}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Test failed: {str(e)}")

@@ -29,12 +29,14 @@ except ImportError:
 class ManagedAgent(Agent):
     def __init__(self, agent_id: str, company_id: str, system_prompt: str,
                  gov: Any, audit: Any, llm: LLMProvider, max_steps: int = 10,
-                 skill_name: Optional[str] = None, topic_id: Optional[str] = None):
+                 skill_name: Optional[str] = None, topic_id: Optional[str] = None,
+                 user_id: Optional[str] = None):
         super().__init__(name=agent_id, system_prompt=system_prompt)
 
         self.agent_id = agent_id
         self.company_id = company_id
         self.topic_id = topic_id
+        self.user_id = user_id  # Phase 3: Multi-tenant user scoping
         self.gov = gov
         self.audit = audit
         self.llm = llm
@@ -46,6 +48,12 @@ class ManagedAgent(Agent):
         self._history_loaded = False
         self.tools = []
         self.workflow_id = "default" # Default workflow_id for budget checks
+
+        # Phase 3: User-scoped workspace directory
+        if user_id:
+            self.workspace_dir = f"data/workspace/users/{user_id}/{agent_id}"
+        else:
+            self.workspace_dir = f"data/workspace/{company_id}/{agent_id}"
 
         # Apply specialization AFTER initialization so logging (audit) works
         if skill_name:
