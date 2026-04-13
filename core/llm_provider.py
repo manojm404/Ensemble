@@ -446,7 +446,7 @@ class LLMProvider:
             "generationConfig": {
                 "temperature": kwargs.get("temperature", 0.7),
                 "topP": kwargs.get("top_p", 0.95),
-                "maxOutputTokens": kwargs.get("max_tokens", 8192)
+                "maxOutputTokens": kwargs.get("max_tokens", 32768)  # Increased for full HTML/code output
             }
         }
         
