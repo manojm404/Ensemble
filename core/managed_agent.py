@@ -13,6 +13,12 @@ from core.llm_provider import LLMProvider
 from core.conversation_memory import Message
 from core.skill_registry import skill_registry
 from core.tools import read_artifact, search_web, write_artifact, list_artifacts
+# Import financial data tools
+try:
+    from core.tools import get_stock_data, get_technical_indicators, get_company_fundamentals, get_market_news
+    FINANCIAL_TOOLS_AVAILABLE = True
+except ImportError:
+    FINANCIAL_TOOLS_AVAILABLE = False
 
 # Security & cost control modules
 from core.security import recursion_guard
@@ -30,24 +36,28 @@ class ManagedAgent(Agent):
     def __init__(self, agent_id: str, company_id: str, system_prompt: str,
                  gov: Any, audit: Any, llm: LLMProvider, max_steps: int = 10,
                  skill_name: Optional[str] = None, topic_id: Optional[str] = None,
-                 user_id: Optional[str] = None):
+                 user_id: Optional[str] = None, tools: Optional[List[str]] = None,
+                 tool_schemas: Optional[List[Dict[str, Any]]] = None,
+                 is_coding_task: bool = False):
         super().__init__(name=agent_id, system_prompt=system_prompt)
 
         self.agent_id = agent_id
         self.company_id = company_id
         self.topic_id = topic_id
-        self.user_id = user_id  # Phase 3: Multi-tenant user scoping
+        self.user_id = user_id
         self.gov = gov
         self.audit = audit
         self.llm = llm
         self.max_steps = max_steps
         self.step_count = 0
         self.last_outputs: List[str] = []
-        self._budget_remaining = 0.0 # Will be updated by governance
+        self._budget_remaining = 0.0
         self._current_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         self._history_loaded = False
-        self.tools = []
-        self.workflow_id = "default" # Default workflow_id for budget checks
+        self.tools = tools or []
+        self.tool_schemas = tool_schemas or []
+        self.is_coding_task = is_coding_task
+        self.workflow_id = "default"
 
         # Phase 3: User-scoped workspace directory
         if user_id:
@@ -68,8 +78,17 @@ class ManagedAgent(Agent):
             "write_artifact": write_artifact,
             "list_artifacts": list_artifacts
         }
-        
-        # Build the tool schemas for the LLM
+
+        # Add financial data tools if available
+        if FINANCIAL_TOOLS_AVAILABLE:
+            self.functional_tools.update({
+                "get_stock_data": get_stock_data,
+                "get_technical_indicators": get_technical_indicators,
+                "get_company_fundamentals": get_company_fundamentals,
+                "get_market_news": get_market_news,
+            })
+
+        # Build the tool schemas for the LLM - always include base tools
         self.tool_schemas = [
             {
                 "name": "read_artifact",
@@ -109,8 +128,68 @@ class ManagedAgent(Agent):
                 "name": "list_artifacts",
                 "description": "List all files available in the current workspace.",
                 "parameters": {"type": "object", "properties": {}}
-            }
+            },
         ]
+
+        # Add financial tool schemas if available
+        if FINANCIAL_TOOLS_AVAILABLE:
+            self.tool_schemas.extend([
+                {
+                    "name": "get_stock_data",
+                    "description": "Get real-time stock price, volume, market cap, 52-week range, and historical price data for a ticker symbol.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "ticker": {"type": "string", "description": "Stock ticker symbol (e.g., AAPL, NVDA, TSLA)"},
+                            "period": {"type": "string", "description": "Time period: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max"}
+                        },
+                        "required": ["ticker"]
+                    }
+                },
+                {
+                    "name": "get_technical_indicators",
+                    "description": "Calculate technical indicators: RSI, MACD, Bollinger Bands, KDJ, CCI, ATR.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "ticker": {"type": "string", "description": "Stock ticker symbol"},
+                            "period": {"type": "string", "description": "Time period for analysis"}
+                        },
+                        "required": ["ticker"]
+                    }
+                },
+                {
+                    "name": "get_company_fundamentals",
+                    "description": "Get company fundamental data: P/E ratio, revenue, profit margins, ROE, debt-to-equity, dividends.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "ticker": {"type": "string", "description": "Stock ticker symbol"}
+                        },
+                        "required": ["ticker"]
+                    }
+                },
+                {
+                    "name": "get_market_news",
+                    "description": "Get latest market news articles with sentiment hints for a ticker.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "ticker": {"type": "string", "description": "Stock ticker symbol (optional, leave empty for general market news)"},
+                            "limit": {"type": "integer", "description": "Number of articles to fetch"}
+                        },
+                        "required": []
+                    }
+                },
+            ])
+
+        # Filter tool_schemas to only include tools specified for this agent
+        if self.tools:
+            # Keep base tools + requested custom tools
+            allowed_tools = set(self.tools) | {"read_artifact", "search_web", "write_artifact", "list_artifacts"}
+            self.tool_schemas = [s for s in self.tool_schemas if s["name"] in allowed_tools]
+            # Also filter functional_tools
+            self.functional_tools = {k: v for k, v in self.functional_tools.items() if k in allowed_tools}
 
     def _apply_skill(self, skill_name: str):
         """Prepend skill prompt and register tools."""
@@ -212,22 +291,32 @@ class ManagedAgent(Agent):
         # 1. BUDGET ENFORCEMENT (Cost Control)
         estimated_cost = self._estimate_cost(user_input)
         budget_res = budget_enforcer.check_budget(self.agent_id, self.workflow_id, estimated_cost)
-        
+
         if not budget_res.allowed:
             self.audit.log(self.company_id, self.agent_id, "BUDGET_DENIED", {"reason": budget_res.reason})
             return f"Error: Budget exhausted. {budget_res.reason}"
 
         # 2. TIMEOUT ENFORCEMENT (Cost Control)
+        # Use is_coding_task flag from workflow definition, or detect from input
+        is_coding = self.is_coding_task or any(kw in user_input.lower() for kw in [
+            'html', 'css', 'javascript', 'code', 'dashboard', 'chart', 'react',
+            'website', 'web page', 'full html', 'complete html', 'single html',
+            'single file', 'self-contained'
+        ])
+        timeout_seconds = 180.0 if is_coding else 90.0
+
+        print(f"⏱️ [ManagedAgent] Agent {self.agent_id} timeout: {timeout_seconds}s (coding={is_coding})", flush=True)
+
         try:
             result = await asyncio.wait_for(
                 self._run_with_format_support(user_input),
-                timeout=60.0  # Default 60s timeout
+                timeout=timeout_seconds
             )
             return result
         except asyncio.TimeoutError:
             # Release escrow if timed out
             budget_enforcer.confirm_execution(self.agent_id, 0.0, self.workflow_id)
-            return f"Error: Execution timed out after 60 seconds"
+            return f"Error: Execution timed out after {int(timeout_seconds)} seconds"
         except Exception as e:
             # Release escrow if failed
             budget_enforcer.confirm_execution(self.agent_id, 0.0, self.workflow_id)
@@ -235,26 +324,31 @@ class ManagedAgent(Agent):
 
     async def _run_with_format_support(self, user_input: str) -> str:
         """Execute the agent based on its format (Markdown, Python, YAML, etc.)."""
-        # Get agent metadata from registry
-        # We use self.skill_name which was passed during init
         skill = skill_registry.get_skill(self.agent_id) or {}
         format_str = skill.get("format", "markdown")
-        
+
         try:
             agent_format = AgentFormat(format_str)
         except ValueError:
             agent_format = AgentFormat.MARKDOWN
 
-        # Create AgentData object for the runner
+        # Use tool_schemas from workflow definition if available, otherwise from skill registry
+        agent_tools = self.tool_schemas if self.tool_schemas else skill.get("tools", [])
+
         agent_data = AgentData(
             agent_id=self.agent_id,
             name=skill.get("name", self.agent_id),
             description=skill.get("description", ""),
             system_prompt=skill.get("prompt_text", self.system_prompt),
             format=agent_format,
-            tools=skill.get("tools", []),
+            tools=agent_tools,
             source_path=skill.get("filepath", "")
         )
+
+        # Log the tools being used
+        if agent_tools:
+            tool_names = [t.get("name", t) if isinstance(t, dict) else t for t in agent_tools]
+            print(f"🔧 [ManagedAgent] Agent {self.agent_id} using tools: {tool_names}", flush=True)
 
         # Get the appropriate runner
         runner = runner_factory.get_runner(agent_format)

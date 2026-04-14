@@ -571,21 +571,31 @@ class DAGWorkflowEngine:
         # 3. Create and run agent
         agent_id = f"{role.lower().replace(' ', '_')}_{node_id}_{int(time.time())}"
 
-        # Enforce code output for coding agents
-        coding_keywords = ['develop', 'frontend', 'coder', 'developer', 'implement', 'write code', 'create the', 'html formatter', 'format html', 'build the page']
+        # Detect coding tasks (need longer timeout and special handling)
+        coding_keywords = ['html', 'css', 'javascript', 'code', 'develop', 'frontend', 'coder', 'developer', 'implement', 'write code', 'create the', 'html formatter', 'format html', 'build the page', 'web developer', 'html dashboard', 'chart', 'dashboard']
         is_coding_task = any(kw in instruction.lower() for kw in coding_keywords)
 
         enhanced_instruction = instruction
-        
+
         # ROLE ISOLATION: Prevent agents from performing tasks assigned to other agents
         role_isolation = (
             f"\n\nIMPORTANT — ROLE ISOLATION: You are ONLY the {role}. "
             f"Do NOT perform tasks assigned to other agents in this workflow. "
             f"Output only what your specific role requires."
         )
-        
+
+        # STRICT OUTPUT FORMAT: Enforce clean, parseable output
+        strict_format = (
+            f"\n\nOUTPUT FORMAT RULES:\n"
+            f"- If the task requires JSON, output ONLY valid JSON. No markdown, no explanations, no conversational text before or after.\n"
+            f"- Do NOT wrap JSON in ```json code blocks unless explicitly asked.\n"
+            f"- Do NOT add phrases like 'Here is the data' or 'I will act as...' before the output.\n"
+            f"- Start your response directly with the requested format.\n"
+            f"- If the task requires code (HTML/CSS/JS), output complete, working code in fenced code blocks."
+        )
+
         if is_coding_task:
-            enhanced_instruction = instruction + role_isolation + (
+            enhanced_instruction = instruction + role_isolation + strict_format + (
                 "\n\nIMPORTANT: You MUST output ALL code files inside fenced code blocks. "
                 "For each file, use:\n"
                 "```html\n...full HTML code...\n```\n"
@@ -595,11 +605,20 @@ class DAGWorkflowEngine:
                 "Each file must be in its own fenced code block with the language specified."
             )
         else:
-            # Non-coding agents: explicitly prevent code/HTML output
-            enhanced_instruction = instruction + role_isolation + (
-                "\n\nDO NOT include code blocks, HTML, CSS, JavaScript, or any formatted code output "
-                "unless your role explicitly requires it. Output plain text only."
+            # Non-coding agents: enforce strict output format
+            enhanced_instruction = instruction + role_isolation + strict_format + (
+                "\n\nIf your role requires structured data output, use JSON format with no surrounding text."
             )
+
+        # Extract tools from node definition
+        agent_tools = node_data.get("tools", [])
+        if isinstance(agent_tools, str):
+            agent_tools = [t.strip() for t in agent_tools.split(",")]
+
+        # Build tool schemas for LLM function calling
+        tool_schemas = self._build_tool_schemas(agent_tools)
+
+        print(f"🔧 [DAG Engine] Node {node_id} using tools: {agent_tools}", flush=True)
 
         agent = ManagedAgent(
             agent_id=agent_id,
@@ -608,6 +627,9 @@ class DAGWorkflowEngine:
             gov=self.gov,
             audit=self.audit,
             llm=self.llm,
+            tools=agent_tools,
+            tool_schemas=tool_schemas,
+            is_coding_task=is_coding_task,
         )
         self.gov.register_agent(agent.agent_id, self.company_id, role)
 
@@ -766,6 +788,102 @@ class DAGWorkflowEngine:
             if edge["target"] == node_id:
                 predecessors.append(edge["source"])
         return predecessors
+
+    def _build_tool_schemas(self, tool_names: List[str]) -> List[Dict[str, Any]]:
+        """Build tool schemas for LLM function calling based on requested tools."""
+        if not tool_names:
+            return []
+
+        TOOL_SCHEMAS = {
+            "get_stock_data": {
+                "name": "get_stock_data",
+                "description": "Get real-time stock price, volume, market cap, 52-week range, and historical price data for a ticker symbol.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "ticker": {"type": "string", "description": "Stock ticker symbol (e.g., AAPL, NVDA, TSLA)"},
+                        "period": {"type": "string", "description": "Time period: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max"}
+                    },
+                    "required": ["ticker"]
+                }
+            },
+            "get_technical_indicators": {
+                "name": "get_technical_indicators",
+                "description": "Calculate technical indicators: RSI, MACD, Bollinger Bands, KDJ, CCI, ATR.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "ticker": {"type": "string", "description": "Stock ticker symbol"},
+                        "period": {"type": "string", "description": "Time period for analysis"}
+                    },
+                    "required": ["ticker"]
+                }
+            },
+            "get_company_fundamentals": {
+                "name": "get_company_fundamentals",
+                "description": "Get company fundamental data: P/E ratio, revenue, profit margins, ROE, debt-to-equity, dividends.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "ticker": {"type": "string", "description": "Stock ticker symbol"}
+                    },
+                    "required": ["ticker"]
+                }
+            },
+            "get_market_news": {
+                "name": "get_market_news",
+                "description": "Get latest market news articles with sentiment hints for a ticker.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "ticker": {"type": "string", "description": "Stock ticker symbol (optional, leave empty for general market news)"},
+                        "limit": {"type": "integer", "description": "Number of articles to fetch"}
+                    },
+                    "required": []
+                }
+            },
+            "search_web": {
+                "name": "search_web",
+                "description": "Search the web for real-time information, market data, or research.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "The search query."}
+                    },
+                    "required": ["query"]
+                }
+            },
+            "read_artifact": {
+                "name": "read_artifact",
+                "description": "Read the contents of a file from the workspace.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Name or path of the file to read."}
+                    },
+                    "required": ["path"]
+                }
+            },
+            "write_artifact": {
+                "name": "write_artifact",
+                "description": "Create or update a file in the workspace.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Name or path of the file to create."},
+                        "content": {"type": "string", "description": "Content to write to the file."}
+                    },
+                    "required": ["path", "content"]
+                }
+            },
+            "list_artifacts": {
+                "name": "list_artifacts",
+                "description": "List all files available in the current workspace.",
+                "parameters": {"type": "object", "properties": {}}
+            },
+        }
+
+        return [TOOL_SCHEMAS[t] for t in tool_names if t in TOOL_SCHEMAS]
 
     def _generate_handover_summary(self, node_id: str, role: str, response: str) -> str:
         """
