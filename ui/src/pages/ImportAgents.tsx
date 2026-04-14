@@ -100,21 +100,28 @@ const ImportAgents = () => {
   };
 
   const handleInstall = async (packId: string) => {
-    if (!jobId) return;
+    if (!jobId) {
+      toast.error("No import job ID found. Please try importing again.");
+      return;
+    }
 
     setInstalling(packId);
     try {
-      await installImportedPack(packId, jobId);
-      toast.success(`Pack ${packId} installed successfully!`);
-      
+      const result = await installImportedPack(packId, jobId);
+      const agentCount = result?.total_agents ?? result?.extracted_files ?? 0;
+      toast.success(`Pack installed! ${agentCount} agent${agentCount !== 1 ? 's' : ''} added to your registry.`);
+
       // 🆕 Trigger a global registry sync to ensure agents show up in Agents tab
       try {
         await syncRegistry();
-      } catch (e) {
+      } catch (e: any) {
         console.warn("Registry sync failed, but pack was installed", e);
+        toast.warning("Pack installed but registry sync failed. Refresh the page to see new agents.");
       }
     } catch (err: any) {
-      toast.error(`Installation failed: ${err.message}`);
+      console.error("Installation error:", err);
+      const errorMsg = err?.message || err?.response?.data?.detail || "Unknown error occurred";
+      toast.error(`Installation failed: ${errorMsg}`);
     } finally {
       setInstalling(null);
     }

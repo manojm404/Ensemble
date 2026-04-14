@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Search, Plus, Bot, RefreshCw, Loader2 } from "lucide-react";
+import { Search, Plus, Bot, RefreshCw, Loader2, ChevronDown, ChevronRight, Building2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,12 +13,56 @@ import { hireAgent } from "@/lib/company-data";
 import { Switch } from "@/components/ui/switch";
 import { NamespaceBadge } from "@/components/ui/namespace-badge";
 
-const categoryColors: Record<string, string> = {
-  Engineering: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-  Support: "bg-green-500/20 text-green-400 border-green-500/30",
-  Marketing: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-  Executive: "bg-amber-500/20 text-amber-400 border-amber-500/30",
-  General: "bg-slate-500/20 text-slate-400 border-slate-500/30",
+// Department hierarchy for organized agent browsing
+const DEPARTMENT_GROUPS: Record<string, { label: string; icon: string; categories: string[]; color: string }> = {
+  engineering: {
+    label: "Engineering",
+    icon: "💻",
+    categories: ["Engineering", "Development", "DevOps", "Infrastructure", "Security", "Testing"],
+    color: "text-blue-400 bg-blue-500/10",
+  },
+  design: {
+    label: "Design & UX",
+    icon: "🎨",
+    categories: ["Design", "UX", "Creative"],
+    color: "text-pink-400 bg-pink-500/10",
+  },
+  marketing: {
+    label: "Marketing & Sales",
+    icon: "📢",
+    categories: ["Marketing", "Sales", "Content", "SEO"],
+    color: "text-purple-400 bg-purple-500/10",
+  },
+  product: {
+    label: "Product & Strategy",
+    icon: "📋",
+    categories: ["Product", "Executive", "Business", "Strategy", "Management"],
+    color: "text-amber-400 bg-amber-500/10",
+  },
+  research: {
+    label: "Research & Analysis",
+    icon: "🔬",
+    categories: ["Research", "Analysis", "Data", "Science", "AI/ML"],
+    color: "text-emerald-400 bg-emerald-500/10",
+  },
+  support: {
+    label: "Support & Operations",
+    icon: "🛠️",
+    categories: ["Support", "Operations", "Documentation", "Writing", "Communication"],
+    color: "text-cyan-400 bg-cyan-500/10",
+  },
+  game_dev: {
+    label: "Game Development",
+    icon: "🎮",
+    categories: ["Game Development", "Gaming"],
+    color: "text-orange-400 bg-orange-500/10",
+  },
+  academic: {
+    label: "Academic",
+    icon: "🎓",
+    categories: ["Academic", "Education"],
+    color: "text-indigo-400 bg-indigo-500/10",
+  },
 };
 
 const Agents = () => {
@@ -28,13 +72,53 @@ const Agents = () => {
 
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
+  const [expandedDepts, setExpandedDepts] = useState<Record<string, boolean>>({ engineering: true });
   const [agents, setAgents] = useState<AgentSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [hiringId, setHiringId] = useState<string | null>(null);
   const { open: openInspector } = useInspector();
 
-  const dynamicCategories = ["All", ...Array.from(new Set(agents.map(a => a.category))).sort()];
+  // Build department -> category -> count mapping
+  const getDepartmentStats = () => {
+    const deptStats: Record<string, { count: number; categories: Record<string, number> }> = {};
+    
+    // Initialize all departments
+    for (const [deptKey, dept] of Object.entries(DEPARTMENT_GROUPS)) {
+      deptStats[deptKey] = { count: 0, categories: {} };
+      for (const cat of dept.categories) {
+        const catCount = agents.filter(a => a.category === cat).length;
+        if (catCount > 0) {
+          deptStats[deptKey].categories[cat] = catCount;
+          deptStats[deptKey].count += catCount;
+        }
+      }
+    }
+    
+    // Handle uncategorized agents
+    const allKnownCategories = Object.values(DEPARTMENT_GROUPS).flatMap(d => d.categories);
+    const uncategorized = agents.filter(a => !allKnownCategories.includes(a.category));
+    if (uncategorized.length > 0) {
+      const uniqueCats = [...new Set(uncategorized.map(a => a.category))];
+      deptStats["other"] = { 
+        count: uncategorized.length, 
+        categories: Object.fromEntries(uniqueCats.map(c => [c, agents.filter(a => a.category === c).length])) 
+      };
+    }
+    
+    return deptStats;
+  };
+
+  const departmentStats = getDepartmentStats();
+
+  // Get all categories that match the active department
+  const getActiveCategories = () => {
+    if (activeCategory === "All") return [];
+    for (const dept of Object.values(DEPARTMENT_GROUPS)) {
+      if (dept.categories.includes(activeCategory)) return dept.categories;
+    }
+    return [activeCategory];
+  };
 
   useEffect(() => {
     loadAgents();
@@ -92,34 +176,142 @@ const Agents = () => {
     } finally { setHiringId(null); }
   };
 
+  const toggleDept = (deptKey: string) => {
+    setExpandedDepts(prev => ({ ...prev, [deptKey]: !prev[deptKey] }));
+  };
+
   const filtered = agents.filter((a) => {
     const matchesSearch = a.name.toLowerCase().includes(search.toLowerCase()) || a.description.toLowerCase().includes(search.toLowerCase());
-    const matchesCat = activeCategory === "All" || a.category === activeCategory;
+    if (activeCategory === "All") return matchesSearch;
+    const activeCats = getActiveCategories();
+    const matchesCat = activeCats.includes(a.category);
     return matchesSearch && matchesCat;
   });
 
+  const totalAgents = agents.length;
+
   return (
     <div className="flex h-full bg-background/50">
-      {/* Category sidebar */}
-      <div className="w-56 border-r border-border/50 shrink-0 bg-card/30 backdrop-blur-sm">
+      {/* Department sidebar */}
+      <div className="w-64 border-r border-border/50 shrink-0 bg-card/30 backdrop-blur-sm flex flex-col">
         <div className="p-4 border-b border-border/50 flex items-center justify-between">
-          <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em]">Agential Fleet</h3>
+          <div>
+            <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em] flex items-center gap-1.5">
+              <Building2 className="h-3 w-3" />
+              Departments
+            </h3>
+            <p className="text-[9px] text-muted-foreground/60 mt-0.5">{totalAgents} agents total</p>
+          </div>
           <RefreshCw className={`h-3 w-3 cursor-pointer text-muted-foreground hover:text-primary transition-all ${syncing ? 'animate-spin' : ''}`} onClick={handleSync} />
         </div>
-        <ScrollArea className="h-[calc(100%-53px)]">
+        <ScrollArea className="flex-1">
           <div className="p-2 space-y-1">
-            {dynamicCategories.map((name) => (
-              <button
-                key={name}
-                onClick={() => setActiveCategory(name)}
-                className={`w-full flex items-center justify-between rounded-md px-3 py-2 text-xs font-medium transition-all ${
-                  activeCategory === name ? "bg-primary/10 text-primary border border-primary/20" : "text-muted-foreground hover:bg-secondary/50"
-                }`}
-              >
-                <span>{name}</span>
-                <span className="text-[10px] opacity-40">{name === "All" ? agents.length : agents.filter(a => a.category === name).length}</span>
-              </button>
-            ))}
+            {/* All agents button */}
+            <button
+              onClick={() => setActiveCategory("All")}
+              className={`w-full flex items-center justify-between rounded-lg px-3 py-2.5 text-xs font-medium transition-all ${
+                activeCategory === "All" 
+                  ? "bg-primary/15 text-primary border border-primary/25 shadow-sm" 
+                  : "text-muted-foreground hover:bg-secondary/50"
+              }`}
+            >
+              <span className="font-semibold">🌐 All Agents</span>
+              <span className="text-[10px] opacity-60 font-mono">{totalAgents}</span>
+            </button>
+
+            <div className="my-2 border-t border-border/30" />
+
+            {/* Department groups */}
+            {Object.entries(DEPARTMENT_GROUPS).map(([deptKey, dept]) => {
+              const stats = departmentStats[deptKey];
+              if (!stats || stats.count === 0) return null;
+              
+              const isExpanded = expandedDepts[deptKey];
+              const isActive = stats.categories.hasOwnProperty(activeCategory) || 
+                (dept.categories.includes(activeCategory));
+              
+              return (
+                <div key={deptKey} className="space-y-0.5">
+                  <button
+                    onClick={() => toggleDept(deptKey)}
+                    className={`w-full flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition-all ${
+                      isActive 
+                        ? "bg-primary/10 text-primary border border-primary/20" 
+                        : "text-muted-foreground hover:bg-secondary/30"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">{dept.icon}</span>
+                      <span className="font-semibold">{dept.label}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] opacity-50 font-mono">{stats.count}</span>
+                      {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                    </div>
+                  </button>
+                  
+                  {isExpanded && (
+                    <div className="ml-4 pl-3 border-l border-border/30 space-y-0.5">
+                      {Object.entries(stats.categories).map(([cat, count]) => (
+                        <button
+                          key={cat}
+                          onClick={() => setActiveCategory(cat === activeCategory ? "All" : cat)}
+                          className={`w-full flex items-center justify-between rounded-md px-3 py-1.5 text-[11px] font-medium transition-all ${
+                            activeCategory === cat 
+                              ? "bg-primary/10 text-primary border border-primary/15" 
+                              : "text-muted-foreground/70 hover:bg-secondary/40 hover:text-muted-foreground"
+                          }`}
+                        >
+                          <span>{cat}</span>
+                          <span className="text-[9px] opacity-40 font-mono">{count}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Other/Uncategorized */}
+            {departmentStats.other && departmentStats.other.count > 0 && (
+              <>
+                <div className="my-2 border-t border-border/30" />
+                <div className="space-y-0.5">
+                  <button
+                    onClick={() => toggleDept("other")}
+                    className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-secondary/30 transition-all"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">📦</span>
+                      <span className="font-semibold">Other</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] opacity-50 font-mono">{departmentStats.other.count}</span>
+                      {expandedDepts.other ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                    </div>
+                  </button>
+                  
+                  {expandedDepts.other && (
+                    <div className="ml-4 pl-3 border-l border-border/30 space-y-0.5">
+                      {Object.entries(departmentStats.other.categories).map(([cat, count]) => (
+                        <button
+                          key={cat}
+                          onClick={() => setActiveCategory(cat === activeCategory ? "All" : cat)}
+                          className={`w-full flex items-center justify-between rounded-md px-3 py-1.5 text-[11px] font-medium transition-all ${
+                            activeCategory === cat 
+                              ? "bg-primary/10 text-primary border border-primary/15" 
+                              : "text-muted-foreground/70 hover:bg-secondary/40 hover:text-muted-foreground"
+                          }`}
+                        >
+                          <span>{cat}</span>
+                          <span className="text-[9px] opacity-40 font-mono">{count}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </ScrollArea>
       </div>

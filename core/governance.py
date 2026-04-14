@@ -810,16 +810,25 @@ async def install_imported_pack(pack_id: str, job_id: str = Query(...)):
     """Install a pack generated from an import job by extracting it to agents/custom/."""
     try:
         import zipfile
-        
+
         # Find the ZIP file for this pack
         zip_path = os.path.join("data/marketplace/zips", f"{pack_id}.zip")
-        if not os.path.exists(zip_path):
-            raise HTTPException(status_code=404, detail=f"Pack ZIP not found: {pack_id}")
+        print(f"📦 [Install] Looking for ZIP at: {zip_path}", flush=True)
         
+        if not os.path.exists(zip_path):
+            # List available ZIPs for debugging
+            zips_dir = os.path.join("data/marketplace/zips")
+            available_zips = []
+            if os.path.exists(zips_dir):
+                available_zips = [f for f in os.listdir(zips_dir) if f.endswith('.zip')]
+            print(f"❌ [Install] ZIP not found: {pack_id}.zip. Available ZIPs: {available_zips}", flush=True)
+            raise HTTPException(status_code=404, detail=f"Pack ZIP not found: {pack_id}. Available: {', '.join(available_zips)}")
+
         # Extract to agents/custom/{pack_id}/
         install_dir = os.path.join("data/agents/custom", pack_id)
         os.makedirs(install_dir, exist_ok=True)
-        
+
+        extracted_count = 0
         with zipfile.ZipFile(zip_path, 'r') as zf:
             # Extract all files from the ZIP
             for member in zf.namelist():
@@ -834,26 +843,33 @@ async def install_imported_pack(pack_id: str, job_id: str = Query(...)):
                 os.makedirs(os.path.dirname(target_path), exist_ok=True)
                 with zf.open(member) as src, open(target_path, 'wb') as dst:
                     dst.write(src.read())
-        
+                extracted_count += 1
+
+        print(f"✅ [Install] Extracted {extracted_count} files to {install_dir}", flush=True)
+
         # Create pack metadata
+        md_files = [f for f in os.listdir(install_dir) if f.endswith(".md")]
         meta = {
             "pack_id": pack_id,
             "installed_at": str(datetime.now()),
             "version": "1.0.0",
             "source": "universal_importer",
             "job_id": job_id,
-            "agent_count": len([f for f in os.listdir(install_dir) if f.endswith(".md")])
+            "agent_count": len(md_files)
         }
         with open(os.path.join(install_dir, ".pack_meta.json"), "w") as f:
             json.dump(meta, f, indent=2)
-        
+
         # Sync registry to pick up new agents
         count = skill_registry.sync_all()
-        
-        return {"status": "success", "message": f"Pack {pack_id} installed", "total_agents": count}
+        print(f"🔄 [Install] Registry synced. Total agents: {count}", flush=True)
+
+        return {"status": "success", "message": f"Pack {pack_id} installed", "total_agents": count, "extracted_files": extracted_count}
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        print(f"❌ [Install] Installation failed: {str(e)}\n{traceback.format_exc()}", flush=True)
         raise HTTPException(status_code=500, detail=f"Installation failed: {str(e)}")
 
 @app.get("/api/marketplace/import-formats")
