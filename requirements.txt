@@ -19,6 +19,16 @@ metagpt
 duckduckgo_search
 
 # ============================================================
+# Financial Data Tools (TradingAgents Integration)
+# ============================================================
+
+# Stock market data (Yahoo Finance)
+yfinance
+
+# Technical indicators (MACD, RSI, Bollinger Bands)
+stockstats>=0.3.0
+
+# ============================================================
 # Phase 1: Supabase Integration & Authentication
 # ============================================================
 
