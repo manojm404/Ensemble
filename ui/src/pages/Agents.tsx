@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Search, Plus, Bot, RefreshCw, Loader2, ChevronDown, ChevronRight, Building2, GitBranch, Package } from "lucide-react";
+import { Search, Plus, Bot, RefreshCw, Loader2, ChevronDown, ChevronRight, Building2, Package, FolderOpen } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,142 +22,123 @@ const categoryColors: Record<string, string> = {
   General: "bg-slate-500/20 text-slate-400 border-slate-500/30",
 };
 
-// Department → skill hierarchy
-const DEPT_SKILLS: Record<string, { label: string; icon: string; skills: string[]; color: string }> = {
+const DEPT_ICONS: Record<string, string> = {
+  Engineering: "💻",
+  Testing: "🧪",
+  Security: "🔒",
+  DevOps: "🔄",
+  Design: "🎨",
+  Marketing: "📢",
+  "Paid Media": "🎯",
+  Product: "📋",
+  Sales: "💼",
+  Support: "🛠️",
+  Research: "🔬",
+  Academic: "🎓",
+  Strategy: "♟️",
+  "Game Development": "🎮",
+  "Unity Development": "🎮",
+  "Unreal Development": "🎮",
+  "Godot Development": "🎮",
+  "Roblox Development": "🎮",
+  "Spatial Computing": "🥽",
+  "3D & VFX": "🎬",
+  "Project Management": "📊",
+  Coordination: "🤝",
+  Data: "📊",
+  Finance: "💰",
+  Trading: "📈",
+  Content: "✍️",
+  SEO: "🔍",
+  Specialized: "⭐",
+  MetaGPT: "🤖",
+  Agents: "🤖",
+  Legal: "⚖️",
+  Writing: "✏️",
+  Documentation: "📝",
+  Analysis: "📊",
+  Executive: "👔",
+  Default: "📦",
+};
+
+// Group categories into departments
+const DEPT_GROUPS: Record<string, { label: string; icon: string; categories: string[]; color: string }> = {
   engineering: {
     label: "Engineering",
     icon: "💻",
-    skills: ["frontend", "backend", "full-stack", "devops", "testing", "security", "mobile", "database", "api", "architecture", "code-review", "cloud"],
+    categories: ["Engineering", "Testing", "Security", "DevOps", "Data"],
     color: "text-blue-400 bg-blue-500/10",
   },
-  trading: {
-    label: "Trading & Finance",
-    icon: "📈",
-    skills: ["trading", "crypto", "stocks", "quantitative", "risk", "portfolio", "forex", "derivatives", "analysis"],
-    color: "text-emerald-400 bg-emerald-500/10",
-  },
-  social_media: {
-    label: "Social Media",
-    icon: "📱",
-    skills: ["content", "seo", "community", "influencer", "analytics", "copywriting", "brand", "engagement"],
-    color: "text-pink-400 bg-pink-500/10",
-  },
-  movie: {
-    label: "Movies & Entertainment",
-    icon: "🎬",
-    skills: ["screenwriting", "production", "animation", "vfx", "editing", "storyboarding", "cinematography"],
-    color: "text-amber-400 bg-amber-500/10",
-  },
   design: {
-    label: "Design & Creative",
+    label: "Design",
     icon: "🎨",
-    skills: ["ui", "ux", "graphic", "illustration", "branding", "typography", "wireframe", "prototyping"],
+    categories: ["Design", "UX", "3D & VFX"],
     color: "text-violet-400 bg-violet-500/10",
   },
-  research: {
-    label: "Research & Analysis",
-    icon: "🔬",
-    skills: ["data-science", "ml", "statistics", "academic", "literature-review", "experiment"],
-    color: "text-cyan-400 bg-cyan-500/10",
+  marketing: {
+    label: "Marketing",
+    icon: "📢",
+    categories: ["Marketing", "Paid Media", "Content", "SEO"],
+    color: "text-pink-400 bg-pink-500/10",
   },
-  product: {
+  product_strategy: {
     label: "Product & Strategy",
-    icon: "📋",
-    skills: ["product-management", "strategy", "business", "operations", "project-management", "roadmap"],
+    icon: "♟️",
+    categories: ["Product", "Strategy", "Executive"],
+    color: "text-amber-400 bg-amber-500/10",
+  },
+  project_mgmt: {
+    label: "Project Management",
+    icon: "📊",
+    categories: ["Project Management", "Coordination"],
     color: "text-orange-400 bg-orange-500/10",
   },
-  support: {
-    label: "Support & Docs",
-    icon: "🛠️",
-    skills: ["technical-writing", "documentation", "customer-success", "communication", "onboarding"],
-    color: "text-slate-400 bg-slate-500/10",
+  sales: {
+    label: "Sales & Finance",
+    icon: "💼",
+    categories: ["Sales", "Finance", "Trading"],
+    color: "text-emerald-400 bg-emerald-500/10",
+  },
+  research_academic: {
+    label: "Research & Academic",
+    icon: "🔬",
+    categories: ["Research", "Academic", "Analysis"],
+    color: "text-cyan-400 bg-cyan-500/10",
   },
   game_dev: {
-    label: "Game Dev",
+    label: "Game Development",
     icon: "🎮",
-    skills: ["unity", "unreal", "level-design", "narrative", "gameplay", "physics"],
+    categories: ["Game Development", "Unity Development", "Unreal Development", "Godot Development", "Roblox Development"],
     color: "text-red-400 bg-red-500/10",
+  },
+  spatial: {
+    label: "Spatial Computing",
+    icon: "🥽",
+    categories: ["Spatial Computing"],
+    color: "text-indigo-400 bg-indigo-500/10",
+  },
+  support: {
+    label: "Support & Writing",
+    icon: "🛠️",
+    categories: ["Support", "Writing", "Documentation", "Legal"],
+    color: "text-slate-400 bg-slate-500/10",
+  },
+  integrations: {
+    label: "Integrations",
+    icon: "🤖",
+    categories: ["MetaGPT", "Agents"],
+    color: "text-teal-400 bg-teal-500/10",
+  },
+  specialized: {
+    label: "Specialized",
+    icon: "⭐",
+    categories: ["Specialized", "Default"],
+    color: "text-yellow-400 bg-yellow-500/10",
   },
 };
 
-function inferSkillFromCategory(category: string): string {
-  const cat = category.toLowerCase();
-  const mapping: Record<string, string> = {
-    engineering: "code-review",
-    testing: "testing",
-    security: "security",
-    devops: "devops",
-    infrastructure: "cloud",
-    frontend: "frontend",
-    backend: "backend",
-    "full-stack": "full-stack",
-    mobile: "mobile",
-    database: "database",
-    api: "api",
-    "software-architecture": "architecture",
-    development: "code-review",
-    trading: "trading",
-    finance: "portfolio",
-    cryptocurrency: "crypto",
-    marketing: "content",
-    content: "content",
-    seo: "seo",
-    "digital-marketing": "brand",
-    "social-media": "community",
-    brand: "brand",
-    influencer: "influencer",
-    analytics: "analytics",
-    movie: "production",
-    entertainment: "production",
-    film: "cinematography",
-    screenwriting: "screenwriting",
-    animation: "animation",
-    vfx: "vfx",
-    design: "ui",
-    ux: "ux",
-    creative: "illustration",
-    "graphic-design": "graphic",
-    illustration: "illustration",
-    branding: "branding",
-    typography: "typography",
-    research: "data-science",
-    analysis: "analysis",
-    "data-science": "data-science",
-    science: "experiment",
-    "ai/ml": "ml",
-    statistics: "statistics",
-    academic: "academic",
-    product: "product-management",
-    executive: "strategy",
-    business: "business",
-    strategy: "strategy",
-    management: "project-management",
-    operations: "operations",
-    support: "customer-success",
-    documentation: "technical-writing",
-    writing: "technical-writing",
-    communication: "communication",
-    "game-development": "gameplay",
-    gaming: "gameplay",
-    unity: "unity",
-    unreal: "unreal",
-    "level-design": "level-design",
-    "narrative-design": "narrative",
-    education: "academic",
-    "customer-success": "customer-success",
-  };
-  return mapping[cat] || cat.replace(/\s+/g, "-");
-}
-
-function extractPackName(agent: AgentSkill): string | null {
-  if (agent.pack_id) return agent.pack_id;
-  if (agent.namespace && agent.namespace !== "native") return agent.namespace;
-  // Try to infer from agent ID if it contains a repo-like segment
-  const parts = agent.id.split(/[_/]/);
-  if (parts.length > 2 && parts[0] !== "engineering" && parts[0] !== "testing" && parts[0] !== "marketing" && parts[0] !== "support" && parts[0] !== "design" && parts[0] !== "product" && parts[0] !== "research") {
-    return parts.slice(0, 2).join("/");
-  }
-  return null;
+function getCategoryIcon(category: string): string {
+  return DEPT_ICONS[category] || "📦";
 }
 
 const Agents = () => {
@@ -166,35 +147,37 @@ const Agents = () => {
   const orgId = searchParams.get("orgId") || "";
 
   const [search, setSearch] = useState("");
-  const [activeFilter, setActiveFilter] = useState("All"); // "All", skill, or pack name
-  const [expandedDepts, setExpandedDepts] = useState<Record<string, boolean>>({ engineering: true });
+  const [activeFilter, setActiveFilter] = useState("All");
+  const [expandedDepts, setExpandedDepts] = useState<Record<string, boolean>>({ engineering: true, design: true });
+  const [expandedPacks, setExpandedPacks] = useState<Record<string, boolean>>({});
   const [agents, setAgents] = useState<AgentSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [hiringId, setHiringId] = useState<string | null>(null);
   const { open: openInspector } = useInspector();
 
-  // ── Compute department/pack stats ──────────────────────────────
+  // ── Compute stats from actual data ──────────────────────────────
   const { deptStats, importedPacks } = useMemo(() => {
-    const deptStats: Record<string, { count: number; skills: Record<string, number>; agents: AgentSkill[] }> = {};
+    const deptStats: Record<string, { count: number; categories: Record<string, number> }> = {};
     const packs: Record<string, { count: number; agents: AgentSkill[] }> = {};
 
     for (const agent of agents) {
-      const packName = extractPackName(agent);
-      const skill = inferSkillFromCategory(agent.category);
+      const category = agent.category || "General";
+      const packId = agent.pack_id;
 
-      if (packName) {
-        if (!packs[packName]) packs[packName] = { count: 0, agents: [] };
-        packs[packName].count++;
-        packs[packName].agents.push(agent);
+      // Group by imported packs
+      if (packId && !agent.is_native) {
+        if (!packs[packId]) packs[packId] = { count: 0, agents: [] };
+        packs[packId].count++;
+        packs[packId].agents.push(agent);
       }
 
-      for (const [deptKey, dept] of Object.entries(DEPT_SKILLS)) {
-        if (dept.skills.includes(skill) || dept.skills.some(s => skill.includes(s) || s.includes(skill))) {
-          if (!deptStats[deptKey]) deptStats[deptKey] = { count: 0, skills: {}, agents: [] };
+      // Group by department
+      for (const [deptKey, dept] of Object.entries(DEPT_GROUPS)) {
+        if (dept.categories.includes(category)) {
+          if (!deptStats[deptKey]) deptStats[deptKey] = { count: 0, categories: {} };
           deptStats[deptKey].count++;
-          deptStats[deptKey].skills[skill] = (deptStats[deptKey].skills[skill] || 0) + 1;
-          deptStats[deptKey].agents.push(agent);
+          deptStats[deptKey].categories[category] = (deptStats[deptKey].categories[category] || 0) + 1;
           break;
         }
       }
@@ -207,29 +190,23 @@ const Agents = () => {
     setExpandedDepts(prev => ({ ...prev, [deptKey]: !prev[deptKey] }));
   };
 
+  const togglePack = (packId: string) => {
+    setExpandedPacks(prev => ({ ...prev, [packId]: !prev[packId] }));
+  };
+
   // ── Filter agents ──────────────────────────────────────────────
   const filtered = useMemo(() => {
     let result = agents;
 
     if (activeFilter !== "All") {
-      // Check if it's an imported pack
       if (importedPacks[activeFilter]) {
         result = importedPacks[activeFilter].agents;
       } else {
-        // It's a skill — find the department and filter by skill
-        for (const [deptKey, dept] of Object.entries(DEPT_SKILLS)) {
-          if (dept.skills.includes(activeFilter) || dept.skills.some(s => activeFilter.includes(s) || s.includes(activeFilter))) {
-            result = agents.filter(a => {
-              const s = inferSkillFromCategory(a.category);
-              return s === activeFilter || s.includes(activeFilter) || activeFilter.includes(s);
-            });
-            break;
-          }
-        }
+        // Filter by exact category
+        result = agents.filter(a => a.category === activeFilter);
       }
     }
 
-    // Apply search
     if (search) {
       const q = search.toLowerCase();
       result = result.filter(a =>
@@ -314,7 +291,7 @@ const Agents = () => {
         </div>
 
         <ScrollArea className="flex-1">
-          <div className="p-2 space-y-1">
+          <div className="p-2 space-y-0.5">
             {/* All */}
             <button
               onClick={() => setActiveFilter("All")}
@@ -328,47 +305,77 @@ const Agents = () => {
               <span className="text-[10px] opacity-60 font-mono">{totalAgents}</span>
             </button>
 
-            {/* ── Imported Packs ────────────────────────────────── */}
+            {/* Imported Packs */}
             {Object.keys(importedPacks).length > 0 && (
               <>
                 <div className="my-2 border-t border-border/30" />
                 <div className="px-3 py-1">
                   <span className="text-[9px] font-bold text-muted-foreground/50 uppercase tracking-wider flex items-center gap-1">
-                    <GitBranch className="h-2.5 w-2.5" /> Imported Repos
+                    <Package className="h-2.5 w-2.5" /> Imported Repos
                   </span>
                 </div>
-                {Object.entries(importedPacks).map(([packName, pack]) => (
-                  <button
-                    key={packName}
-                    onClick={() => setActiveFilter(packName === activeFilter ? "All" : packName)}
-                    className={`w-full flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition-all ${
-                      activeFilter === packName
-                        ? "bg-primary/10 text-primary border border-primary/20"
-                        : "text-muted-foreground hover:bg-secondary/30"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Package className="h-3.5 w-3.5 opacity-60" />
-                      <span className="truncate text-[11px] font-medium">{packName}</span>
-                    </div>
-                    <span className="text-[10px] opacity-50 font-mono">{pack.count}</span>
-                  </button>
+                {Object.entries(importedPacks).map(([packId, pack]) => (
+                  <div key={packId} className="space-y-0.5">
+                    <button
+                      onClick={() => togglePack(packId)}
+                      className={`w-full flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition-all ${
+                        activeFilter === packId
+                          ? "bg-primary/10 text-primary border border-primary/20"
+                          : "text-muted-foreground hover:bg-secondary/30"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Package className="h-3.5 w-3.5 opacity-60" />
+                        <span className="truncate text-[11px] font-medium">{packId}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] opacity-50 font-mono">{pack.count}</span>
+                        {expandedPacks[packId] ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                      </div>
+                    </button>
+                    {expandedPacks[packId] && (
+                      <div className="ml-4 pl-3 border-l border-border/30 space-y-0.5">
+                        {[...new Set(pack.agents.map(a => a.category))].map(cat => {
+                          const catCount = pack.agents.filter(a => a.category === cat).length;
+                          return (
+                            <button
+                              key={cat}
+                              onClick={() => setActiveFilter(cat === activeFilter ? "All" : cat)}
+                              className={`w-full flex items-center justify-between rounded-md px-3 py-1.5 text-[11px] font-medium transition-all ${
+                                activeFilter === cat
+                                  ? "bg-primary/10 text-primary border border-primary/15"
+                                  : "text-muted-foreground/70 hover:bg-secondary/40"
+                              }`}
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <span>{getCategoryIcon(cat)}</span>
+                                <span>{cat}</span>
+                              </span>
+                              <span className="text-[9px] opacity-40 font-mono">{catCount}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 ))}
               </>
             )}
 
-            {/* ── Departments → Skills ──────────────────────────── */}
+            {/* Departments */}
             <div className="my-2 border-t border-border/30" />
             <div className="px-3 py-1">
-              <span className="text-[9px] font-bold text-muted-foreground/50 uppercase tracking-wider">Native Departments</span>
+              <span className="text-[9px] font-bold text-muted-foreground/50 uppercase tracking-wider flex items-center gap-1">
+                <FolderOpen className="h-2.5 w-2.5" /> Departments
+              </span>
             </div>
 
-            {Object.entries(DEPT_SKILLS).map(([deptKey, dept]) => {
+            {Object.entries(DEPT_GROUPS).map(([deptKey, dept]) => {
               const stats = deptStats[deptKey];
               if (!stats || stats.count === 0) return null;
 
               const isExpanded = expandedDepts[deptKey];
-              const isActive = Object.keys(stats.skills).includes(activeFilter);
+              const isActive = Object.keys(stats.categories).includes(activeFilter);
 
               return (
                 <div key={deptKey} className="space-y-0.5">
@@ -392,17 +399,20 @@ const Agents = () => {
 
                   {isExpanded && (
                     <div className="ml-4 pl-3 border-l border-border/30 space-y-0.5">
-                      {Object.entries(stats.skills).sort((a, b) => b[1] - a[1]).map(([skill, count]) => (
+                      {Object.entries(stats.categories).sort((a, b) => b[1] - a[1]).map(([cat, count]) => (
                         <button
-                          key={skill}
-                          onClick={() => setActiveFilter(skill === activeFilter ? "All" : skill)}
+                          key={cat}
+                          onClick={() => setActiveFilter(cat === activeFilter ? "All" : cat)}
                           className={`w-full flex items-center justify-between rounded-md px-3 py-1.5 text-[11px] font-medium transition-all ${
-                            activeFilter === skill
+                            activeFilter === cat
                               ? "bg-primary/10 text-primary border border-primary/15"
                               : "text-muted-foreground/70 hover:bg-secondary/40 hover:text-muted-foreground"
                           }`}
                         >
-                          <span className="capitalize">{skill.replace(/-/g, " ")}</span>
+                          <span className="flex items-center gap-1.5">
+                            <span>{getCategoryIcon(cat)}</span>
+                            <span>{cat}</span>
+                          </span>
                           <span className="text-[9px] opacity-40 font-mono">{count}</span>
                         </button>
                       ))}

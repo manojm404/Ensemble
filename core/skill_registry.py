@@ -212,6 +212,31 @@ class SkillRegistry:
                 "social": "Social Media",
                 "movie": "Movies",
                 "film": "Film",
+                "blender": "3D & VFX",
+                "coordination": "Coordination",
+                "sales": "Sales",
+                "hr": "HR",
+                "legal": "Legal",
+                "metagpt": "MetaGPT",
+                "agents": "Agents",
+                "strategic": "Strategy",
+                # Specialized agents
+                "specialized": "Specialized",
+                "default": "Default",
+                # Paid media / performance marketing
+                "paid": "Paid Media",
+                "paid-media": "Paid Media",
+                # Project management
+                "project": "Project Management",
+                "project-mgmt": "Project Management",
+                # Spatial computing / XR
+                "spatial": "Spatial Computing",
+                "spatial-computing": "Spatial Computing",
+                # Game engines
+                "unity": "Unity Development",
+                "unreal": "Unreal Development",
+                "godot": "Godot Development",
+                "roblox": "Roblox Development",
             }
             for prefix, category in category_map.items():
                 if filename.startswith(prefix):
