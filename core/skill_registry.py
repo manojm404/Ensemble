@@ -181,6 +181,42 @@ class SkillRegistry:
             rel_path = os.path.relpath(filepath, self.integrations_dir)
             parts = Path(rel_path).parts
             return parts[0].replace("-", " ").replace("_", " ").title() if parts else "Integration"
+
+        # For native agents, infer category from filename prefix
+        if source in (SkillSource.NATIVE, SkillSource.CORE):
+            filename = Path(filepath).stem
+            # Map common prefixes to categories
+            category_map = {
+                "engineering": "Engineering",
+                "testing": "Testing",
+                "security": "Security",
+                "devops": "DevOps",
+                "design": "Design",
+                "ux": "UX",
+                "marketing": "Marketing",
+                "content": "Content",
+                "seo": "SEO",
+                "product": "Product",
+                "executive": "Executive",
+                "support": "Support",
+                "documentation": "Documentation",
+                "writing": "Writing",
+                "research": "Research",
+                "analysis": "Analysis",
+                "data": "Data",
+                "game": "Game Development",
+                "narrative": "Narrative Design",
+                "academic": "Academic",
+                "trading": "Trading",
+                "finance": "Finance",
+                "social": "Social Media",
+                "movie": "Movies",
+                "film": "Film",
+            }
+            for prefix, category in category_map.items():
+                if filename.startswith(prefix):
+                    return category
+
         return meta.get("category", "General")
     
     def _generate_skill_id(self, filepath: str, source: SkillSource) -> str:
