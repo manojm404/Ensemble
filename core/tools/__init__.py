@@ -247,8 +247,20 @@ def get_technical_indicators(ticker: str, period: str = "6mo") -> str:
         df = StockDataFrame.retype(hist)
 
         # Calculate indicators
-        # RSI (Relative Strength Index)
+        # RSI (Relative Strength Index) — try 14-day first, fallback to 7-day if insufficient data
         df.get('rsi_14')
+        rsi = df.iloc[-1].get('rsi_14', None)
+        rsi_period = 14
+        if rsi is None or (isinstance(rsi, float) and (rsi < 0 or rsi > 100)):
+            # Fallback to 7-day RSI
+            try:
+                df.get('rsi_7')
+                rsi = df.iloc[-1].get('rsi_7', None)
+                rsi_period = 7
+            except Exception:
+                rsi = None
+                rsi_period = 14
+
         # MACD
         df.get('macd')
         df.get('macds')  # MACD signal
@@ -268,7 +280,6 @@ def get_technical_indicators(ticker: str, period: str = "6mo") -> str:
         # Get latest values
         last = df.iloc[-1]
 
-        rsi = last.get('rsi_14', None)
         macd = last.get('macd', None)
         macd_signal = last.get('macds', None)
         macd_hist = last.get('macdh', None)
@@ -288,9 +299,11 @@ def get_technical_indicators(ticker: str, period: str = "6mo") -> str:
         macd_signal_text = "BULLISH crossover" if macd_hist and macd_hist > 0 else \
                           "BEARISH crossover" if macd_hist else "N/A"
 
+        rsi_display = f"{rsi:.2f}" if rsi is not None else "N/A"
+
         output = f"""📈 Technical Indicators: {ticker.upper()}
 
-🔴 RSI (14): {rsi:.2f} → {rsi_signal}
+🔴 RSI ({rsi_period}): {rsi_display} → {rsi_signal}
 
 📊 MACD:
 • MACD Line: {macd:.4f}
@@ -471,7 +484,19 @@ def get_market_news(ticker: str = "", limit: int = 10) -> str:
 
 """
         for i, article in enumerate(news_list[:limit], 1):
-            title = article.get('title', 'No title')
+            # Extract title with fallbacks
+            title = article.get('title') or article.get('relatedStocks', [{}])[0].get('name', '')
+            if not title or title.strip() == '':
+                # Try extracting from description/summary
+                desc = article.get('content', {}).get('content', '') if isinstance(article.get('content'), dict) else ''
+                if not desc:
+                    # Use the thumbnail or link as a last resort
+                    link = article.get('link', '#')
+                    # Extract stock name from URL as fallback
+                    title = f"News about {ticker.upper() if ticker else 'Market'}"
+                else:
+                    title = desc[:120] + '...' if len(desc) > 120 else desc
+
             publisher = article.get('publisher', 'Unknown')
             link = article.get('link', '#')
             published = article.get('providerPublishTime', 0)

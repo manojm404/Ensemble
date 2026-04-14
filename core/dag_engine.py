@@ -847,13 +847,9 @@ class DAGWorkflowEngine:
         """
         Resolve {{agent_id.field.path}} placeholders with actual values from previous agents' outputs.
         
-        This solves the "context cliff" problem by injecting exact values instead of stacking raw outputs.
-        
-        Examples in agent instructions:
-            "Price: {{data_fetcher.current_price}}"
-            "RSI: {{technical_analyst.rsi.value}}"
-            "P/E: {{fundamentals_analyst.pe_ratio}}"
-            "Risk: {{risk_manager.risk_score}}/10"
+        Supports two binding styles:
+        1. Position-based: {{Agent1.price}}, {{Agent2.rsi}} — matches 1st, 2nd predecessor by order
+        2. Name-based: {{data_fetcher.price}}, {{technical_analyst.rsi}} — matches by substring in node ID
         """
         import re
         
@@ -862,31 +858,41 @@ class DAGWorkflowEngine:
         
         def replace_binding(match):
             binding = match.group(1).strip()
-            
-            # Find the predecessor node ID (first part before first dot)
             parts = binding.split(".")
             agent_key = parts[0]
             field_path = ".".join(parts[1:]) if len(parts) > 1 else ""
             
-            # Try to find the predecessor by matching agent_key to node ID
-            pred_output = None
-            for pred_id in predecessors:
-                # Match if pred_id contains agent_key or vice versa
-                if agent_key in pred_id or pred_id in agent_key:
-                    artifact_name = f"{pred_id}_output"
-                    if self.space.exists(artifact_name):
-                        raw = self.space.read(artifact_name).decode("utf-8", errors="ignore")
-                        # Try to parse as JSON
-                        try:
-                            import json as _json_mod
-                            pred_output = _json_mod.loads(raw)
-                        except (_json_mod.JSONDecodeError, ValueError):
-                            # Not JSON, use raw text
-                            pred_output = raw
+            # POSITION-BASED: Agent1 → 1st predecessor, Agent2 → 2nd, etc.
+            pos_match = re.match(r'[Aa]gent(\d+)', agent_key)
+            if pos_match:
+                position = int(pos_match.group(1)) - 1  # 0-indexed
+                if 0 <= position < len(predecessors):
+                    pred_id = predecessors[position]
+                else:
+                    return f"[N/A: Agent{position+1} not found (only {len(predecessors)} predecessors)]"
+            else:
+                # NAME-BASED: match by substring
+                pred_id = None
+                for pid in predecessors:
+                    if agent_key in pid or pid in agent_key:
+                        pred_id = pid
                         break
+                if pred_id is None:
+                    return f"[N/A: agent '{agent_key}' not found in {predecessors}]"
             
-            if pred_output is None:
-                return f"[N/A: agent '{agent_key}' not found]"
+            # Fetch output from CAS
+            artifact_name = f"{pred_id}_output"
+            if not self.space.exists(artifact_name):
+                return f"[N/A: no output for {pred_id}]"
+            
+            raw = self.space.read(artifact_name).decode("utf-8", errors="ignore")
+            
+            # Try to parse as JSON
+            try:
+                import json as _json_mod
+                pred_output = _json_mod.loads(raw)
+            except (_json_mod.JSONDecodeError, ValueError):
+                pred_output = raw
             
             # If no field path, return entire output (truncated if too long)
             if not field_path:
