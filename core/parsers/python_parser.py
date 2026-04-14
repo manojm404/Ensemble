@@ -293,6 +293,23 @@ class PythonParser:
         if has_executing_class:
             agent_indicators += 2
 
+        # Check for functions that contain large prompt strings (TradingAgents style)
+        # These are functions like `create_bull_researcher(llm, memory)` with prompts inside
+        has_prompt_function = False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                func_content = ast.get_docstring(node) or ""
+                # Check function body for prompt-like strings
+                for child in ast.walk(node):
+                    if isinstance(child, ast.Constant) and isinstance(child.value, str):
+                        val = child.value
+                        if len(val) > 200 and any(kw in val.lower() for kw in ['you are', 'your task', 'act as', 'role:', 'persona:', 'prompt:']):
+                            has_prompt_function = True
+                            break
+
+        if has_prompt_function:
+            agent_indicators += 3
+
         return agent_indicators >= 3
 
     def _create_from_class(
@@ -389,6 +406,7 @@ class PythonParser:
         """
         Create AgentData from a module that looks like an agent but
         has no explicit agent base classes.
+        Extracts prompts from functions (TradingAgents style).
         """
         # Use filename as name
         filename = os.path.basename(source_path) if source_path else "module"
@@ -405,8 +423,22 @@ class PythonParser:
             or global_prompts.get("instruction", "")
         )
 
+        # If no global prompt, try to extract from functions
+        if not system_prompt:
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    for child in ast.walk(node):
+                        if isinstance(child, ast.Constant) and isinstance(child.value, str):
+                            val = child.value
+                            if len(val) > 200 and any(kw in val.lower() for kw in ['you are', 'your task', 'act as']):
+                                system_prompt = val
+                                break
+                    if system_prompt:
+                        break
+
         description = module_docstring.split("\n")[0] if module_docstring else ""
-        body_prompt = module_docstring if module_docstring else content[:2000]
+        # Use the system prompt as body if available
+        body_prompt = system_prompt if system_prompt else (module_docstring or content[:2000])
 
         # Find any classes for metadata
         classes = []
@@ -418,10 +450,10 @@ class PythonParser:
         content_hash = hashlib.sha256(content.encode()).hexdigest()
 
         return AgentData(
-            name=name,
+            name=name.replace("_", " ").title(),
             format=AgentFormat.PYTHON,
             source_path=source_path or "",
-            description=description or f"Python module: {name}",
+            description=description or f"Python agent: {name}",
             category=AgentCategory.GENERAL,
             system_prompt=system_prompt,
             body_prompt=body_prompt,
