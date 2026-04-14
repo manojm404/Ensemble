@@ -106,6 +106,10 @@ export interface AgentSkill {
   category: string;
   enabled: boolean;
   is_native: boolean;
+  namespace?: string;
+  pack_id?: string;
+  tags?: string[];
+  version?: string;
 }
 
 export interface WorkflowData {
@@ -125,7 +129,11 @@ export async function getAgents(): Promise<AgentSkill[]> {
         emoji: d.emoji || "🤖",
         category: d.category || "General",
         enabled: d.enabled ?? true,
-        is_native: d.is_native ?? false
+        is_native: d.is_native ?? false,
+        namespace: d.namespace,
+        pack_id: d.pack_id,
+        tags: d.tags || [],
+        version: d.version || "1.0.0"
       }));
     }
   } catch (e) {
