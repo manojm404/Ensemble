@@ -39,6 +39,7 @@ const ImportAgents = () => {
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [installing, setInstalling] = useState<string | null>(null);
+  const [installedPacks, setInstalledPacks] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     // 🆕 Reload job status when page is focused
@@ -100,6 +101,12 @@ const ImportAgents = () => {
   };
 
   const handleInstall = async (packId: string) => {
+    // If already installed, navigate to Agents page
+    if (installedPacks.has(packId)) {
+      navigate("/agents");
+      return;
+    }
+
     if (!jobId) {
       toast.error("No import job ID found. Please try importing again.");
       return;
@@ -109,15 +116,21 @@ const ImportAgents = () => {
     try {
       const result = await installImportedPack(packId, jobId);
       const agentCount = result?.total_agents ?? result?.extracted_files ?? 0;
+
+      setInstalledPacks(prev => new Set(prev).add(packId));
+
       toast.success(`Pack installed! ${agentCount} agent${agentCount !== 1 ? 's' : ''} added to your registry.`);
 
-      // 🆕 Trigger a global registry sync to ensure agents show up in Agents tab
+      // Trigger a global registry sync
       try {
         await syncRegistry();
       } catch (e: any) {
         console.warn("Registry sync failed, but pack was installed", e);
         toast.warning("Pack installed but registry sync failed. Refresh the page to see new agents.");
       }
+
+      // Navigate to Agents page after short delay
+      setTimeout(() => navigate("/agents"), 1500);
     } catch (err: any) {
       console.error("Installation error:", err);
       const errorMsg = err?.message || err?.response?.data?.detail || "Unknown error occurred";
@@ -258,13 +271,23 @@ const ImportAgents = () => {
                       <Info className="h-4 w-4 mr-2" />
                       View in Marketplace
                     </Button>
-                    <Button 
+                    <Button
                       onClick={() => handleInstall(pack.id)}
                       disabled={installing === pack.id}
-                      className="flex-1 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold shadow-md shadow-primary/10"
+                      className={`flex-1 rounded-xl font-bold shadow-md transition-all ${
+                        installedPacks.has(pack.id)
+                          ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25"
+                          : "bg-primary hover:bg-primary/90 text-primary-foreground shadow-primary/10"
+                      }`}
                     >
-                      {installing === pack.id ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
-                      Install Pack
+                      {installing === pack.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : installedPacks.has(pack.id) ? (
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                      ) : (
+                        <Download className="h-4 w-4 mr-2" />
+                      )}
+                      {installing === pack.id ? "Installing..." : installedPacks.has(pack.id) ? "Installed ✓" : "Install Pack"}
                     </Button>
                   </div>
                 </MotionCard>
