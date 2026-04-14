@@ -779,7 +779,133 @@ class DAGWorkflowEngine:
 
         context_str = "\n\n".join(context_parts) if context_parts else "No previous context."
         print(f"📝 [DAG Engine] Context for {node_id}: {len(context_str)} chars, predecessors: {predecessors}", flush=True)
+        
+        # DATA INJECTOR: Resolve {{agent_id.field.path}} placeholders
+        context_str = self._resolve_data_bindings(context_str, run_id, predecessors)
+        
         return context_str
+
+    def _extract_json_path(self, data: Any, path: str) -> str:
+        """
+        Safely extract a value from nested JSON using dot-notation path.
+        
+        Examples:
+            _extract_json_path({"price": 100}, "price") → "100"
+            _extract_json_path({"rsi": {"value": 68.5}}, "rsi.value") → "68.5"
+            _extract_json_path({"items": [1,2,3]}, "items.0") → "1"
+            _extract_json_path({"a": 1}, "b.c") → "N/A (path not found: b.c)"
+        """
+        if not path:
+            return str(data) if data is not None else "N/A"
+        
+        keys = path.split(".")
+        current = data
+        
+        for key in keys:
+            if current is None:
+                return f"N/A (null at: {key})"
+            
+            # Try dict key first
+            if isinstance(current, dict):
+                if key in current:
+                    current = current[key]
+                else:
+                    # Case-insensitive fallback
+                    lower_key = key.lower()
+                    found = None
+                    for k in current:
+                        if k.lower() == lower_key:
+                            found = current[k]
+                            break
+                    if found is not None:
+                        current = found
+                    else:
+                        return f"N/A (key not found: {key} in {list(current.keys())[:5]}...)"
+            # Try list index
+            elif isinstance(current, (list, tuple)):
+                try:
+                    idx = int(key)
+                    current = current[idx]
+                except (ValueError, IndexError):
+                    return f"N/A (invalid index: {key})"
+            else:
+                return f"N/A (cannot traverse: {type(current).__name__}.{key})"
+        
+        # Format the final value
+        if isinstance(current, (dict, list)):
+            # For complex structures, return compact JSON
+            import json as _json
+            return _json.dumps(current, ensure_ascii=False)
+        elif isinstance(current, bool):
+            return str(current).lower()
+        elif current is None:
+            return "null"
+        else:
+            return str(current)
+
+    def _resolve_data_bindings(self, text: str, run_id: str, predecessors: List[str]) -> str:
+        """
+        Resolve {{agent_id.field.path}} placeholders with actual values from previous agents' outputs.
+        
+        This solves the "context cliff" problem by injecting exact values instead of stacking raw outputs.
+        
+        Examples in agent instructions:
+            "Price: {{data_fetcher.current_price}}"
+            "RSI: {{technical_analyst.rsi.value}}"
+            "P/E: {{fundamentals_analyst.pe_ratio}}"
+            "Risk: {{risk_manager.risk_score}}/10"
+        """
+        import re
+        
+        # Pattern: {{agent_id.field.path}} or {{agent_id}} (entire output)
+        pattern = r'\{\{([^}]+)\}\}'
+        
+        def replace_binding(match):
+            binding = match.group(1).strip()
+            
+            # Find the predecessor node ID (first part before first dot)
+            parts = binding.split(".")
+            agent_key = parts[0]
+            field_path = ".".join(parts[1:]) if len(parts) > 1 else ""
+            
+            # Try to find the predecessor by matching agent_key to node ID
+            pred_output = None
+            for pred_id in predecessors:
+                # Match if pred_id contains agent_key or vice versa
+                if agent_key in pred_id or pred_id in agent_key:
+                    artifact_name = f"{pred_id}_output"
+                    if self.space.exists(artifact_name):
+                        raw = self.space.read(artifact_name).decode("utf-8", errors="ignore")
+                        # Try to parse as JSON
+                        try:
+                            import json as _json_mod
+                            pred_output = _json_mod.loads(raw)
+                        except (_json_mod.JSONDecodeError, ValueError):
+                            # Not JSON, use raw text
+                            pred_output = raw
+                        break
+            
+            if pred_output is None:
+                return f"[N/A: agent '{agent_key}' not found]"
+            
+            # If no field path, return entire output (truncated if too long)
+            if not field_path:
+                if isinstance(pred_output, str):
+                    return pred_output[:500] if len(pred_output) > 500 else pred_output
+                return str(pred_output)
+            
+            # Extract the specific field
+            return self._extract_json_path(pred_output, field_path)
+        
+        # Count bindings for logging
+        bindings = re.findall(pattern, text)
+        if bindings:
+            print(f"💉 [Data Injector] Resolving {len(bindings)} bindings: {bindings}", flush=True)
+        
+        # Replace all bindings
+        resolved = re.sub(pattern, replace_binding, text)
+        
+        return resolved
 
     def _get_predecessors(self, node_id: str, edges: List[Dict]) -> List[str]:
         """Get list of predecessor node IDs for a given node using the edges list."""
