@@ -25,52 +25,58 @@ const categoryColors: Record<string, string> = {
 // Department hierarchy for organized agent browsing
 const DEPARTMENT_GROUPS: Record<string, { label: string; icon: string; categories: string[]; color: string }> = {
   engineering: {
-    label: "Engineering",
+    label: "Engineering & Development",
     icon: "💻",
-    categories: ["Engineering", "Development", "DevOps", "Infrastructure", "Security", "Testing"],
+    categories: ["Engineering", "Development", "DevOps", "Infrastructure", "Security", "Testing", "Software Architecture", "Backend", "Frontend", "Full Stack", "Mobile Development", "API"],
     color: "text-blue-400 bg-blue-500/10",
   },
-  design: {
-    label: "Design & UX",
-    icon: "🎨",
-    categories: ["Design", "UX", "Creative"],
+  trading: {
+    label: "Trading & Finance",
+    icon: "📈",
+    categories: ["Trading", "Finance", "Cryptocurrency", "Stock Market", "Investment", "Quantitative Analysis", "Risk Management", "Financial Planning"],
+    color: "text-emerald-400 bg-emerald-500/10",
+  },
+  social_media: {
+    label: "Social Media & Marketing",
+    icon: "📱",
+    categories: ["Social Media", "Marketing", "Content", "SEO", "Digital Marketing", "Brand", "Influencer", "Community Management", "Analytics"],
     color: "text-pink-400 bg-pink-500/10",
   },
-  marketing: {
-    label: "Marketing & Sales",
-    icon: "📢",
-    categories: ["Marketing", "Sales", "Content", "SEO"],
-    color: "text-purple-400 bg-purple-500/10",
-  },
-  product: {
-    label: "Product & Strategy",
-    icon: "📋",
-    categories: ["Product", "Executive", "Business", "Strategy", "Management"],
+  movie: {
+    label: "Movies & Entertainment",
+    icon: "🎬",
+    categories: ["Movie", "Entertainment", "Film", "Screenwriting", "Production", "Post Production", "Animation", "VFX", "Cinematography"],
     color: "text-amber-400 bg-amber-500/10",
+  },
+  design: {
+    label: "Design & Creative",
+    icon: "🎨",
+    categories: ["Design", "UX", "Creative", "UI", "Graphic Design", "Illustration", "Branding", "Typography", "Color Theory"],
+    color: "text-violet-400 bg-violet-500/10",
   },
   research: {
     label: "Research & Analysis",
     icon: "🔬",
-    categories: ["Research", "Analysis", "Data", "Science", "AI/ML"],
-    color: "text-emerald-400 bg-emerald-500/10",
+    categories: ["Research", "Analysis", "Data Science", "Science", "AI/ML", "Machine Learning", "Statistics", "Academic"],
+    color: "text-cyan-400 bg-cyan-500/10",
+  },
+  product: {
+    label: "Product & Strategy",
+    icon: "📋",
+    categories: ["Product", "Executive", "Business", "Strategy", "Management", "Project Management", "Operations"],
+    color: "text-orange-400 bg-orange-500/10",
   },
   support: {
-    label: "Support & Operations",
+    label: "Support & Documentation",
     icon: "🛠️",
-    categories: ["Support", "Operations", "Documentation", "Writing", "Communication"],
-    color: "text-cyan-400 bg-cyan-500/10",
+    categories: ["Support", "Documentation", "Writing", "Communication", "Customer Success", "Technical Writing"],
+    color: "text-slate-400 bg-slate-500/10",
   },
   game_dev: {
     label: "Game Development",
     icon: "🎮",
-    categories: ["Game Development", "Gaming"],
-    color: "text-orange-400 bg-orange-500/10",
-  },
-  academic: {
-    label: "Academic",
-    icon: "🎓",
-    categories: ["Academic", "Education"],
-    color: "text-indigo-400 bg-indigo-500/10",
+    categories: ["Game Development", "Gaming", "Unity", "Unreal", "Level Design", "Narrative Design"],
+    color: "text-red-400 bg-red-500/10",
   },
 };
 
