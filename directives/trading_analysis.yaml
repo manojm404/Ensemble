@@ -1,0 +1,153 @@
+# Trading Analysis Workflow
+# Based on TradingAgents multi-agent financial trading framework
+# 
+# This workflow mirrors a real trading firm's analysis process:
+# 1. Analyst Team gathers data in parallel
+# 2. Researchers debate bull vs bear case
+# 3. Trader makes recommendation
+# 4. Risk team evaluates and Portfolio Manager decides
+#
+# Usage: Load this template in Ensemble's Workflow Studio
+
+name: "Trading Analysis"
+description: "Comprehensive stock analysis using multi-agent team debate - produces Buy/Sell/Hold recommendation with reasoning"
+version: "1.0.0"
+
+# Agent sequence (DAG execution order)
+agents:
+  - id: analyst_fundamentals
+    role: "Fundamentals Analyst"
+    instruction: |
+      You are a Fundamentals Analyst. Analyze the given stock ticker's fundamental data.
+      Use get_company_fundamentals tool to get financial metrics.
+      Evaluate: P/E ratio, revenue growth, profit margins, ROE, debt levels.
+      Output a summary with intrinsic value assessment and key financial strengths/weaknesses.
+    tools:
+      - get_company_fundamentals
+      - search_web
+
+  - id: analyst_technical
+    role: "Technical Analyst"
+    instruction: |
+      You are a Technical Analyst. Analyze the given stock ticker's technical indicators.
+      Use get_technical_indicators tool to get MACD, RSI, Bollinger Bands, etc.
+      Evaluate: trend direction, momentum, volatility, support/resistance levels.
+      Output a technical summary with chart pattern assessment and key levels.
+    tools:
+      - get_technical_indicators
+      - get_stock_data
+      - search_web
+
+  - id: analyst_sentiment
+    role: "Sentiment Analyst"
+    instruction: |
+      You are a Sentiment Analyst. Analyze market sentiment for the given stock ticker.
+      Use get_market_news tool to get recent news and assess sentiment.
+      Evaluate: news sentiment, social media buzz, analyst ratings changes.
+      Output a sentiment summary with bullish/bearish indicators and sentiment score.
+    tools:
+      - get_market_news
+      - search_web
+
+  - id: researcher_bull
+    role: "Bull Researcher"
+    instruction: |
+      You are a Bull Researcher. Build the strongest CASE FOR buying this stock.
+      Review the analyst reports and identify all positive factors.
+      Focus on: growth catalysts, competitive advantages, undervaluation, positive momentum.
+      Address counterarguments proactively.
+      Output a compelling bull case with specific evidence from analyst reports.
+    tools:
+      - search_web
+
+  - id: researcher_bear
+    role: "Bear Researcher"
+    instruction: |
+      You are a Bear Researcher. Build the strongest CASE AGAINST buying this stock.
+      Review the analyst reports and identify all risk factors and negatives.
+      Focus on: overvaluation risks, competitive threats, declining metrics, headwinds.
+      Address bull arguments and explain why they may be flawed.
+      Output a compelling bear case with specific evidence from analyst reports.
+    tools:
+      - search_web
+
+  - id: trader
+    role: "Trader"
+    instruction: |
+      You are a Trader. Synthesize all analyst and researcher reports into a trading decision.
+      Weigh the bull case vs bear case objectively.
+      Consider: risk/reward ratio, position sizing, entry/exit levels.
+      Output a clear decision: BUY / SELL / HOLD with:
+      - Recommended action and confidence level (1-10)
+      - Suggested position size (% of portfolio)
+      - Entry price target and stop-loss level
+      - Key reasoning (3-5 bullet points)
+    tools:
+      - search_web
+
+  - id: risk_manager
+    role: "Risk Manager"
+    instruction: |
+      You are a Risk Manager. Evaluate the trader's recommendation for risk factors.
+      Assess: market volatility, liquidity risk, concentration risk, downside exposure.
+      Provide a risk assessment report with:
+      - Risk level: LOW / MEDIUM / HIGH
+      - Key risk factors identified
+      - Recommended risk mitigation strategies
+      - Maximum acceptable position size
+    tools:
+      - search_web
+
+  - id: portfolio_manager
+    role: "Portfolio Manager"
+    instruction: |
+      You are the Portfolio Manager. Make the FINAL decision.
+      Review all reports: analysts, researchers, trader, and risk manager.
+      Approve, modify, or reject the trading recommendation.
+      Output the FINAL decision in this format:
+
+      ## Trading Decision: [BUY / SELL / HOLD]
+
+      **Stock:** [TICKER]
+      **Confidence:** [1-10]
+      **Risk Level:** [LOW / MEDIUM / HIGH]
+
+      ### Recommendation
+      - Action: [Buy/Sell/Hold]
+      - Position Size: [% of portfolio]
+      - Entry Target: [$price]
+      - Stop Loss: [$price]
+      - Price Target: [$price]
+
+      ### Key Reasons
+      - [Reason 1]
+      - [Reason 2]
+      - [Reason 3]
+
+      ### Risk Assessment
+      [Brief risk summary]
+
+      ### Final Notes
+      [Any additional guidance or caveats]
+    tools:
+      - search_web
+
+# Execution order (DAG edges)
+# Analysts run in parallel, then researchers debate, then trader decides, then risk evaluates, then PM decides
+execution_order:
+  # Phase 1: Analysts (can run in parallel)
+  - [analyst_fundamentals, analyst_technical, analyst_sentiment]
+  # Phase 2: Researchers debate (need all analyst reports)
+  - [researcher_bull, researcher_bear]
+  # Phase 3: Trader makes decision (needs research)
+  - [trader]
+  # Phase 4: Risk evaluates
+  - [risk_manager]
+  # Phase 5: Portfolio Manager final decision
+  - [portfolio_manager]
+
+# Output format
+output:
+  type: "trading_decision"
+  format: "markdown"
+  description: "Final Buy/Sell/Hold recommendation with position sizing, entry/exit levels, and risk assessment"
