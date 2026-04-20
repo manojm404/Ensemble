@@ -19,9 +19,8 @@ We created Ensemble to solve the **"Context Gap"** in modern AI work.
 2.  **Beyond the Chatbox**: Professional work isn't a single prompt; it's a workflow. Ensemble replaces back-and-forth chatting with **durable, reproducible pipelines**.
 3.  **Specialization**: A single LLM tries to be everything. Ensemble uses **specialized personas** (Skills) that are better at their specific tasks than a general-purpose model.
 
----
-
-Welcome to the **Ensemble** technical core. This document serves as the absolute source of truth for the architecture, engineering decisions, and operational logic of the Ensemble V1.0 platform.
+### **The Philosophical Edge: Code = SOP**
+Ensemble stands on the shoulders of giants (MetaGPT, CrewAI, AutoGen) but takes the philosophy further: **Every workflow is a Standard Operating Procedure (SOP).** Our architecture ensures that probabilistic AI behavior is constrained by deterministic business logic.
 
 ---
 
@@ -53,68 +52,82 @@ graph TD
     end
 ```
 
+### **The Governance "Sidecar"**
+Every action in the architecture above is intercepted by an **Audit Sidecar**. Before a tool (Layer 3) is allowed to run, the **Governance Engine** checks:
+1.  **Budget**: Does the current project have remaining tokens?
+2.  **Permission**: Is the agent authorized for this specific tool?
+3.  **Approvals**: Does this action (e.g., deleting a file) require a human approval gate?
+
 ---
 
-## 💻 2. The Tech Stack: What & Why
+## 🛡️ 2. Security & Economic Guardrails
+Ensemble implements a **Five-Layer Defense-in-Depth** for running agentic code:
+
+1.  **Docker Sandboxing**: Ephemeral, hardened containers for execution.
+2.  **AST Guard**: Blocks dangerous Python builtins (`eval`, `exec`, `__import__`) at the source level.
+3.  **Network Policy**: Domain whitelisting to prevent data exfiltration.
+4.  **Recursion Guard**: Prevents infinite agent loops (Hard limit: 3 levels).
+5.  **Economic Governance**:
+    *   **Per-Agent Caps**: Monthly spend limits per role.
+    *   **Human Approval Gates**: Triggered for sensitive actions and shell commands.
+    *   **Token Grant System**: Pre-allocates budget before a workflow begins.
+
+---
+
+## 💻 3. The Tech Stack: What & Why
 
 ### **Frontend: The Command Center**
-*   **Tauri 2.0 (Rust/Desktop)**: Chosen for security and native performance. Unlike Electron, Tauri uses the system's native Webview, resulting in a ~80% smaller binary footprint.
-*   **React + Tailwind CSS**: Used for the UI layer to provide a premium, "Glassmorphic" interface that feels alive.
-*   **React Flow**: The engine behind the Workflow Designer. It treats the agent team as a **DAG (Directed Acyclic Graph)**, allowing for complex data-pass-through between roles.
+*   **Tauri 2.0 (Rust/Desktop)**: Native performance and high security.
+*   **React + Tailwind CSS**: Premium, "Glassmorphic" interface.
+*   **React Flow**: The engine for visual DAG (Directed Acyclic Graph) orchestration.
 
 ### **Backend: The Intelligence Engine**
-*   **FastAPI (Python)**: Acts as the bridge between the desktop UI and the AI agents. We chose FastAPI for its high-performance asynchronous capabilities.
-*   **PyInstaller**: Used to bundle the Python environment into a single `ensemble-backend` binary. This ensures that a new user doesn't need to install Python or Pip to run Ensemble.
+*   **FastAPI (Python)**: High-performance asynchronous API bridge.
+*   **PyInstaller**: Environment-free distribution via a single binary.
+*   **Universal Agent Importer**: Natively supports Markdown, Python, YAML, and JSON agent formats.
 
 ---
 
-## 🧠 3. Core Concept: RAG Activation
+## 🧠 4. Core Concept: RAG Activation
 **RAG (Retrieval-Augmented Generation)** is how Ensemble gives agents "Long-Term Memory." 
 
-### **How we did it (Deep Dive):**
-We implemented a **Local-First Vector Store** in `core/rag.py`:
-1.  **Embedding Model**: We use `sentence_transformers` (specifically the `all-MiniLM-L6-v2` model). This model transforms human text into a 384-dimensional vector (a list of numbers representing the "meaning" of the text).
-2.  **Storage**: These vectors are stored as `BLOB`s (Binary Large Objects) in a local `SQLite` database (`data/ensemble_memory.db`).
-3.  **Search**: When an agent needs to remember something, we use **NumPy** to calculate the **Cosine Similarity** between the current task and all stored memories.
-    *   *Analogy*: Instead of searching for the word "Apple," RAG looks for everything "Fruit-like" or "Tech-company-like" based on mathematical distance.
+### **The Technical Implementation:**
+*   **Embedding Model**: `sentence_transformers` (`all-MiniLM-L6-v2`) generates 384-dimensional semantic vectors.
+*   **Storage**: SQLite vector-blobs in `data/ensemble_memory.db`.
+*   **Search Engine**: NumPy-powered **Cosine Similarity** search for O(1) retrieval speed on local hardware.
 
 ---
 
-## 🔍 4. The Bulletproof Search Fallback
-A common failure in AI agents is "Search Blindsiding"—where a primary search tool gets blocked, causing the agent to give up. 
-
-**Ensemble's Solution:**
-In `core/tools/__init__.py`, we implemented a **Multi-Stage Fallback Engine**:
-1.  **Stage 1: Standard DDG**: Top-level web search.
-2.  **Stage 2: News Fallback**: If standard is blocked, it switches to `news.search` which uses different endpoints.
-3.  **Stage 3: Broad Fallback**: If specific queries fail, it recursively simplifies the query to find "Market Trends" or "Projections" to ensure the agent always has a foundation to build on.
+## 🔍 5. The Bulletproof Search Fallback
+To prevent agent failure in production, our search tool in `core/tools/__init__.py` uses a **Recursive Fallback Strategy**:
+1.  **Stage 1: Standard DDG** (General Web).
+2.  **Stage 2: News Fallback** (Direct endpoint switch for 403 bypass).
+3.  **Stage 3: Broad Semantic Fallback** (Query simplification to find high-level projections).
 
 ---
 
-## 🛠️ 5. Developer Guide: How to Extend
+## 🛠️ 6. Quick Start & Setup
 
-### **Adding a New Agent Specialist**
-1.  Create a new directory in `skills/`.
-2.  Add a `SKILL.md` file following the SOP format.
-3.  Ensemble's `SkillRegistry` will automatically detect, categorize, and enable the agent on the next sync.
+### **Prerequisites**
+*   Python 3.11+
+*   Node.js 18+
+*   Gemini API Key or Ollama (for full local sovereignty)
 
-### **Building & Bundling**
-To create a fresh production binary after making core changes:
+### **Developer Setup**
 ```bash
-# 1. Update the backend binary
-python3 scripts/bundle_backend.py
+# 1. Install Dependencies
+pip install -r requirements.txt
 
-# 2. Build the desktop app
-npm run tauri build
+# 2. Launch Backend
+uvicorn core.governance:app --reload --port 8088
+
+# 3. Launch Frontend (UI)
+cd ui && npm install && npm run dev
 ```
 
 ---
 
-## 🛡️ 6. Governance & Safety
-Every action taken by an agent is intercepted by the **Governance Dashboard**. 
-*   **Budget Enforcement**: Agents have a strict "Token Grant" limit. 
-*   **Auditing**: Every thought, tool call, and output is saved to `data/ensemble_audit.db`, making the platform 100% auditable for enterprise compliance.
-
----
+## 📅 7. Project Information
 **Document Status**: Immutable Master Record
 **Project Version**: 1.0.0 "Sovereign"
+**Release Philosophy**: Be autonomous. Be auditable. Be Ensemble. 🎼
