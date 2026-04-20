@@ -60,21 +60,38 @@ def search_web(query: str) -> str:
             from duckduckgo_search import DDGS
         
         with DDGS() as ddgs:
+            # Stage 1: Standard Text Search
+            print(f"🔍 [Search] Attempting Standard Search: {query}", flush=True)
             results = list(ddgs.text(query, max_results=5))
+            
+            # Filter out empty or useless results
+            results = [r for r in results if r.get('body') or r.get('snippet')]
+            
+            # Stage 2: Fallback to News if Text Search is blocked
+            if not results:
+                print(f"🔄 [Search] Standard search empty or blocked, trying News fallback...", flush=True)
+                results = list(ddgs.news(query, max_results=5))
+            
+            # Stage 3: Broad Fallback (Last Resort)
+            if not results:
+                 broad_query = query.split(" ")[0] + " market trends 2025"
+                 print(f"⚠️ [Search] Specific search failed. Trying broad fallback: {broad_query}", flush=True)
+                 results = list(ddgs.text(broad_query, max_results=3))
 
         if not results:
+            print(f"❌ [Search] All search attempts failed for: {query}", flush=True)
             return f"""🔍 Search Results for: "{query}"
 
-No results found. Try:
-- Using different keywords
-- Making the query more specific
-- Checking spelling"""
+No findings. The search engine may be blocking requests or the topic is too specific.
+SUGGESTION: Try searching for broader terms like "AI coding assistants" or "AI market 2025" instead.
+"""
 
+        print(f"✅ [Search] Successfully retrieved {len(results)} results", flush=True)
         output = [f"🔍 Search Results for: \"{query}\"\n"]
         for i, r in enumerate(results, 1):
             title = r.get('title', 'No title')
-            url = r.get('href', 'No URL')
-            snippet = r.get('body', 'No description')
+            url = r.get('href', r.get('link', 'No URL'))
+            snippet = r.get('body', r.get('snippet', 'No description'))
             output.append(f"{i}. **{title}**")
             output.append(f"   URL: {url}")
             output.append(f"   {snippet}\n")

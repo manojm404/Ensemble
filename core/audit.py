@@ -69,6 +69,23 @@ class AuditLogger:
                     cas_hash TEXT
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    user_id TEXT,
+                    company_id TEXT,
+                    from_name TEXT,
+                    from_avatar TEXT,
+                    title TEXT,
+                    preview TEXT,
+                    content TEXT,
+                    is_unread INTEGER DEFAULT 1,
+                    is_starred INTEGER DEFAULT 0,
+                    is_archived INTEGER DEFAULT 0,
+                    category TEXT
+                )
+            """)
 
     def log(
         self,
@@ -296,3 +313,75 @@ class AuditLogger:
         except Exception as e:
             logger.warning("⚠️ [AuditLogger] Replay failed: %s", e)
             return None
+
+    def notify(
+        self,
+        user_id: str,
+        company_id: str,
+        title: str,
+        preview: str,
+        content: str,
+        from_name: str = "Ensemble",
+        from_avatar: str = "🤖",
+        category: str = "system",
+        broadcast: bool = True
+    ):
+        """Persistent notification for the Inbox."""
+        timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        
+        # SQLite storage
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT INTO notifications (
+                    timestamp, user_id, company_id, from_name, from_avatar,
+                    title, preview, content, category, is_unread
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """, (timestamp, user_id, company_id, from_name, from_avatar, title, preview, content, category))
+        
+        if broadcast:
+            # Broadcast to UI for live badge updates
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        ws_manager.broadcast(company_id, "NOTIFICATION", {
+                            "title": title,
+                            "preview": preview,
+                            "category": category
+                        }),
+                        loop
+                    )
+                else:
+                    asyncio.run(ws_manager.broadcast(company_id, "NOTIFICATION", {
+                        "title": title,
+                        "preview": preview,
+                        "category": category
+                    }))
+            except Exception as e:
+                logger.warning("⚠️  [AuditLogger] Notification broadcast failed: %s", e)
+
+    def get_notifications(self, user_id: str, company_id: str = None, limit: int = 50) -> List[Dict[str, Any]]:
+        """Fetch notifications for the Inbox."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            query = "SELECT * FROM notifications WHERE (user_id = ? OR user_id = 'dev_user' OR user_id IS NULL)"
+            params = [user_id]
+            
+            if company_id:
+                query += " AND company_id = ?"
+                params.append(company_id)
+                
+            query += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+            
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def mark_notification_read(self, notification_id: int):
+        """Mark a notification as read."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("UPDATE notifications SET is_unread = 0 WHERE id = ?", (notification_id,))
+
+
+# Export singleton
+audit_logger = AuditLogger()

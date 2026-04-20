@@ -6,6 +6,7 @@ Supports multiple formats: .md (primary), .py, .yaml, .json, .txt
 All marketplace packs are normalized to .md during import for consistency.
 """
 import os
+import sys
 import json
 import re
 from enum import Enum
@@ -31,7 +32,13 @@ class SkillSource(Enum):
 
 class SkillRegistry:
     def __init__(self):
-        self.root = os.getcwd()
+        # Support PyInstaller internal directory structure
+        if hasattr(sys, '_MEIPASS'):
+            self.root = sys._MEIPASS
+        else:
+            self.root = os.getcwd()
+
+        print(f"🎬 [SkillRegistry] Initialized with root: {self.root}")
         self.native_dir = os.path.join(self.root, "data/agents/native")
         self.custom_dir = os.path.join(self.root, "data/agents/custom")
         self.legacy_skills_dir = os.path.join(self.root, "skills")
@@ -63,16 +70,28 @@ class SkillRegistry:
     def sync_all(self):
         self.skills = {}
         self._conflict_cache = {}
-        # 1. Load Native Core (High-fidelity, categorized)
-        self._load_from_path(self.native_dir, source=SkillSource.NATIVE)
-        # 2. Load Legacy Registry (The 170+ specialists)
-        self._load_from_path(self.legacy_skills_dir, source=SkillSource.CORE)
-        # 3. Load Custom User Agents (split into packs and custom)
-        self._load_custom_agents()
-        # 4. Load External Integrations
-        self._load_integrations()
-        print(f"✅ [SkillRegistry] Successfully loaded {len(self.skills)} specialist agents.")
-        return len(self.skills)
+        
+        print(f"🔍 [SkillRegistry] Starting sync...")
+        print(f"   📂 Native: {self.native_dir} (exists: {os.path.exists(self.native_dir)})")
+        print(f"   📂 Legacy: {self.legacy_skills_dir} (exists: {os.path.exists(self.legacy_skills_dir)})")
+        print(f"   📂 Custom: {self.custom_dir} (exists: {os.path.exists(self.custom_dir)})")
+
+        try:
+            # 1. Load Native Core (High-fidelity, categorized)
+            self._load_from_path(self.native_dir, source=SkillSource.NATIVE)
+            # 2. Load Legacy Registry (The 170+ specialists)
+            self._load_from_path(self.legacy_skills_dir, source=SkillSource.CORE)
+            # 3. Load Custom User Agents (split into packs and custom)
+            self._load_custom_agents()
+            # 4. Load External Integrations
+            self._load_integrations()
+            print(f"✅ [SkillRegistry] Successfully loaded {len(self.skills)} specialist agents.")
+            return len(self.skills)
+        except Exception as e:
+            print(f"❌ [SkillRegistry] Sync failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0
 
     def _load_from_path(self, path: str, source: SkillSource):
         if not os.path.exists(path): return

@@ -27,7 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Play, Save, Undo, Redo, X, Search, Plus, Settings2, Loader2, CheckCircle2, Wand2, Sparkles, FileText, Bot } from "lucide-react";
+import { Play, Save, Undo, Redo, X, Search, Plus, Settings2, Loader2, CheckCircle2, Wand2, Sparkles, FileText, Bot, ChevronLeft } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { getWorkflow, saveWorkflow, getAgents, type AgentSkill } from "@/lib/api";
@@ -410,6 +410,14 @@ function WorkflowEditorInner() {
             proOptions={{ hideAttribution: true }}
             style={{ background: "hsl(220, 20%, 7%)" }}
           >
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute top-4 left-4 z-50 h-9 w-9 text-muted-foreground hover:text-foreground bg-card/40 backdrop-blur-md rounded-full border border-border/40 shadow-lg"
+              onClick={() => navigate("/workflows")}
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </Button>
             <Background color="hsl(220, 14%, 16%)" gap={20} size={1} />
             <Controls
               style={{

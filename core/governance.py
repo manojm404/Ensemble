@@ -20,7 +20,7 @@ import yaml
 from dotenv import load_dotenv
 from fastapi import (
     FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Query,
-    UploadFile, File
+    UploadFile, File, Depends
 )
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -75,11 +75,14 @@ else:
         "http://localhost:8080",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:8080",
+        "tauri://localhost",
+        "https://tauri.localhost",
     ]
 
+# CORS Middleware - Permissive for V1 Release
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -88,15 +91,7 @@ app.add_middleware(
 # Phase 1: JWT Authentication Middleware
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    """
-    Validate JWT token on all protected endpoints.
-    Skips authentication for public paths (auth endpoints, health, static files).
-    Also skips for OPTIONS requests (CORS preflight).
-
-    Dev Mode: If SUPABASE_URL is not configured or ENFORCE_AUTH=false,
-    authentication is bypassed for all requests (local development).
-    """
-    # Allow CORS preflight requests to bypass auth
+    # Allow CORS preflight requests to bypass everything
     if request.method == "OPTIONS":
         return await call_next(request)
 
@@ -1766,6 +1761,45 @@ async def get_pipeline_status():
         
         return pipelines
 
+# --- Notification API Endpoints ---
+
+@app.get("/api/notifications", dependencies=[Depends(require_auth)])
+async def get_notifications(request: Request, limit: int = Query(default=50)):
+    """Fetch real notifications for the authenticated user/company."""
+    user = request.state.user
+    company_id = request.query_params.get("company_id")
+    
+    # Use the audit_logger to fetch from DB
+    notifications = audit_logger.get_notifications(
+        user_id=user["id"],
+        company_id=company_id,
+        limit=limit
+    )
+    
+    # Format for the UI
+    formatted = []
+    for n in notifications:
+        # notification model logic
+        formatted.append({
+            "id": str(n["id"]),
+            "from": n["from_name"],
+            "fromAvatar": n["from_avatar"],
+            "title": n["title"],
+            "preview": n["preview"],
+            "content": n["content"],
+            "time": _format_relative_time(n["timestamp"]),
+            "unread": bool(n["is_unread"]),
+            "starred": bool(n["is_starred"]),
+            "category": n["category"]
+        })
+    return formatted
+
+@app.post("/api/notifications/{notification_id}/read", dependencies=[Depends(require_auth)])
+async def mark_notification_read(notification_id: int):
+    """Mark a specific notification as viewed."""
+    audit_logger.mark_notification_read(notification_id)
+    return {"status": "success"}
+
 def _format_relative_time(timestamp):
     """Format a timestamp as relative time (e.g. '2m ago')."""
     if not timestamp:
@@ -1806,9 +1840,6 @@ def _format_activity_message(action_type, details, agent_id):
     }
     return messages.get(action_type, f"{action_type} by {agent_id or 'system'}")
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8088)
 
 @app.get("/api/runs/{run_id}/timeline")
 async def get_run_timeline(run_id: str):
@@ -2093,14 +2124,14 @@ AVAILABLE AGENTS (grouped by category):
 
 OUTPUT RULES:
 - Return ONLY strict JSON. No markdown fences.
-- Create 3-7 nodes representing a logical automated mission.
-- 'data.role' should be an Agent ID from the list above IF a matching agent exists.
-- CRITICAL: If the user's prompt defines specific agent roles (like "Research Agent", "Outline Agent", etc.) that are NOT in the available agents list above, you MUST create custom agent nodes using the role descriptions from the user's prompt. Use the role name as the 'data.role' value (e.g., "research_agent", "outline_agent", "writing_agent", "editor_agent").
-- For custom agents, set 'data.is_custom': true and include the role description in 'data.instruction'.
+- Create 1-5 nodes representing a logical automated mission. Be minimalistic — do NOT add agents that don't add value.
+- CRITICAL: Use a logical pipeline order: RESEARCH -> DRAFTING -> EDITING/REVIEW. Never put a researcher at the end of a chain.
+- 'data.role' should be a matching Agent ID from the list above.
+- If the user's prompt defines specific roles NOT in the list, create custom nodes with 'data.is_custom': true and 'data.instruction' describing their specialized role.
 - 'data.model' should be 'gemini-2.5-flash'.
 - Position nodes logically in a pipeline (node 1 at x:100, y:100, node 2 at x:400, y:100 etc).
 - CRITICAL: The graph MUST be a Directed Acyclic Graph (DAG). There can be NO CYCLES or loops.
-- CRITICAL: Use TWO separate nodes if an agent needs to delegate and later summarize (e.g., 'ceo_delegate' and 'ceo_summarize'). Do NOT point arrows back to the original node.
+- Avoid redundant agents. If one agent can do the task perfectly, use ONLY that agent.
 
 JSON SCHEMA:
 {{
@@ -2281,7 +2312,7 @@ async def get_workflow_preview(workflow_id: str):
             with open(preview_path, "r", encoding="utf-8") as f:
                 html_content = f.read()
             html_content = _inline_assets(html_content, workflow_ws_dir)
-            return {"html": html_content, "node": "legacy", "path": "preview.html"}
+            return {"html": html_content, "node": "combined", "path": "preview.html"}
 
     # Fallback: look for HTML files in the global workspace that may have been generated
     # during this run (sorted by most recent first, but only if modified within 10 min)
@@ -3669,3 +3700,7 @@ async def test_api_key(request: Request):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Test failed: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8088)

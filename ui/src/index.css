@@ -53,40 +53,40 @@
   }
 
   .dark {
-    --background: 220 20% 7%;
-    --foreground: 210 20% 92%;
-    --card: 220 16% 11%;
-    --card-foreground: 210 20% 92%;
-    --popover: 220 16% 11%;
-    --popover-foreground: 210 20% 92%;
-    --primary: 195 90% 50%;
-    --primary-foreground: 220 20% 7%;
-    --secondary: 220 14% 16%;
-    --secondary-foreground: 210 20% 85%;
-    --muted: 220 14% 14%;
-    --muted-foreground: 215 15% 55%;
-    --accent: 195 90% 50%;
-    --accent-foreground: 220 20% 7%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 210 20% 92%;
-    --border: 220 14% 16%;
-    --input: 220 14% 18%;
-    --ring: 195 90% 50%;
-    --sidebar-background: 220 18% 9%;
-    --sidebar-foreground: 215 15% 55%;
-    --sidebar-primary: 195 90% 50%;
-    --sidebar-primary-foreground: 220 20% 7%;
-    --sidebar-accent: 220 14% 14%;
-    --sidebar-accent-foreground: 210 20% 92%;
-    --sidebar-border: 220 14% 16%;
-    --sidebar-ring: 195 90% 50%;
-    --surface-elevated: 220 14% 14%;
-    --glow-primary: 195 90% 50%;
-    --badge-green: 155 70% 45%;
-    --badge-orange: 30 85% 55%;
-    --badge-purple: 270 60% 60%;
-    --badge-blue: 210 80% 55%;
-    --badge-red: 0 70% 55%;
+    --background: 222 47% 1%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 4%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 4%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 195 100% 50%;
+    --primary-foreground: 222 47% 2%;
+    --secondary: 222 47% 8%;
+    --secondary-foreground: 210 40% 90%;
+    --muted: 222 47% 6%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 195 100% 50%;
+    --accent-foreground: 222 47% 2%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 222 47% 12%;
+    --input: 222 47% 12%;
+    --ring: 195 100% 50%;
+    --sidebar-background: 222 47% 2%;
+    --sidebar-foreground: 215 20% 65%;
+    --sidebar-primary: 195 100% 50%;
+    --sidebar-primary-foreground: 222 47% 2%;
+    --sidebar-accent: 222 47% 6%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 222 47% 10%;
+    --sidebar-ring: 195 100% 50%;
+    --surface-elevated: 222 47% 6%;
+    --glow-primary: 195 100% 50%;
+    --badge-green: 155 100% 50%;
+    --badge-orange: 30 100% 50%;
+    --badge-purple: 270 100% 65%;
+    --badge-blue: 210 100% 60%;
+    --badge-red: 0 100% 60%;
   }
 }
 

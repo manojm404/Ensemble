@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "ensemble",
-  "version": "0.1.0",
+  "productName": "Ensemble",
+  "version": "1.0.0",
   "identifier": "com.ensemble.app",
   "build": {
     "frontendDist": "../dist",
@@ -13,11 +13,14 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Ensemble",
-        "width": 800,
-        "height": 600,
+        "title": "Ensemble — Autonomous AI Company Platform",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 680,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "center": true
       }
     ],
     "security": {
@@ -33,6 +36,17 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "shortDescription": "Autonomous AI Company Platform",
+    "longDescription": "Build, orchestrate, and govern teams of AI agents with a no-code visual studio, local LLMs, and human-in-the-loop controls.",
+    "copyright": "© 2026 Ensemble",
+    "category": "DeveloperTool",
+    "externalBin": [
+      "binaries/ensemble-backend"
     ]
+  },
+  "plugins": {
+    "shell": {},
+    "log": {}
   }
 }

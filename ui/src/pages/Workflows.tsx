@@ -89,9 +89,11 @@ const Workflows = () => {
               agentCount = Array.isArray(graph?.nodes) ? graph.nodes.length : 0;
             } catch { agentCount = 0; }
 
-            // Check for localStorage output for this specific workflow
+            // Merge outputs: trust server data if available, fallback to localStorage
+            const serverOutput = backendOutputs[w.id];
             const lsOutput = lsOutputs[w.id];
-            const hasLocalStorageOutput = !!lsOutput?.output?.markdown;
+            const finalOutput = serverOutput || lsOutput;
+            const hasOutput = !!finalOutput?.output?.markdown;
             
             return {
               id: w.id,
@@ -101,9 +103,9 @@ const Workflows = () => {
               lastEdited: lastEditedStr,
               status: "active" as const,
               graphJson: w.graph_json,
-              runStatus: hasLocalStorageOutput ? "success" : "none",
-              lastOutput: hasLocalStorageOutput ? lsOutput : null,
-              hasOutputsAvailable: false // Don't show Output button unless localStorage has it
+              runStatus: hasOutput ? "success" : "none",
+              lastOutput: hasOutput ? finalOutput : null,
+              hasOutputsAvailable: hasOutput
             };
           });
           setWorkflows(loaded);

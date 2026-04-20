@@ -637,7 +637,14 @@ class DAGWorkflowEngine:
             # Check panic again right before LLM call
             if self.gov.is_panic: return False, None
 
-            response = await agent.run(f"Instruction: {enhanced_instruction}\nContext: {context}")
+            # 📝 CRITICAL FIX: Ensure user's project goal is the PRIMARY instruction
+            user_task = ""
+            if self.space.exists("user_initial_input"):
+                user_task = self.space.read("user_initial_input").decode("utf-8", errors="ignore")
+            
+            final_prompt = f"### YOUR ACCURATE TASK:\n{user_task}\n\n### ROLE INSTRUCTIONS:\n{enhanced_instruction}\n\n### FULL CONTEXT:\n{context}"
+            
+            response = await agent.run(final_prompt)
 
             if "Execution aborted" in response or "Budget exhausted" in response:
                 print(f"⏸️ [DAG Engine] Node {node_id} paused/aborted", flush=True)

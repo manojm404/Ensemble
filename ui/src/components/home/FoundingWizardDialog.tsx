@@ -59,8 +59,59 @@ export function FoundingWizardDialog({ open, onOpenChange }: FoundingWizardDialo
     };
 
     const handleCreate = () => {
-        // MOCKED: Would POST to backend
-        console.log("Founding:", { companyName, mission, agentId, model, adapter, taskTitle, taskDesc });
+        // Build company object
+        const companyId = `company_${Date.now()}`;
+        const newOrg = {
+            company: {
+                id: companyId,
+                name: companyName,
+                mission: mission,
+                emoji: "🏢",
+                status: "Active",
+                memberCount: 1,
+                agentCount: 1,
+                teamCount: 1
+            },
+            teams: [{
+                id: `team_${Date.now()}`,
+                companyId,
+                name: "Alpha Team",
+                description: "Primary operational unit.",
+                emoji: "🚀"
+            }],
+            agents: [{
+                id: agentId,
+                companyId,
+                name: agentId,
+                role: "Sentinel",
+                model: model,
+                adapter: adapter,
+                emoji: "🤖"
+            }],
+            issues: [{
+                id: `issue_${Date.now()}`,
+                companyId,
+                title: taskTitle,
+                description: taskDesc,
+                status: "todo",
+                priority: "high"
+            }],
+            activity: [{
+                id: `act_${Date.now()}`,
+                companyId,
+                type: "system",
+                action: "Organization Founded",
+                time: new Date().toISOString()
+            }]
+        };
+
+        // Save to localStorage
+        const existing = JSON.parse(localStorage.getItem("ensemble_companies") || "{}");
+        existing[companyId] = newOrg;
+        localStorage.setItem("ensemble_companies", JSON.stringify(existing));
+        localStorage.setItem("ensemble_current_company", companyId);
+
+        toast.success(`Organization "${companyName}" founded!`);
         reset();
         onOpenChange(false);
     };

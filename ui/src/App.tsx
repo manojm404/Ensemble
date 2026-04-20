@@ -31,6 +31,8 @@ import CompanyIssues from "./pages/CompanyIssues";
 import CompanyActivity from "./pages/CompanyActivity";
 import CompanyReports from "./pages/CompanyReports";
 
+import Inbox from "./pages/Inbox";
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -45,6 +47,7 @@ const App = () => (
               <Route element={<AppLayout />}>
                 <Route path="/" element={<Index />} />
                 <Route path="/chat" element={<Chat />} />
+                <Route path="/inbox" element={<Inbox />} />
                 <Route path="/launcher" element={<Launcher />} />
                 <Route path="/app/:appId" element={<ExternalApp />} />
                 <Route path="/agents" element={<Agents />} />

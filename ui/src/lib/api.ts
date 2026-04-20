@@ -658,5 +658,18 @@ export async function createIssueAPI(companyId: string, issue: any): Promise<any
   });
 }
 
-// Re-export skill_registry access via API (the Python registry is accessed via /api/skills)
-// Consumers should call `getAgents()` to get the skill registry list.
+// --- Notification Endpoints ---
+
+export async function getNotifications(companyId?: string): Promise<any[]> {
+  try {
+    const query = companyId ? `?company_id=${companyId}` : '';
+    return await fetchApi(`/api/notifications${query}`);
+  } catch (e) {
+    console.warn("Failed to fetch notifications:", e);
+    return [];
+  }
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  return await fetchApi(`/api/notifications/${id}/read`, { method: 'POST' });
+}

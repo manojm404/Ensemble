@@ -68,12 +68,21 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 
-import InboxView from "./Inbox";
+import { FoundingWizardDialog } from "@/components/home/FoundingWizardDialog";
 
 const Index = () => {
   const navigate = useNavigate();
   const { openApp } = useTabContext();
   const [activeSubTab, setActiveSubTab] = useState("dashboard");
+  const [wizardOpen, setWizardOpen] = useState(false);
+
+  useEffect(() => {
+    // Check if onboarding is needed
+    const companies = localStorage.getItem("ensemble_companies");
+    if (!companies || Object.keys(JSON.parse(companies)).length === 0) {
+      setWizardOpen(true);
+    }
+  }, []);
 
   // Real data states
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -826,6 +835,7 @@ const Index = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <FoundingWizardDialog open={wizardOpen} onOpenChange={setWizardOpen} />
     </div>
   );
 };

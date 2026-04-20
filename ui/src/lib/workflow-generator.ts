@@ -159,14 +159,14 @@ function generateTaskPrompt(agentId: string, userPrompt: string): string {
 // Maps task keywords to sensible default agent teams
 const intentAgents: Record<string, { name: string; instruction: string; emoji: string }[]> = {
   poem: [
-    { name: "Poet", instruction: "Write creative, evocative poetry with vivid imagery, rhythm, and emotion. Avoid clichés.", emoji: "🪶" },
-    { name: "Poetry Editor", instruction: "Review and polish the poem for meter, rhyme, imagery, word choice, and emotional impact.", emoji: "✏️" },
-    { name: "Subject Researcher", instruction: "Research the poem's subject for authentic details, facts, and references.", emoji: "📚" },
+    { name: "Subject Researcher", instruction: "Conduct deep research on the topic. For future dates or emerging tech, search for '2025/2026 projections', 'industry roadmaps', and 'emerging trends'. If direct results are sparse, synthesize an outlook from the most recent expert data and professional forecasts. Build a comprehensive fact-base for the next agent.", emoji: "📚" },
+    { name: "Poet", instruction: "Write creative, evocative poetry using the research provided. Focus on imagery, rhythm, and emotion in the requested language.", emoji: "🪶" },
+    { name: "Poetry Editor", instruction: "Review and polish the poem for meter, rhyme, and impact. Ensure it honors the research and requested language requirements.", emoji: "✏️" },
   ],
   blog: [
     { name: "Research Agent", instruction: "Conduct thorough web research on the assigned topic. Gather facts, statistics, quotes, and sources.", emoji: "🔍" },
-    { name: "Content Strategist", instruction: "Create a detailed, SEO-friendly blog outline with logical section flow and content mapping.", emoji: "📋" },
-    { name: "Blog Writer", instruction: "Write a complete, engaging blog post following the outline. Use a natural, conversational tone.", emoji: "✍️" },
+    { name: "Content Strategist", instruction: "Create a detailed, SEO-friendly blog outline with logical section flow based on the research results.", emoji: "📋" },
+    { name: "Blog Writer", instruction: "Write a complete blog post following the strategist's outline and using the researcher's facts.", emoji: "✍️" },
     { name: "Editor", instruction: "Review and polish the blog post for clarity, grammar, SEO, readability, and fact accuracy.", emoji: "📝" },
   ],
   code: [
@@ -175,9 +175,9 @@ const intentAgents: Record<string, { name: string; instruction: string; emoji: s
     { name: "Tester", instruction: "Write comprehensive test cases covering normal flow, edge cases, and error handling.", emoji: "🧪" },
   ],
   research: [
-    { name: "Researcher", instruction: "Conduct thorough research on the topic. Gather facts, data, expert opinions, and current trends.", emoji: "🔍" },
-    { name: "Analyst", instruction: "Analyze the research findings. Identify patterns, insights, contradictions, and implications.", emoji: "📊" },
-    { name: "Report Writer", instruction: "Write a polished research report with executive summary, findings, analysis, and recommendations.", emoji: "📝" },
+    { name: "Researcher", instruction: "Conduct thorough research on the topic. For future-dated or emerging trends (like '2026 projections'), actively search for roadmaps, expert forecasts, and market precursors. If direct data is unavailable, gather the most recent relevant patterns for synthesis.", emoji: "🔍" },
+    { name: "Analyst", instruction: "Analyze the research findings. If the data is based on projections, identify the underlying logic and patterns. Create a high-fidelity SWOT or gap analysis based on the available intelligence.", emoji: "📊" },
+    { name: "Report Writer", instruction: "Write a polished research report with executive summary. Clearly distinguish between current hard facts and future-dated strategic projections to provide a cohesive outlook.", emoji: "📝" },
   ],
   design: [
     { name: "UI Designer", instruction: "Design a beautiful, intuitive user interface with attention to layout, typography, and color.", emoji: "🎨" },
@@ -374,36 +374,11 @@ export async function generateWorkflowFromPrompt(
   const promptLower = prompt.toLowerCase().trim();
   const requestedCount = parseAgentCount(prompt);
 
-  // 1. PRIORITY: Extract or infer custom agents from the user's prompt
-  const customAgents = extractCustomAgentsFromPrompt(prompt, requestedCount || undefined);
-  if (customAgents.length >= 2) {
-    console.log(`✅ [Workflow Generator] Using ${customAgents.length} custom agents from prompt:`, customAgents.map(a => a.name).join(", "));
-    return buildWorkflow(
-      prompt.split(/\s+/).slice(0, 4).join(" "),
-      customAgents,
-      prompt
-    );
-  }
-
-  // 2. If registry is empty, skip unreliable API — use synthetic agents
-  if (allAgents.length === 0) {
-    const count = requestedCount || 2;
-    const synthetic: AgentSkill[] = [
-      { id: "synth-planner", name: "Task Planner", description: "Plans and organizes the workflow", emoji: "📋", category: "General", enabled: true, is_native: true },
-      { id: "synth-executor", name: "Task Executor", description: "Executes the planned tasks", emoji: "⚡", category: "General", enabled: true, is_native: true },
-    ];
-    console.log(`⚠️ [Workflow Generator] Registry empty, using ${Math.min(count, synthetic.length)} synthetic agents`);
-    return buildWorkflow(
-      prompt.split(/\s+/).slice(0, 4).join(" "),
-      synthetic.slice(0, count),
-      prompt
-    );
-  }
-
-  // 3. Try backend API (only when registry has agents)
+  // 1. TOP PRIORITY: Use backend Architect AI whenever possible (smarter planning)
   try {
     const apiResult = await generateWorkflowAPI(prompt);
     if (apiResult && Array.isArray(apiResult.nodes) && apiResult.nodes.length > 0 && Array.isArray(apiResult.edges) && apiResult.edges.length > 0) {
+       console.log("🪄 [Workflow Generator] Using Architect AI for mission design");
        return {
          name: apiResult.name || prompt.split(/\s+/).slice(0, 4).join(" "),
          nodes: apiResult.nodes,
@@ -411,7 +386,19 @@ export async function generateWorkflowFromPrompt(
        };
     }
   } catch (e) {
-    console.warn("Failed to generate workflow via API, falling back to local generation", e);
+    console.warn("Backend Architect AI unavailable, falling back to local patterns", e);
+  }
+
+  // 2. FALLBACK: Infer custom agents from the user's prompt (Legacy logic)
+  const customAgents = extractCustomAgentsFromPrompt(prompt, requestedCount || undefined);
+  if (customAgents.length >= 2 && (prompt.includes("Agent") || prompt.includes("Step"))) {
+    // Only use local custom extraction if the prompt looks like a manual list
+    console.log(`✅ [Workflow Generator] Using ${customAgents.length} custom agents from prompt patterns:`, customAgents.map(a => a.name).join(", "));
+    return buildWorkflow(
+      prompt.split(/\s+/).slice(0, 4).join(" "),
+      customAgents,
+      prompt
+    );
   }
 
   // 4. Check for template matches

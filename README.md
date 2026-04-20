@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.5-blue.svg" alt="Version 1.5"/>
+  <img src="https://img.shields.io/badge/version-1.0.0-blue.svg" alt="Version 1.0.0"/>
   <img src="https://img.shields.io/badge/python-3.11+-green.svg" alt="Python 3.11+"/>
   <img src="https://img.shields.io/badge/license-MIT-orange.svg" alt="License MIT"/>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg" alt="Cross-platform"/>

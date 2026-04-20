@@ -16,6 +16,7 @@ import { useParams } from "react-router-dom";
 import { useWorkflowOutput } from "@/lib/workflow-output-context";
 import { OutputViewer } from "@/components/workflow/OutputViewer";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { FileText, Clock, Bot } from "lucide-react";
 
 const STORAGE_KEY = "ensemble_workflow_outputs";
@@ -75,6 +76,19 @@ export default function WorkflowOutput() {
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-9 px-4 gap-2 font-semibold border-primary/20 hover:bg-primary/5 hover:text-primary transition-all shadow-sm"
+            onClick={() => {
+              // Set the rerun flag for the editor to pick up
+              sessionStorage.setItem(`rerun_${id}`, JSON.stringify({ lastOutput: data.task }));
+              window.location.href = `/workflows/${id}`;
+            }}
+          >
+            <Bot className="h-4 w-4" />
+            Modify & Rerun
+          </Button>
           <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className="text-[10px] font-bold uppercase tracking-wider gap-1.5 px-2 py-0.5 bg-secondary/50">

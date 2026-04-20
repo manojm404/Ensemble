@@ -4,6 +4,7 @@ python-dotenv
 httpx
 PyYAML
 requests
+urllib3==1.26.15
 pydantic[email]
 tiktoken
 sentence-transformers
