@@ -217,6 +217,11 @@ class DAGWorkflowEngine:
         in_degree: Dict[str, int] = {nid: 0 for nid in node_ids}
 
         for edge in edges:
+            # Phase I: Ignore edges explicitly marked as Loop Back for sorting purposes
+            is_loop = edge.get("data", {}).get("isLoopBack", False)
+            if is_loop:
+                continue
+
             src, tgt = edge["source"], edge["target"]
             if src in node_ids and tgt in node_ids:
                 adjacency[src].append(tgt)
@@ -234,8 +239,10 @@ class DAGWorkflowEngine:
                 if in_degree[neighbor] == 0:
                     queue.append(neighbor)
 
+        # In a loop-enabled DAG, we only care about cycles in the FORWARD path
         if len(order) != len(node_ids):
-            raise ValueError("Cycle detected in workflow graph — topological sort impossible")
+            # Try to identify which nodes are truly stuck vs which are loop targets
+            raise ValueError("Cycle detected in forward workflow graph — topological sort impossible")
 
         return order
 
@@ -415,7 +422,10 @@ class DAGWorkflowEngine:
             completed_nodes: Set[str] = set()
             pruned_nodes: Set[str] = set()
             
-            print(f"🔀 [DAG Engine] Starting Dynamic Execution (V3 Protocol)", flush=True)
+            # Loop Management (Phase I)
+            loop_iterations: Dict[str, int] = {} # target_node_id -> current_iteration
+            
+            print(f"🔀 [DAG Engine] Starting Dynamic Execution (V3 Protocol) with Loop Support", flush=True)
 
             while len(completed_nodes | pruned_nodes) < len(nodes):
                 # 1. Identify nodes that are "Ready" (all parents are completed or pruned)
@@ -444,10 +454,38 @@ class DAGWorkflowEngine:
                 
                 results = await asyncio.gather(*tasks)
                 
-                # 3. Process results and handle branching
+                # 3. Process results and handle branching/looping
                 for nid, (success, branch_info) in zip(ready_ids, results):
                     if success:
                         completed_nodes.add(nid)
+                        
+                        # --- PHASE I: LOOP DETECTION ---
+                        # Check if this node has an outgoing LOOP BACK edge
+                        loop_edges = [e for e in edges if e["source"] == nid and e.get("data", {}).get("isLoopBack", False)]
+                        
+                        for le in loop_edges:
+                            target_id = le["target"]
+                            loop_config = le.get("data", {})
+                            max_iters = int(loop_config.get("maxIterations", 1))
+                            
+                            current_iter = loop_iterations.get(target_id, 0)
+                            
+                            if current_iter < max_iters:
+                                new_iter = current_iter + 1
+                                loop_iterations[target_id] = new_iter
+                                print(f"🔄 [DAG Engine] Loop detected: {nid} -> {target_id}. Iteration {new_iter}/{max_iters}", flush=True)
+                                
+                                # RELAX THE DAG: To re-run the target, we must clear it (and its descendants) from completed_nodes
+                                nodes_to_reset = self._get_descendants(target_id, edges) | {target_id}
+                                for r_node in nodes_to_reset:
+                                    if r_node in completed_nodes:
+                                        completed_nodes.remove(r_node)
+                                        print(f"  ✨ Resetting node state for loop: {r_node}", flush=True)
+
+                                # Update DB with loop progress
+                                self._update_loop_stats(run_id, target_id, new_iter, max_iters)
+                    else:
+                        print(f"⚠️ [DAG Engine] Node {nid} failed. Stopping branch.", flush=True)
                         if branch_info and branch_info.get("type") == "switch":
                             # Prune non-selected branches
                             self._prune_branches(branch_info["prune_targets"], edges, pruned_nodes)
@@ -790,17 +828,26 @@ class DAGWorkflowEngine:
         # Get predecessor artifacts using the passed edges list
         predecessors = self._get_predecessors(node_id, edges)
         for pred_id in predecessors:
-            artifact_name = f"{pred_id}_output"
-            if self.space.exists(artifact_name):
-                content = self.space.read(artifact_name).decode("utf-8", errors="ignore")
-                # Context pruning: limit to 8000 chars
-                if len(content) > 8000:
-                    content = f"{content[:4000]}\n... [truncated] ...\n{content[-4000:]}"
-                context_parts.append(f"### Previous Node ({pred_id}) Output:\n{content}")
-
+            # Phase I: Loop-Aware Context Assembly
+            # Fetch ALL versions of the predecessor's output to ensure history is preserved in loops
+            all_versions = self.space.read_all_versions(f"{pred_id}_output")
+            
+            if all_versions:
+                if len(all_versions) > 1:
+                    print(f"📚 [DAG Engine] Gathering full history for looping predecessor {pred_id} ({len(all_versions)} rounds)", flush=True)
+                    history_blocks = []
+                    for i, content in enumerate(all_versions):
+                        round_text = content.decode("utf-8", errors="ignore")
+                        history_blocks.append(f"### MISSION ROUND {i+1} OUTPUT ({pred_id}):\n{round_text}")
+                    context_parts.append("\n\n---\n\n".join(history_blocks))
+                else:
+                    response = all_versions[0].decode("utf-8", errors="ignore")
+                    context_parts.append(f"### Outcome of {pred_id}:\n{response}")
+            
             # Include handover summary
             handover_name = f"{pred_id}_handover"
             if self.space.exists(handover_name):
+                # We usually only need the latest handover to understand the current state
                 handover = self.space.read(handover_name).decode("utf-8", errors="ignore")
                 context_parts.append(f"### Handover Summary ({pred_id}):\n{handover}")
 
@@ -1110,6 +1157,34 @@ class DAGWorkflowEngine:
                 (run_id,),
             )
             return [row[0] for row in cursor.fetchall()]
+
+    def _get_descendants(self, node_id: str, edges: List[Dict]) -> Set[str]:
+        """Recursively find all downstream nodes in the graph."""
+        descendants = set()
+        to_process = [node_id]
+        while to_process:
+            nid = to_process.pop(0)
+            children = [e["target"] for e in edges if e["source"] == nid and not e.get("data", {}).get("isLoopBack", False)]
+            for child in children:
+                if child not in descendants:
+                    descendants.add(child)
+                    to_process.append(child)
+        return descendants
+
+    def _update_loop_stats(self, run_id: str, target_node_id: str, current_iter: int, max_iters: int):
+        """Update DB with iteration count and loop metadata."""
+        try:
+            with sqlite3.connect(self.gov.db_path) as conn:
+                metadata = json.dumps({
+                    "target_node": target_node_id,
+                    "last_loop_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
+                })
+                conn.execute(
+                    "UPDATE executions SET current_iteration = ?, max_iterations = ?, loop_metadata = ? WHERE run_id = ?",
+                    (current_iter, max_iters, metadata, run_id)
+                )
+        except Exception as e:
+            print(f"⚠️ [DAG Engine] Failed to update loop stats: {e}", flush=True)
 
     def _mirror_to_deliverables(self, run_id: str, node_id: str, role: str, content: str):
         """

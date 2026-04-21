@@ -105,6 +105,30 @@ class EnsembleSpace(Space):
                         return f.read()
         return None
 
+    def read_all_versions(self, symbolic_name: str, user_id: str = None) -> List[bytes]:
+        """Retrieve all historical versions of an artifact by symbolic name."""
+        user_dir = self._get_user_dir(user_id)
+        versions = []
+
+        with sqlite3.connect(self.manifest_db) as conn:
+            query = "SELECT hash FROM artifacts WHERE symbolic_name = ?"
+            params = [symbolic_name]
+
+            if user_id:
+                query += " AND (user_id = ? OR user_id IS NULL)"
+                params.append(user_id)
+
+            query += " ORDER BY created_at ASC" # Oldest first
+
+            cursor = conn.execute(query, params)
+            for row in cursor.fetchall():
+                content_hash = row[0]
+                blob_path = os.path.join(user_dir, content_hash)
+                if os.path.exists(blob_path):
+                    with open(blob_path, "rb") as f:
+                        versions.append(f.read())
+        return versions
+
     def list_artifacts(self, state_name: str = None, user_id: str = None) -> List[str]:
         """List symbolic names, optionally filtered by state and user."""
         query = "SELECT DISTINCT symbolic_name FROM artifacts"
