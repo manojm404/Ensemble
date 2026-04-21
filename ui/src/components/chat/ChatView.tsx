@@ -229,7 +229,13 @@ export function ChatView() {
 
     if (isNew) {
       topicId = convId;
-      const creativeTitle = `${currentAgent.emoji} ${currentAgent.name} Session`;
+      
+      // Creative naming logic based on agent category/name
+      const suffix = currentAgent.category === 'Engineering' ? 'Lab' 
+                   : currentAgent.category === 'Design' ? 'Studio' 
+                   : currentAgent.category === 'Marketing' ? 'Campaign'
+                   : 'Session';
+      const creativeTitle = `${currentAgent.emoji} ${currentAgent.name} ${suffix}`;
       const newConv: Conversation = {
         id: topicId,
         title: creativeTitle,
@@ -507,17 +513,29 @@ export function ChatView() {
                       animate={{ opacity: 1, y: 0 }}
                       className="flex items-start gap-4 px-4 py-4"
                     >
-                      <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-sm animate-pulse shadow-[0_0_15px_rgba(var(--primary),0.2)]">
+                      <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center text-sm animate-pulse shadow-[0_0_20px_rgba(var(--primary),0.3)] border border-primary/30">
                         {displayEmoji}
                       </div>
-                      <div className="flex flex-col gap-1 mt-1.5">
+                      <div className="flex flex-col gap-1.5 mt-1">
                         <div className="flex items-center gap-1.5">
-                          <div className="h-1.5 w-1.5 rounded-full bg-primary/40 animate-bounce [animation-delay:-0.3s]" />
-                          <div className="h-1.5 w-1.5 rounded-full bg-primary/40 animate-bounce [animation-delay:-0.15s]" />
-                          <div className="h-1.5 w-1.5 rounded-full bg-primary/40 animate-bounce" />
+                          <motion.div 
+                            animate={{ scale: [1, 1.2, 1], opacity: [0.3, 1, 0.3] }}
+                            transition={{ repeat: Infinity, duration: 1.5, times: [0, 0.5, 1] }}
+                            className="h-2 w-2 rounded-full bg-primary" 
+                          />
+                          <motion.div 
+                            animate={{ scale: [1, 1.2, 1], opacity: [0.3, 1, 0.3] }}
+                            transition={{ repeat: Infinity, duration: 1.5, delay: 0.2, times: [0, 0.5, 1] }}
+                            className="h-2 w-2 rounded-full bg-primary" 
+                          />
+                          <motion.div 
+                            animate={{ scale: [1, 1.2, 1], opacity: [0.3, 1, 0.3] }}
+                            transition={{ repeat: Infinity, duration: 1.5, delay: 0.4, times: [0, 0.5, 1] }}
+                            className="h-2 w-2 rounded-full bg-primary" 
+                          />
                         </div>
-                        <span className="text-[10px] font-bold text-primary/40 uppercase tracking-widest mt-1">
-                          Thinking...
+                        <span className="text-[10px] font-black text-primary/60 uppercase tracking-[0.3em] mt-1 drop-shadow-sm">
+                          Synthesizing...
                         </span>
                       </div>
                     </motion.div>

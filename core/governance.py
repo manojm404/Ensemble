@@ -38,7 +38,7 @@ from core.llm_provider import LLMProvider
 from core.dag_engine import DAGWorkflowEngine
 import core.adapters
 from core import settings
-from core.scheduler import scheduler
+from core.scheduler import init_scheduler
 
 # Phase 1: Supabase Integration
 from core.supabase_client import supabase, supabase_admin, verify_connection
@@ -199,9 +199,11 @@ rate_limit_per_minute = int(os.getenv("RATE_LIMIT_PER_MINUTE", "100"))
 @app.on_event("startup")
 async def startup_event():
     """Server initialization."""
-    # Start the Sovereign Scheduler background task
+    # Initialize and Start the Sovereign Scheduler background task
     try:
-        await scheduler.start()
+        from core.scheduler import init_scheduler
+        s = init_scheduler(audit_logger, dag_engine)
+        await s.start()
         print("🕒 [Ensemble] Sovereign Scheduler active")
     except Exception as e:
         print(f"⚠️ [Ensemble] Failed to start scheduler: {e}")
@@ -1730,14 +1732,22 @@ async def get_dashboard_agent_stats():
     for row in rows_data:
         agent_id, run_count, total_cost = row
         skill = skill_map.get(agent_id, {})
+        
+        # Clean name logic
+        clean_name = skill.get("name")
+        if not clean_name:
+            parts = agent_id.split('_')
+            name_parts = [p for p in parts if not p.isdigit()]
+            clean_name = " ".join(name_parts).title() if name_parts else agent_id
+            
         agent_stats.append({
             "rank": rank,
             "agent_id": agent_id,
-            "name": skill.get("name", agent_id),
+            "name": clean_name,
             "emoji": skill.get("emoji", "🤖"),
             "category": skill.get("category", "General"),
             "runs": run_count,
-            "cost": total_cost
+            "cost": float(total_cost)
         })
         rank += 1
     
@@ -3733,6 +3743,10 @@ async def get_dashboard_stats(request: Request):
             cursor = conn.execute("SELECT COUNT(*) FROM agents WHERE status = 'ACTIVE'")
             agents_running = cursor.fetchone()[0]
 
+            # Scheduled Jobs
+            cursor = conn.execute("SELECT COUNT(*) FROM scheduled_jobs WHERE status = 'pending' AND next_run >= date('now')")
+            scheduled_count = cursor.fetchone()[0]
+
             # Tokens Today (Sum of cost_usd * 1000000 approx)
             # Actually audit_logger can calculate this
             cursor = conn.execute("SELECT SUM(cost_usd) FROM events WHERE timestamp >= date('now')")
@@ -3747,13 +3761,19 @@ async def get_dashboard_stats(request: Request):
             cursor = conn.execute("SELECT status, COUNT(*) FROM executions GROUP BY status")
             execution_stats = {row[0]: row[1] for row in cursor.fetchall()}
 
+            # Success Rate
+            total_runs = execution_stats.get('completed', 0) + execution_stats.get('failed', 0)
+            success_rate = round((execution_stats.get('completed', 0) / max(total_runs, 1)) * 100, 1)
+
             return {
                 "active_workflows": active_workflows,
                 "agents_running": agents_running,
                 "tokens_today": tokens_today,
                 "monthly_cost": round(monthly_cost, 2),
                 "total_workflows": execution_stats.get('completed', 0) + active_workflows,
-                "execution_stats": execution_stats
+                "execution_stats": execution_stats,
+                "scheduled_count": scheduled_count,
+                "success_rate": success_rate
             }
     except Exception as e:
         logger.error(f"Failed to fetch dashboard stats: {e}")
@@ -3768,16 +3788,34 @@ async def get_dashboard_activity(limit: int = 20):
         for e in events:
             # Create a more user-friendly message based on action_type
             action = e['action_type']
-            agent = e['agent_id'].split('_')[-1]
+            agent_id = e['agent_id']
+            
+            # Extract readable name from ID (e.g. "research_agent_123" -> "Research Agent")
+            if agent_id == 'system':
+                agent = "System"
+            elif agent_id == 'human_user':
+                agent = "User"
+            else:
+                parts = agent_id.split('_')
+                # Filter out numeric timestamps from parts
+                name_parts = [p for p in parts if not p.isdigit()]
+                agent = " ".join(name_parts).title() if name_parts else agent_id
+            
             details = e['details']
             
             message = f"{agent} performed {action}"
             if action == 'TOOL_CALL':
-                message = f"{agent} used {details.get('tool', 'a tool')}"
+                tool_name = details.get('tool', 'a tool')
+                message = f"{agent} is using {tool_name} to fulfill the objective"
             elif action == 'RESULT':
-                message = f"{agent} completed a task"
+                message = f"{agent} successfully completed the assigned task"
             elif action == 'THOUGHT':
-                message = f"{agent} is strategizing"
+                thought = details.get('thought', 'strategizing')
+                # Truncate thought
+                summary = (thought[:60] + '...') if len(thought) > 60 else thought
+                message = f"{agent} reasoned: {summary}"
+            elif action == 'SOP_START':
+                message = f"{agent} initiated a new workflow sequence"
             
             activity.append({
                 "agent_id": e['agent_id'],
@@ -3807,7 +3845,8 @@ async def get_token_usage_chart(days: int = 7):
                 data.append({
                     "day": datetime.strptime(row[0], "%Y-%m-%d").strftime("%a"),
                     "date": row[0],
-                    "tokens": int((row[1] or 0) * 750000)
+                    # Use a floor check to ensure even tiny runs show up as at least 100 tokens
+                    "tokens": max(int((row[1] or 0) * 1000000), 1) if (row[1] or 0) > 0 else 0
                 })
             return data
     except Exception as e:

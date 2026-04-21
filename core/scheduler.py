@@ -1,38 +1,38 @@
+"""
+core/scheduler.py - Persistent background scheduler for Ensemble Sovereign workflows.
+
+Polls the 'scheduled_jobs' table in audit.db and executes workflows via DAGWorkflowEngine.
+Supports cron-like behavior (hourly, daily) and one-off tasks.
+"""
+
 import asyncio
 import json
 import logging
 import sqlite3
 import time
-from datetime import datetime
-from typing import List, Dict, Any, Optional
-
-from core.audit import audit_logger
+from datetime import datetime, timedelta
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 class SovereignScheduler:
-    """
-    Background scheduler for Ensemble.
-    Polled-based execution of workflows stored in the scheduled_jobs table.
-    """
-    
-    def __init__(self, check_interval: int = 60):
-        self.check_interval = check_interval
+    def __init__(self, audit_logger, dag_engine):
+        self.audit = audit_logger
+        self.dag_engine = dag_engine
         self.is_running = False
         self._task = None
-        self.db_path = audit_logger.db_path
 
     async def start(self):
-        """Start the background scheduler loop."""
+        """Start the background polling loop."""
         if self.is_running:
             return
         
         self.is_running = True
-        self._task = asyncio.create_task(self._loop())
-        logger.info("🕒 [Scheduler] Sovereign Scheduler started (interval: %ds)", self.check_interval)
+        self._task = asyncio.create_task(self._poll_loop())
+        logger.info("🚀 [SovereignScheduler] Background loop started")
 
     async def stop(self):
-        """Stop the background scheduler loop."""
+        """Stop the background polling loop."""
         self.is_running = False
         if self._task:
             self._task.cancel()
@@ -40,101 +40,108 @@ class SovereignScheduler:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        logger.info("🕒 [Scheduler] Sovereign Scheduler stopped")
+        logger.info("🛑 [SovereignScheduler] Background loop stopped")
 
-    async def _loop(self):
-        """Main execution loop."""
+    async def _poll_loop(self):
+        """Poll the database every 60 seconds for due jobs."""
         while self.is_running:
             try:
                 await self.check_and_run_jobs()
             except Exception as e:
-                logger.error("🕒 [Scheduler] Error in check_and_run_jobs: %s", e)
+                logger.error(f"⚠️ [SovereignScheduler] Error in poll loop: {e}")
             
-            await asyncio.sleep(self.check_interval)
+            await asyncio.sleep(60)
 
     async def check_and_run_jobs(self):
-        """Query database for jobs that need execution."""
+        """Query DB for pending jobs that are due for execution."""
         now = datetime.utcnow().isoformat()
         
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.audit.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute("""
-                SELECT * FROM scheduled_jobs 
-                WHERE next_run <= ? AND status != 'paused'
-            """, (now,))
-            
+            cursor = conn.execute(
+                "SELECT * FROM scheduled_jobs WHERE status = 'pending' AND next_run <= ?",
+                (now,)
+            )
             jobs = cursor.fetchall()
-            
-            for job in jobs:
-                await self._execute_job(dict(job))
 
-    async def _execute_job(self, job: Dict[str, Any]):
-        """Trigger a workflow run for a scheduled job."""
+        for job in jobs:
+            await self._run_job(job)
+
+    async def _run_job(self, job: sqlite3.Row):
+        """Execute a single job and update its next run time."""
         job_id = job['id']
-        workflow_id = job['workflow_id']
         name = job['name']
-        
-        logger.info("🚀 [Scheduler] Triggering scheduled job: %s (workflow: %s)", name, workflow_id)
-        
-        # Update last run/next run first to avoid double-triggering
-        # (Very basic cron logic: just push next_run by 24h if it's daily, 
-        # or remove if it's a one-off)
-        last_run = datetime.utcnow().isoformat()
-        
-        # Simple interval logic for MVP
-        next_run = None
-        if job['cron_pattern'] == 'daily':
-            # Add 24 hours
-            from datetime import timedelta
-            next_run = (datetime.utcnow() + timedelta(days=1)).isoformat()
-        elif job['cron_pattern'] == 'hourly':
-             # Add 1 hour
-            from datetime import timedelta
-            next_run = (datetime.utcnow() + timedelta(hours=1)).isoformat()
-        
-        with sqlite3.connect(self.db_path) as conn:
-            if next_run:
-                conn.execute("""
-                    UPDATE scheduled_jobs 
-                    SET last_run = ?, next_run = ?
-                    WHERE id = ?
-                """, (last_run, next_run, job_id))
-            else:
-                conn.execute("""
-                    UPDATE scheduled_jobs 
-                    SET last_run = ?, status = 'completed'
-                    WHERE id = ?
-                """, (last_run, job_id))
+        workflow_id = job['workflow_id']
+        cron = job['cron_pattern']
+        payload = json.loads(job['payload_json'] or '{}')
 
-        # Actually run the workflow
-        # Note: We import here to avoid circular dependencies
+        logger.info(f"🕒 [SovereignScheduler] Executing job '{name}' (WF: {workflow_id})")
+
+        # 1. Update status to 'running'
+        with sqlite3.connect(self.audit.db_path) as conn:
+            conn.execute("UPDATE scheduled_jobs SET status = 'running', last_run = ? WHERE id = ?", 
+                         (datetime.utcnow().isoformat(), job_id))
+
+        # 2. Trigger Workflow (Mocking the fetch for now)
         try:
-            # This is a placeholder for the actual workflow trigger logic
-            # In a real implementation, we'd call the engine
-             logger.info("🕒 [Scheduler] Running workflow %s...", workflow_id)
-             
-             # Notify user
-             audit_logger.notify(
-                 user_id="dev_user",
-                 company_id="company_alpha",
-                 title="Scheduled Job Started",
-                 preview=f"Workflow '{name}' is now running automatically.",
-                 content=f"The scheduled execution of {workflow_id} has commenced.",
-                 category="automation"
-             )
-             
+            # We need the full graph JSON for the DAG engine
+            # In a real scenario, fetch this from the workflows table
+            from core.governance import governance_manager
+            wf_data = governance_manager.get_workflow(workflow_id)
+            
+            if wf_data and wf_data.get("graph"):
+                # Run in background
+                asyncio.create_task(self.dag_engine.execute_workflow(
+                    workflow_id=workflow_id,
+                    graph_json=wf_data["graph"],
+                    initial_input=payload.get("input", f"Scheduled run: {name}"),
+                    company_id=payload.get("company_id", "company_alpha")
+                ))
+                
+                # Notify Inbox
+                self.audit.notify(
+                    user_id=payload.get("user_id", "dev_user"),
+                    company_id=payload.get("company_id", "company_alpha"),
+                    title=f"🕒 Scheduled Job Started: {name}",
+                    preview=f"Workflow {workflow_id} is now executing in the background.",
+                    content=f"Your scheduled Sovereign task '{name}' was triggered successfully at {datetime.utcnow().isoformat()}.",
+                    category="system"
+                )
+            else:
+                logger.error(f"❌ [SovereignScheduler] Workflow {workflow_id} not found for job {name}")
+
         except Exception as e:
-            logger.error("🕒 [Scheduler] Failed to execute job %s: %s", job_id, e)
+            logger.error(f"❌ [SovereignScheduler] Failed to trigger job {name}: {e}")
 
-    def schedule_job(self, name: str, workflow_id: str, next_run: str, cron_pattern: str = None, payload: Dict = None):
-        """Add a new job to the schedule."""
+        # 3. Calculate next run or mark complete
+        next_run = None
+        if cron == 'hourly':
+            next_run = (datetime.utcnow() + timedelta(hours=1)).isoformat()
+        elif cron == 'daily':
+            next_run = (datetime.utcnow() + timedelta(days=1)).isoformat()
+        
+        status = 'pending' if next_run else 'completed'
+
+        with sqlite3.connect(self.audit.db_path) as conn:
+            conn.execute(
+                "UPDATE scheduled_jobs SET status = ?, next_run = ? WHERE id = ?",
+                (status, next_run, job_id)
+            )
+
+    def schedule_job(self, name: str, workflow_id: str, next_run: str, cron: Optional[str] = None, payload: Dict = None):
+        """Insert a new job into the database."""
         payload_json = json.dumps(payload or {})
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                INSERT INTO scheduled_jobs (name, workflow_id, cron_pattern, next_run, payload_json)
-                VALUES (?, ?, ?, ?, ?)
-            """, (name, workflow_id, cron_pattern, next_run, payload_json))
-        logger.info("🕒 [Scheduler] Job '%s' scheduled for %s", name, next_run)
+        with sqlite3.connect(self.audit.db_path) as conn:
+            conn.execute(
+                "INSERT INTO scheduled_jobs (name, workflow_id, next_run, cron_pattern, payload_json) VALUES (?, ?, ?, ?, ?)",
+                (name, workflow_id, next_run, cron, payload_json)
+            )
+        logger.info(f"📅 [SovereignScheduler] Scheduled new job: {name}")
 
-# Singleton
-scheduler = SovereignScheduler()
+# Global singleton
+scheduler = None
+
+def init_scheduler(audit_logger, dag_engine):
+    global scheduler
+    scheduler = SovereignScheduler(audit_logger, dag_engine)
+    return scheduler

@@ -350,6 +350,9 @@ const Marketplace = () => {
         {/* Header Area */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="h-9 w-9 rounded-lg hover:bg-white/5">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
             <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center border border-primary/20 shadow-lg shadow-primary/5">
               <ShoppingBag className="h-6 w-6 text-primary" />
             </div>

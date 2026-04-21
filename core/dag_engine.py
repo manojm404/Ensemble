@@ -454,11 +454,31 @@ class DAGWorkflowEngine:
                     else:
                         print(f"❌ [DAG Engine] Node {nid} failed. Halting workflow.", flush=True)
                         self._update_run_status(run_id, WorkflowState.FAILED.value)
+                        
+                        # PERSISTENT NOTIFICATION for Failure
+                        self.audit.notify(
+                            user_id="dev_user",
+                            company_id=self.company_id,
+                            title="❌ Workflow Failed",
+                            preview=f"Workflow {workflow_id} failed at node {nid}.",
+                            content=f"An error occurred during the execution of node {nid} in run {run_id}. The workflow has been halted.",
+                            category="error"
+                        )
                         return {"status": "failed", "run_id": run_id, "failed_node": nid}
 
             # All required nodes completed
             self._update_run_status(run_id, WorkflowState.COMPLETED.value)
             print(f"✅ [DAG Engine] Workflow {workflow_id} completed successfully", flush=True)
+            
+            # PERSISTENT NOTIFICATION for Completion
+            self.audit.notify(
+                user_id="dev_user",
+                company_id=self.company_id,
+                title="🏁 Workflow Completed",
+                preview=f"Custom DAG {workflow_id} finished.",
+                content=f"Your Sovereign workflow {workflow_id} (Run: {run_id}) has finished all required states.",
+                category="success"
+            )
             return {"status": "completed", "run_id": run_id}
 
         finally:

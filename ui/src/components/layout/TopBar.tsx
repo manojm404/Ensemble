@@ -12,17 +12,6 @@ import {
   Search,
   ChevronLeft,
 } from "lucide-react";
-import { useNavigate, useLocation } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { allApps, useTabContext } from "@/lib/tab-context";
 import { useAIApps } from "@/lib/ai-apps";
 import { AddCustomAppDialog } from "@/components/home/AddCustomAppDialog";
 import { aiLogoMap } from "@/components/icons/ai-logos";
@@ -55,15 +44,21 @@ export function TopBar() {
   return (
     <header className="flex items-end shrink-0 z-40 bg-secondary/80 pt-1.5 px-2 gap-0.5 border-b border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
       {/* Back Button (Only for sub-pages) */}
-      {location.pathname !== "/" && (
-        <button
-          onClick={() => navigate(-1)}
-          className="h-9 w-9 flex items-center justify-center rounded-t-lg text-muted-foreground hover:text-foreground hover:bg-background/40 transition-colors duration-150 shrink-0 mr-1"
-          title="Go back"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </button>
-      )}
+      <AnimatePresence>
+        {location.pathname !== "/" && (
+          <motion.button
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -10 }}
+            onClick={() => navigate(-1)}
+            className="h-9 px-3 flex items-center gap-1.5 rounded-t-lg text-muted-foreground hover:text-foreground hover:bg-background/40 transition-colors duration-150 shrink-0 mr-1"
+            title="Go back"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            <span className="text-[10px] font-bold uppercase tracking-widest hidden md:inline">Back</span>
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* AI Apps button */}
       <div className="relative">

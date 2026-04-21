@@ -68,13 +68,12 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 
-import { FoundingWizardDialog } from "@/components/home/FoundingWizardDialog";
+
 
 const Index = () => {
   const navigate = useNavigate();
   const { openApp } = useTabContext();
   const [activeSubTab, setActiveSubTab] = useState("dashboard");
-  const [wizardOpen, setWizardOpen] = useState(false);
 
   useEffect(() => {
     /* 
@@ -360,6 +359,54 @@ const Index = () => {
                 </div>
               </motion.div>
 
+              {/* Sovereign Framework Definitions */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.5, delay: 0.2 }}
+                className="p-6 rounded-[2rem] bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border border-primary/20 shadow-2xl shadow-primary/5 space-y-6"
+              >
+                <div className="flex items-center gap-3">
+                   <div className="h-10 w-10 rounded-2xl bg-primary/20 flex items-center justify-center border border-primary/30 shadow-inner">
+                      <Sparkles className="h-5 w-5 text-primary" />
+                   </div>
+                   <div>
+                      <h2 className="text-lg font-bold tracking-tight">Sovereign Intelligence Framework</h2>
+                      <p className="text-[10px] text-muted-foreground font-black uppercase tracking-widest mt-0.5">Automated Power · Deterministic Trust</p>
+                   </div>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                       <Workflow className="h-3.5 w-3.5 text-primary opacity-60" />
+                       <h3 className="text-xs font-bold uppercase tracking-widest text-foreground">Autonomous Workflows</h3>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground/80 leading-relaxed font-semibold pr-2">
+                       Ensemble executes complex multi-agent SOPs on automated schedules, eliminating human error in your operations.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                       <Bot className="h-3.5 w-3.5 text-primary opacity-60" />
+                       <h3 className="text-xs font-bold uppercase tracking-widest text-foreground">Specialist Agents</h3>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground/80 leading-relaxed font-semibold pr-2">
+                       Specialized LLM units equipped with deterministic tool-sets, operating within high-intelligence constraints.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                       <CheckCircle2 className="h-3.5 w-3.5 text-primary opacity-60" />
+                       <h3 className="text-xs font-bold uppercase tracking-widest text-foreground">Audit Ledger</h3>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground/80 leading-relaxed font-semibold pr-2">
+                      An immutable record of every agent action and cost, ensuring 100% transparency and professional accountability.
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+
               {/* 2. Stats Row */}
               {loading ? (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -372,18 +419,17 @@ const Index = () => {
                   ))}
                 </div>
               ) : (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                   {[
-                    { label: "Active Workflows", value: stats?.active_workflows?.toString() || "0", change: stats?.total_workflows ? `${stats.total_workflows} total` : "None configured", trend: (stats?.active_workflows || 0) > 0 ? "up" : "down" as const, icon: GitBranch, color: "text-primary", bgColor: "bg-primary/10" },
-                    { label: "Agents Running", value: stats?.agents_running?.toString() || "0", change: stats?.total_agents ? `${stats.total_agents} available` : "None available", trend: (stats?.agents_running || 0) > 0 ? "up" : "down" as const, icon: Bot, color: "text-emerald-400", bgColor: "bg-emerald-400/10" },
-                    { label: "Tokens Today", value: formatTokens(stats?.tokens_today || 0), change: stats?.tokens_today ? `~${formatTokens(stats.tokens_today)}` : "No activity", trend: (stats?.tokens_today || 0) > 0 ? "up" : "down" as const, icon: Coins, color: "text-amber-400", bgColor: "bg-amber-400/10" },
-                    { label: "Monthly Cost", value: formatCost(stats?.monthly_cost || 0), change: stats?.monthly_cost ? `Total spent` : "No spend yet", trend: (stats?.monthly_cost || 0) > 0 ? "up" : "down" as const, icon: DollarSign, color: "text-rose-400", bgColor: "bg-rose-400/10" },
+                    { label: "Active Workflows", value: stats?.active_workflows?.toString() || "0", change: stats?.total_workflows ? `${stats.total_workflows} total` : "None", trend: "up", icon: Workflow, color: "text-blue-400", bgColor: "bg-blue-400/10" },
+                    { label: "Agents Running", value: stats?.agents_running?.toString() || "0", change: stats?.total_agents ? `${stats.total_agents} total` : "None", trend: "up", icon: Bot, color: "text-indigo-400", bgColor: "bg-indigo-400/10" },
+                    { label: "Success Rate", value: `${stats?.success_rate || 0}%`, change: "Avg per run", trend: (stats?.success_rate || 0) >= 90 ? "up" : "down", icon: CheckCircle2, color: "text-emerald-400", bgColor: "bg-emerald-400/10" },
+                    { label: "Scheduled Today", value: stats?.scheduled_count?.toString() || "0", change: "Jobs in queue", trend: "up", icon: Calendar, color: "text-purple-400", bgColor: "bg-purple-400/10" },
+                    { label: "Tokens Today", value: formatTokens(stats?.tokens_today || 0), change: "Approx sum", trend: "up", icon: Coins, color: "text-amber-400", bgColor: "bg-amber-400/10" },
+                    { label: "Monthly Cost", value: formatCost(stats?.monthly_cost || 0), change: "Total spend", trend: "up", icon: DollarSign, color: "text-rose-400", bgColor: "bg-rose-400/10" },
                   ].map((stat, i) => {
                     const Icon = stat.icon;
-                    const TrendIcon = stat.trend === "up" ? ArrowUpRight : ArrowDownRight;
-                    const trendColor = stat.label === "Monthly Cost"
-                      ? stat.trend === "up" ? "text-rose-400" : "text-emerald-400"
-                      : stat.trend === "up" ? "text-emerald-400" : "text-muted-foreground/40";
+                    const trendColor = stat.trend === "up" ? "text-emerald-400/60" : "text-rose-400/60";
 
                     return (
                       <motion.div
@@ -394,16 +440,15 @@ const Index = () => {
                         className="rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm p-4 hover:border-border/60 transition-colors"
                       >
                         <div className="flex items-center justify-between mb-3">
-                          <div className={`h-9 w-9 rounded-lg ${stat.bgColor} flex items-center justify-center`}>
-                            <Icon className={`h-4.5 w-4.5 ${stat.color}`} />
+                          <div className={`h-8 w-8 rounded-lg ${stat.bgColor} flex items-center justify-center`}>
+                            <Icon className={`h-4 w-4 ${stat.color}`} />
                           </div>
-                          <div className={`flex items-center gap-0.5 text-xs font-medium ${trendColor}`}>
-                            <TrendIcon className="h-3 w-3" />
+                          <div className={`text-[10px] font-bold uppercase tracking-tight ${trendColor}`}>
                             {stat.change}
                           </div>
                         </div>
-                        <p className="text-2xl font-bold text-foreground">{stat.value}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{stat.label}</p>
+                        <p className="text-xl font-bold text-foreground">{stat.value}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/40 mt-1">{stat.label}</p>
                       </motion.div>
                     );
                   })}
@@ -837,7 +882,6 @@ const Index = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <FoundingWizardDialog open={wizardOpen} onOpenChange={setWizardOpen} />
     </div>
   );
 };

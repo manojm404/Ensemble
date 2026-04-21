@@ -259,11 +259,9 @@ const Agents = () => {
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         <div className="flex items-center gap-4 p-4 border-b border-border/50 bg-background/20 backdrop-blur-md">
-          {orgId && (
-            <Button variant="ghost" size="sm" className="gap-2 h-9 px-3 text-muted-foreground hover:text-foreground" onClick={() => navigate(`/org/${orgId}`)}>
-              ← Back
-            </Button>
-          )}
+          <Button variant="ghost" size="sm" className="gap-2 h-9 px-3 text-muted-foreground hover:text-foreground" onClick={() => navigate(-1)}>
+            ← Back
+          </Button>
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={orgId ? "Search agents to hire..." : "Search specialists..."} className="pl-9 bg-secondary/30 border-border/20 text-sm h-9" />

@@ -132,13 +132,22 @@ class SOPEngine:
 
         # Update run status and log completion (without broadcasting to avoid duplicate RESULT)
         self._update_run_status(run_id, "COMPLETED")
-        result_text = self.last_response or "Workflow execution complete."
         self.audit.log(
             self.company_id,
             "system",
             "ACTION",
             {"type": "workflow_complete", "result": result_text, "run_id": run_id},
             broadcast=False
+        )
+        
+        # PERSISTENT NOTIFICATION for Inbox
+        self.audit.notify(
+            user_id=self.user_id or "dev_user",
+            company_id=self.company_id,
+            title="✅ Workflow Completed",
+            preview=f"SOP execution finished successfully.",
+            content=f"Workflow run {run_id} has completed. Result: {result_text[:200]}...",
+            category="success"
         )
 
     def _update_run_status(self, run_id: str, status: str, state: str = None, agent_id: str = None):
