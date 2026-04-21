@@ -517,7 +517,8 @@ export interface PipelineStatus {
   name: string;
   status: string;
   current_step: string;
-  total_steps: string;
+  current_step_index: number;
+  total_steps: number;
   started_at: string;
   time: string;
 }

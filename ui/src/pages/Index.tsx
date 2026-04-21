@@ -471,10 +471,10 @@ const Index = () => {
                                 {p.status}
                               </Badge>
                             </div>
-                            <Progress value={(p.current_step / p.total_steps) * 100} className="h-1.5" />
+                            <Progress value={(p.current_step_index / p.total_steps) * 100} className="h-1.5" />
                             <div className="flex items-center justify-between text-[10px] text-muted-foreground font-bold">
                               <span className="flex items-center gap-1">
-                                <Layers className="h-3 w-3" /> Step {p.current_step}/{p.total_steps}
+                                <Layers className="h-3 w-3" /> {p.current_step}
                               </span>
                               <span>{p.time}</span>
                             </div>

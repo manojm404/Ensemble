@@ -1721,10 +1721,10 @@ async def get_token_usage(days: int = Query(default=7)):
 
 @app.get("/api/dashboard/pipeline-status")
 async def get_pipeline_status():
-    """Get current pipeline/workflow execution status."""
+    """Get current pipeline/workflow execution status with enriched details."""
     with sqlite3.connect(gov_instance.db_path) as conn:
         cursor = conn.execute("""
-            SELECT e.run_id, e.workflow_id, e.status, e.current_node, e.started_at, w.name
+            SELECT e.run_id, e.workflow_id, e.status, e.current_node, e.started_at, w.name, w.graph_json
             FROM executions e
             LEFT JOIN workflows w ON e.workflow_id = w.id
             ORDER BY e.started_at DESC LIMIT 10
@@ -1732,23 +1732,35 @@ async def get_pipeline_status():
         
         pipelines = []
         for row in cursor.fetchall():
-            run_id, wf_id, status, current_node, started_at, name = row
-            try:
-                graph = json.loads(wf_id) if wf_id else {}
-            except:
-                graph = {}
+            run_id, wf_id, status, current_node, started_at, name, graph_json = row
             
+            total_steps = 3
+            display_node = current_node
+            
+            if graph_json:
+                try:
+                    graph = json.loads(graph_json)
+                    nodes = graph.get("nodes", [])
+                    total_steps = len(nodes)
+                    
+                    # Resolve node ID (n1, n2) to its name/label
+                    node_info = next((n for n in nodes if n.get("id") == current_node), None)
+                    if node_info:
+                        display_node = node_info.get("data", {}).get("label") or node_info.get("id")
+                except:
+                    pass
+
             pipelines.append({
                 "id": run_id,
                 "workflow_id": wf_id,
                 "name": name or f"Workflow {wf_id[:8]}",
-                "status": status,
-                "current_step": current_node or "1",
-                "total_steps": "3",
+                "status": status.lower(),
+                "current_step": display_node or "Initialize",
+                "current_step_index": int(current_node.replace('n', '')) if current_node and current_node.startswith('n') and current_node[1:].isdigit() else 1,
+                "total_steps": total_steps,
                 "started_at": started_at,
                 "time": _format_relative_time(started_at) if started_at else "unknown"
             })
-        
         return pipelines
 
 # --- Notification API Endpoints ---
@@ -3826,10 +3838,14 @@ async def get_dashboard_agent_stats():
             cursor = conn.execute("""
                 SELECT agent_id, COUNT(*), SUM(cost_usd)
                 FROM events
-                WHERE agent_id IS NOT NULL AND agent_id NOT IN ('human_user', 'system', 'unknown', '')
+                WHERE agent_id IS NOT NULL 
+                AND agent_id NOT IN ('human_user', 'system', 'unknown', '')
+                AND agent_id NOT LIKE 'step%'
+                AND agent_id NOT LIKE 'n%'
+                AND length(agent_id) > 2
                 GROUP BY agent_id
                 ORDER BY COUNT(*) DESC
-                LIMIT 6
+                LIMIT 8
             """)
             stats = []
             for i, row in enumerate(cursor.fetchall()):
@@ -3840,16 +3856,26 @@ async def get_dashboard_agent_stats():
                 # Robust naming logic
                 clean_name = agent_info.get("name") if agent_info else None
                 if not clean_name:
+                    # Handle generated IDs like native_researcher_12345
+                    # Take the first 2 parts if they are words
                     parts = agent_id.split('_')
-                    name_parts = [p for p in parts if not p.isdigit()]
-                    clean_name = " ".join(name_parts).title() if name_parts else agent_id
+                    # Filter out purely numeric or short hash parts
+                    name_parts = [p for p in parts if not p.isdigit() and len(p) > 1][:2]
+                    if name_parts:
+                        clean_name = " ".join(name_parts).title()
+                    else:
+                        clean_name = agent_id.split('-')[0].replace('_', ' ').title()
+
+                # Filter out pure technical names that escaped
+                if any(x in clean_name.lower() for x in ['step ', 'node ', 'n1', 'n2']):
+                    continue
 
                 stats.append({
-                    "rank": i + 1,
+                    "rank": len(stats) + 1,
                     "agent_id": agent_id,
-                    "name": agent_info.get("name"),
-                    "emoji": agent_info.get("emoji"),
-                    "category": agent_info.get("category"),
+                    "name": clean_name,
+                    "emoji": agent_info.get("emoji") if agent_info else "🤖",
+                    "category": agent_info.get("category") if agent_info else "Specialist",
                     "runs": row[1],
                     "cost": round(row[2] or 0, 4)
                 })
