@@ -229,9 +229,10 @@ export function ChatView() {
 
     if (isNew) {
       topicId = convId;
+      const creativeTitle = `${currentAgent.emoji} ${currentAgent.name} Session`;
       const newConv: Conversation = {
         id: topicId,
-        title: content.slice(0, 40),
+        title: creativeTitle,
         lastMessage: content.slice(0, 50),
         timestamp: new Date(),
         agentName: currentAgent.name,
@@ -246,7 +247,7 @@ export function ChatView() {
           method: 'POST',
           body: JSON.stringify({
             id: topicId,
-            title: content.slice(0, 40),
+            title: creativeTitle,
             assistant_id: currentAgent.id
           })
         });
@@ -498,6 +499,30 @@ export function ChatView() {
                       <ChatMessage message={msg} agentEmoji={displayEmoji} />
                     </motion.div>
                   ))}
+                  
+                  {/* Thinking Animation */}
+                  {isGenerating && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="flex items-start gap-4 px-4 py-4"
+                    >
+                      <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-sm animate-pulse shadow-[0_0_15px_rgba(var(--primary),0.2)]">
+                        {displayEmoji}
+                      </div>
+                      <div className="flex flex-col gap-1 mt-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <div className="h-1.5 w-1.5 rounded-full bg-primary/40 animate-bounce [animation-delay:-0.3s]" />
+                          <div className="h-1.5 w-1.5 rounded-full bg-primary/40 animate-bounce [animation-delay:-0.15s]" />
+                          <div className="h-1.5 w-1.5 rounded-full bg-primary/40 animate-bounce" />
+                        </div>
+                        <span className="text-[10px] font-bold text-primary/40 uppercase tracking-widest mt-1">
+                          Thinking...
+                        </span>
+                      </div>
+                    </motion.div>
+                  )}
+                  
                   <div ref={messagesEndRef} />
                 </div>
               </ScrollArea>

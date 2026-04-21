@@ -33,9 +33,27 @@ export default function Inbox() {
 
   const loadNotifications = async () => {
     setLoading(true);
-    const data = await getNotifications();
-    setNotifications(data);
-    setLoading(false);
+    try {
+      const data = await getNotifications();
+      // Map backend fields to UI fields
+      const mapped = (data || []).map((n: any) => ({
+        id: n.id,
+        unread: !!n.is_unread,
+        from: n.from_name || "System",
+        fromAvatar: n.from_avatar || "🤖",
+        title: n.title,
+        preview: n.preview,
+        content: n.content,
+        time: n.timestamp ? new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Just now",
+        timestamp: n.timestamp,
+        category: n.category
+      }));
+      setNotifications(mapped);
+    } catch (e) {
+      console.error("Failed to load notifications:", e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSelect = async (id: string) => {

@@ -77,11 +77,13 @@ const Index = () => {
   const [wizardOpen, setWizardOpen] = useState(false);
 
   useEffect(() => {
+    /* 
     // Check if onboarding is needed
     const companies = localStorage.getItem("ensemble_companies");
     if (!companies || Object.keys(JSON.parse(companies)).length === 0) {
       setWizardOpen(true);
     }
+    */
   }, []);
 
   // Real data states

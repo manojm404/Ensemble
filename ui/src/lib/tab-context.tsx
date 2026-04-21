@@ -55,7 +55,6 @@ export const allApps: AppItem[] = [
   { id: "agents", title: "Agents", url: "/agents", icon: Bot, iconName: "Bot", description: "Manage AI agents" },
   { id: "marketplace", title: "Marketplace", url: "/marketplace", icon: ShoppingBag, iconName: "ShoppingBag", description: "Browse community agent packs" },
   { id: "workflows", title: "Workflows", url: "/workflows", icon: GitBranch, iconName: "GitBranch", description: "Automation pipelines" },
-  { id: "macros", title: "Macros", url: "/macros", icon: Blocks, iconName: "Blocks", description: "Reusable sequences" },
   { id: "permissions", title: "Permissions", url: "/permissions", icon: Shield, iconName: "Shield", description: "Access control" },
   { id: "companies", title: "Companies", url: "/companies", icon: LayoutGrid, iconName: "LayoutGrid", description: "AI-powered business entities" },
   { id: "settings", title: "Settings", url: "/settings/general", icon: Settings, iconName: "Settings", description: "App configuration" },

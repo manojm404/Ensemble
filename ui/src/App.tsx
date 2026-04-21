@@ -15,8 +15,7 @@ import Agents from "./pages/Agents";
 import Workflows from "./pages/Workflows";
 import WorkflowEditor from "./pages/WorkflowEditor";
 import WorkflowOutput from "./pages/WorkflowOutput";
-import Macros from "./pages/Macros";
-import MacroDetail from "./pages/MacroDetail";
+import Permissions from "./pages/Permissions";
 import Permissions from "./pages/Permissions";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
@@ -56,8 +55,6 @@ const App = () => (
                 <Route path="/workflows" element={<Workflows />} />
                 <Route path="/workflows/:id" element={<WorkflowEditor />} />
                 <Route path="/workflow-output/:id" element={<WorkflowOutput />} />
-                <Route path="/macros" element={<Macros />} />
-                <Route path="/macros/:id" element={<MacroDetail />} />
                 <Route path="/permissions" element={<Permissions />} />
                 <Route path="/settings/*" element={<Settings />} />
                 {/* Companies */}

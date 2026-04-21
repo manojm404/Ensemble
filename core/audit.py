@@ -86,6 +86,18 @@ class AuditLogger:
                     category TEXT
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS scheduled_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT,
+                    workflow_id TEXT,
+                    cron_pattern TEXT,
+                    next_run TEXT,
+                    last_run TEXT,
+                    status TEXT DEFAULT 'pending',
+                    payload_json TEXT
+                )
+            """)
 
     def log(
         self,

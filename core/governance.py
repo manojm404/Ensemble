@@ -38,6 +38,7 @@ from core.llm_provider import LLMProvider
 from core.dag_engine import DAGWorkflowEngine
 import core.adapters
 from core import settings
+from core.scheduler import scheduler
 
 # Phase 1: Supabase Integration
 from core.supabase_client import supabase, supabase_admin, verify_connection
@@ -192,12 +193,25 @@ async def security_headers_middleware(request: Request, call_next):
 rate_limit_enabled = os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true"
 rate_limit_per_minute = int(os.getenv("RATE_LIMIT_PER_MINUTE", "100"))
 
-if rate_limit_enabled:
-    from slowapi import Limiter
-    from slowapi.util import get_remote_address
-    from slowapi.errors import RateLimitExceeded
-
     limiter = Limiter(key_func=get_remote_address, default_limits=[f"{rate_limit_per_minute}/minute"])
+    app.state.limiter = limiter
+
+@app.on_event("startup")
+async def startup_event():
+    """Server initialization."""
+    # Start the Sovereign Scheduler background task
+    try:
+        await scheduler.start()
+        print("🕒 [Ensemble] Sovereign Scheduler active")
+    except Exception as e:
+        print(f"⚠️ [Ensemble] Failed to start scheduler: {e}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Server cleanup."""
+    # Stop the Sovereign Scheduler
+    await scheduler.stop()
+    print("👋 [Ensemble] Scheduler stopped")
     app.state.limiter = limiter
 
     @app.exception_handler(RateLimitExceeded)
@@ -3700,6 +3714,184 @@ async def test_api_key(request: Request):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Test failed: {str(e)}")
+
+# ============================================================
+# Dashboard & Analytics Endpoints
+# ============================================================
+
+@app.get("/api/dashboard/stats")
+async def get_dashboard_stats(request: Request):
+    """Aggregate real-time metrics for the Home dashboard cards."""
+    try:
+        user_id = _get_user_id_from_request(request)
+        with sqlite3.connect(audit_logger.db_path) as conn:
+            # Active Workflows (status = 'active')
+            cursor = conn.execute("SELECT COUNT(*) FROM executions WHERE status = 'active'")
+            active_workflows = cursor.fetchone()[0]
+
+            # Agents Running (status = 'ACTIVE')
+            cursor = conn.execute("SELECT COUNT(*) FROM agents WHERE status = 'ACTIVE'")
+            agents_running = cursor.fetchone()[0]
+
+            # Tokens Today (Sum of cost_usd * 1000000 approx)
+            # Actually audit_logger can calculate this
+            cursor = conn.execute("SELECT SUM(cost_usd) FROM events WHERE timestamp >= date('now')")
+            cost_today = cursor.fetchone()[0] or 0.0
+            tokens_today = int(cost_today * 750000) # Rough estimate tokens per dollar
+
+            # Monthly Cost
+            cursor = conn.execute("SELECT SUM(cost_usd) FROM events WHERE timestamp >= date('now', 'start of month')")
+            monthly_cost = cursor.fetchone()[0] or 0.0
+
+            # Execution stats (grouped by status)
+            cursor = conn.execute("SELECT status, COUNT(*) FROM executions GROUP BY status")
+            execution_stats = {row[0]: row[1] for row in cursor.fetchall()}
+
+            return {
+                "active_workflows": active_workflows,
+                "agents_running": agents_running,
+                "tokens_today": tokens_today,
+                "monthly_cost": round(monthly_cost, 2),
+                "total_workflows": execution_stats.get('completed', 0) + active_workflows,
+                "execution_stats": execution_stats
+            }
+    except Exception as e:
+        logger.error(f"Failed to fetch dashboard stats: {e}")
+        return {"error": str(e)}
+
+@app.get("/api/dashboard/activity")
+async def get_dashboard_activity(limit: int = 20):
+    """Retrieve summarized recent activity for the dashboard."""
+    try:
+        events = audit_logger.get_history(company_id="company_alpha", limit=limit)
+        activity = []
+        for e in events:
+            # Create a more user-friendly message based on action_type
+            action = e['action_type']
+            agent = e['agent_id'].split('_')[-1]
+            details = e['details']
+            
+            message = f"{agent} performed {action}"
+            if action == 'TOOL_CALL':
+                message = f"{agent} used {details.get('tool', 'a tool')}"
+            elif action == 'RESULT':
+                message = f"{agent} completed a task"
+            elif action == 'THOUGHT':
+                message = f"{agent} is strategizing"
+            
+            activity.append({
+                "agent_id": e['agent_id'],
+                "action_type": action,
+                "timestamp": e['timestamp'],
+                "message": message,
+                "details": details
+            })
+        return activity
+    except Exception as e:
+        return []
+
+@app.get("/api/dashboard/token-usage")
+async def get_token_usage_chart(days: int = 7):
+    """Daily token consumption for the last N days."""
+    try:
+        with sqlite3.connect(audit_logger.db_path) as conn:
+            cursor = conn.execute(f"""
+                SELECT date(timestamp) as day, SUM(cost_usd)
+                FROM events 
+                WHERE timestamp >= date('now', '-{days} days')
+                GROUP BY day
+                ORDER BY day ASC
+            """)
+            data = []
+            for row in cursor.fetchall():
+                data.append({
+                    "day": datetime.strptime(row[0], "%Y-%m-%d").strftime("%a"),
+                    "date": row[0],
+                    "tokens": int((row[1] or 0) * 750000)
+                })
+            return data
+    except Exception as e:
+        return []
+
+@app.get("/api/dashboard/agent-stats")
+async def get_dashboard_agent_stats():
+    """Top-performing agents by run count and efficiency."""
+    try:
+        with sqlite3.connect(audit_logger.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT agent_id, COUNT(*), SUM(cost_usd)
+                FROM events
+                WHERE action_type = 'RESULT'
+                GROUP BY agent_id
+                ORDER BY COUNT(*) DESC
+                LIMIT 5
+            """)
+            stats = []
+            for i, row in enumerate(cursor.fetchall()):
+                agent_id = row[0]
+                # Look up agent name in registry
+                agent_info = skill_registry.get_skill(agent_id) or {"name": agent_id, "emoji": "🤖", "category": "General"}
+                stats.append({
+                    "rank": i + 1,
+                    "agent_id": agent_id,
+                    "name": agent_info.get("name"),
+                    "emoji": agent_info.get("emoji"),
+                    "category": agent_info.get("category"),
+                    "runs": row[1],
+                    "cost": round(row[2] or 0, 4)
+                })
+            return stats
+    except Exception as e:
+        return []
+
+# ============================================================
+# Notification & Inbox Endpoints
+# ============================================================
+
+@app.get("/api/notifications")
+async def get_user_notifications(request: Request, company_id: Optional[str] = None):
+    """Retrieve notifications for the Inbox."""
+    user_id = _get_user_id_from_request(request) or "dev_user"
+    return audit_logger.get_notifications(user_id, company_id)
+
+@app.post("/api/notifications/{id}/read")
+async def mark_notification_as_read(id: int):
+    """Mark a notification as read via ID."""
+    audit_logger.mark_notification_read(id)
+    return {"status": "success"}
+
+# ============================================================
+# Scheduler & Automation Endpoints (V1 Implementation)
+# ============================================================
+
+@app.get("/api/scheduler/jobs")
+async def list_scheduled_jobs():
+    """List all scheduled workflow tasks from DB."""
+    try:
+        with sqlite3.connect(audit_logger.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("SELECT * FROM scheduled_jobs ORDER BY next_run ASC")
+            return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/api/scheduler/jobs")
+async def create_scheduled_job(req: Dict[str, Any]):
+    """Schedule a workflow to run at a specific time (Cron/Once)."""
+    try:
+        name = req.get("name", "Untitled Job")
+        workflow_id = req.get("workflow_id")
+        next_run = req.get("next_run") # ISO string
+        cron_pattern = req.get("cron_pattern") # 'hourly', 'daily', or None for once
+        
+        if not workflow_id or not next_run:
+            raise HTTPException(status_code=400, detail="workflow_id and next_run are required")
+            
+        scheduler.schedule_job(name, workflow_id, next_run, cron_pattern, req.get("payload"))
+        return {"status": "scheduled", "message": f"Job '{name}' queued for execution"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn
