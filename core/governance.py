@@ -3823,7 +3823,7 @@ async def get_token_usage_chart(days: int = 7):
                 data.append({
                     "day": datetime.strptime(row[0], "%Y-%m-%d").strftime("%a"),
                     "date": row[0],
-                    # Use a floor check to ensure even tiny runs show up as at least 100 tokens
+                    # Use a floor check to ensure even tiny runs show up correctly
                     "tokens": max(int((row[1] or 0) * 1000000), 1) if (row[1] or 0) > 0 else 0
                 })
             return data
@@ -3832,42 +3832,56 @@ async def get_token_usage_chart(days: int = 7):
 
 @app.get("/api/dashboard/agent-stats")
 async def get_dashboard_agent_stats():
-    """Top-performing agents by run count and efficiency."""
+    """Top-performing official specialized agents by run count and efficiency."""
     try:
         with sqlite3.connect(audit_logger.db_path) as conn:
+            # We fetch 30 candidates to ensure we find at least 6 REAL agents after filtering technical IDs
             cursor = conn.execute("""
                 SELECT agent_id, COUNT(*), SUM(cost_usd)
                 FROM events
                 WHERE agent_id IS NOT NULL 
-                AND agent_id NOT IN ('human_user', 'system', 'unknown', '')
-                AND agent_id NOT LIKE 'step%'
-                AND agent_id NOT LIKE 'n%'
-                AND length(agent_id) > 2
+                AND lower(agent_id) NOT IN ('human_user', 'system', 'unknown', '', 'human', 'bot', 'step')
+                AND lower(agent_id) NOT LIKE 'step%'
+                AND lower(agent_id) NOT LIKE 'n1'
+                AND lower(agent_id) NOT LIKE 'n2'
+                AND lower(agent_id) NOT LIKE 'n3'
+                AND lower(agent_id) NOT LIKE 'n4'
                 GROUP BY agent_id
                 ORDER BY COUNT(*) DESC
-                LIMIT 8
+                LIMIT 30
             """)
+            
             stats = []
-            for i, row in enumerate(cursor.fetchall()):
+            for row in cursor.fetchall():
                 agent_id = row[0]
-                # Look up agent name in registry
-                agent_info = skill_registry.get_skill(agent_id)
                 
-                # Robust naming logic
+                # 1. Check if ID pattern is a technical internal ID
+                low_id = agent_id.lower()
+                if any(x in low_id for x in ['step', 'task_', 'node_', 'pipeline_', 'trigger_']):
+                    continue
+                if len(agent_id) <= 2:
+                    continue
+                
+                # 2. STRICT REQUIREMENT: Must be in registry or follow official agency prefix
+                agent_info = skill_registry.get_skill(agent_id)
+                is_official = agent_id.startswith('agency_') or agent_id.startswith('native_') or agent_id.startswith('integration_')
+                
+                if not agent_info and not is_official:
+                    continue
+                
+                # 3. Robust naming logic
                 clean_name = agent_info.get("name") if agent_info else None
                 if not clean_name:
-                    # Handle generated IDs like native_researcher_12345
-                    # Take the first 2 parts if they are words
                     parts = agent_id.split('_')
-                    # Filter out purely numeric or short hash parts
-                    name_parts = [p for p in parts if not p.isdigit() and len(p) > 1][:2]
-                    if name_parts:
-                        clean_name = " ".join(name_parts).title()
+                    # Find parts that are actually words
+                    word_parts = [p for p in parts if not p.isdigit() and len(p) > 2]
+                    if word_parts:
+                        clean_name = " ".join(word_parts[:2]).title()
                     else:
                         clean_name = agent_id.split('-')[0].replace('_', ' ').title()
 
-                # Filter out pure technical names that escaped
-                if any(x in clean_name.lower() for x in ['step ', 'node ', 'n1', 'n2']):
+                # Final guard against technical artifacts
+                if any(x in clean_name.lower() for x in ['step', 'node', 'task']):
                     continue
 
                 stats.append({
@@ -3879,8 +3893,14 @@ async def get_dashboard_agent_stats():
                     "runs": row[1],
                     "cost": round(row[2] or 0, 4)
                 })
+                
+                # We only need top 6 for the dashboard grid
+                if len(stats) >= 6:
+                    break
+            
             return stats
     except Exception as e:
+        print(f"CRITICAL: Error in agent-stats: {e}")
         return []
 
 # ============================================================
