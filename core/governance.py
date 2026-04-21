@@ -26,6 +26,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 load_dotenv()
 
@@ -193,17 +196,31 @@ async def security_headers_middleware(request: Request, call_next):
 rate_limit_enabled = os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true"
 rate_limit_per_minute = int(os.getenv("RATE_LIMIT_PER_MINUTE", "100"))
 
-    limiter = Limiter(key_func=get_remote_address, default_limits=[f"{rate_limit_per_minute}/minute"])
-    app.state.limiter = limiter
+limiter = Limiter(key_func=get_remote_address, default_limits=[f"{rate_limit_per_minute}/minute"])
+app.state.limiter = limiter
+
+# Setup backend service singletons for global access
+audit_logger = AuditLogger()
+space = EnsembleSpace()
+llm = LLMProvider()
+dag_engine = DAGWorkflowEngine(
+    space=space,
+    audit=audit_logger,
+    llm=llm,
+    gov=None # Will be set via gov_instance
+)
+scheduler = None # Global singleton placeholder
+gov_instance = None # Placeholder for circular ref if needed
 
 @app.on_event("startup")
 async def startup_event():
     """Server initialization."""
     # Initialize and Start the Sovereign Scheduler background task
+    global scheduler
     try:
         from core.scheduler import init_scheduler
-        s = init_scheduler(audit_logger, dag_engine)
-        await s.start()
+        scheduler = init_scheduler(audit_logger, dag_engine)
+        await scheduler.start()
         print("🕒 [Ensemble] Sovereign Scheduler active")
     except Exception as e:
         print(f"⚠️ [Ensemble] Failed to start scheduler: {e}")
@@ -212,9 +229,9 @@ async def startup_event():
 async def shutdown_event():
     """Server cleanup."""
     # Stop the Sovereign Scheduler
-    await scheduler.stop()
-    print("👋 [Ensemble] Scheduler stopped")
-    app.state.limiter = limiter
+    if scheduler:
+        await scheduler.stop()
+        print("👋 [Ensemble] Scheduler stopped")
 
     @app.exception_handler(RateLimitExceeded)
     async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
@@ -236,12 +253,6 @@ async def ensure_cors_headers(request: Request, call_next):
     else:
         response.headers["Access-Control-Allow-Origin"] = "*"
     return response
-
-# Setup backend service singletons
-audit_logger = AuditLogger()
-space = EnsembleSpace()
-llm = LLMProvider()
-gov_instance = None # Will be initialized below
 
 # Background SOP run tracking
 sop_runs: Dict[str, Dict[str, Any]] = {}

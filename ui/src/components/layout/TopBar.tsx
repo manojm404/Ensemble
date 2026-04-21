@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   User,
   Plus,
@@ -11,10 +13,22 @@ import {
   Grid3X3,
   Search,
   ChevronLeft,
+  Loader2,
+  Calendar,
+  Sparkles
 } from "lucide-react";
 import { useAIApps } from "@/lib/ai-apps";
 import { AddCustomAppDialog } from "@/components/home/AddCustomAppDialog";
 import { aiLogoMap } from "@/components/icons/ai-logos";
+import { useTabContext } from "@/lib/tab-context";
+import { ThemeToggle } from "@/components/theme-toggle";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export function TopBar() {
   const navigate = useNavigate();

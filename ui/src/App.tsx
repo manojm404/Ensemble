@@ -16,7 +16,6 @@ import Workflows from "./pages/Workflows";
 import WorkflowEditor from "./pages/WorkflowEditor";
 import WorkflowOutput from "./pages/WorkflowOutput";
 import Permissions from "./pages/Permissions";
-import Permissions from "./pages/Permissions";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 import Marketplace from "./pages/Marketplace";
