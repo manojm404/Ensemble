@@ -5,7 +5,8 @@ import pytest
 from unittest.mock import MagicMock
 from core.engine import SOPEngine
 
-def test_engine_workflow_execution():
+@pytest.mark.asyncio
+async def test_engine_workflow_execution():
     space = MagicMock()
     audit = MagicMock()
     llm = MagicMock()
@@ -17,7 +18,9 @@ def test_engine_workflow_execution():
     space.read.return_value = None
     space.exists.return_value = True # Forces transition to next state
     
-    engine = SOPEngine(space, audit, llm)
+    gov = MagicMock()
+    gov.db_path = ":memory:" # Use in-memory for tests
+    engine = SOPEngine(space, audit, llm, gov)
     
     # Create temporary SOP file
     sop_data = {
@@ -38,7 +41,7 @@ def test_engine_workflow_execution():
     with open(sop_path, "w") as f:
         yaml.dump(sop_data, f)
     
-    engine.run_workflow(sop_path)
+    await engine.run_workflow(sop_path)
     
     # Verify transitions happen correctly
     assert space.write.called
