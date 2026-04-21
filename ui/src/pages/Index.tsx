@@ -409,8 +409,10 @@ const Index = () => {
               {/* 2. Intelligence Metrics Grid */}
               <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
                 
-                {/* Left: Stats & Leaderboard */}
+                {/* Left Column: Live Operations & Registry (8/12) */}
                 <div className="xl:col-span-8 space-y-8">
+                  
+                  {/* Stats Row */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {[
                       { label: "Active Nodes", value: stats?.active_workflows || 0, icon: Workflow, color: "text-blue-400" },
@@ -434,95 +436,207 @@ const Index = () => {
                     ))}
                   </div>
 
+                  {/* HIGH DENSITY: Live Pipelines */}
                   <motion.div 
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="rounded-[2.5rem] border border-border/40 bg-card/30 backdrop-blur-xl p-8 shadow-2xl relative overflow-hidden"
+                    className="rounded-[2rem] border border-border/40 bg-card/40 backdrop-blur-xl p-6 shadow-2xl relative overflow-hidden"
                   >
-                    <div className="absolute top-0 right-0 p-8 opacity-5">
-                       <Bot className="h-32 w-32" />
-                    </div>
-                    <div className="flex items-center justify-between mb-8">
-                      <div>
-                        <h2 className="text-xl font-black tracking-tight uppercase">Agent Performance</h2>
-                        <p className="text-xs text-muted-foreground font-medium mt-1">Specialists ranked by execution volume</p>
+                    <div className="flex items-center justify-between mb-6">
+                      <div className="flex items-center gap-3">
+                        <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                        <h2 className="text-sm font-black tracking-tight uppercase">Live Operations</h2>
                       </div>
-                      <Button variant="ghost" size="sm" className="text-primary font-bold text-[10px] uppercase tracking-widest" onClick={() => handleAppOpen("agents")}>
-                        View Registry
-                      </Button>
+                      <Badge variant="secondary" className="text-[9px] font-bold uppercase tracking-widest bg-secondary/50">
+                        {pipelines.filter(p => p.status === "running").length} Active Runs
+                      </Badge>
                     </div>
 
                     {loading ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {[...Array(4)].map((_, i) => <div key={i} className="h-20 bg-muted/20 rounded-2xl animate-pulse" />)}
+                      <div className="space-y-4">
+                        {[...Array(2)].map((_, i) => <div key={i} className="h-24 bg-muted/20 rounded-2xl animate-pulse" />)}
                       </div>
-                    ) : topAgents.length === 0 ? (
-                      <div className="py-12 text-center border-2 border-dashed border-border/20 rounded-[2rem]">
-                        <Bot className="h-10 w-10 text-muted-foreground/20 mx-auto mb-3" />
-                        <p className="text-sm font-bold text-muted-foreground/40">No Agent Activity Detected</p>
+                    ) : pipelines.length === 0 ? (
+                      <div className="py-10 text-center border-2 border-dashed border-border/10 rounded-3xl">
+                        <Workflow className="h-8 w-8 text-muted-foreground/20 mx-auto mb-2" />
+                        <p className="text-xs font-bold text-muted-foreground/40 uppercase tracking-widest">No Active Pipelines</p>
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {topAgents.slice(0, 4).map((agent, i) => (
-                          <div key={i} className="p-4 rounded-2xl bg-secondary/20 border border-white/5 flex items-center gap-4 hover:bg-secondary/30 transition-all">
-                            <div className="h-12 w-12 rounded-xl bg-background/40 flex items-center justify-center text-2xl border border-white/5">
-                              {agent.emoji}
+                        {pipelines.slice(0, 4).map((p) => (
+                          <div key={p.id} className="p-4 rounded-2xl bg-secondary/20 border border-white/5 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold truncate pr-2">{p.name}</span>
+                              <Badge variant={p.status === "running" ? "default" : "secondary"} className="text-[8px] uppercase font-black">
+                                {p.status}
+                              </Badge>
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-bold truncate">{agent.name}</p>
-                              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">{agent.category}</p>
-                            </div>
-                            <div className="text-right px-2">
-                              <p className="text-lg font-black text-primary">{agent.runs}</p>
-                              <p className="text-[9px] text-muted-foreground font-black uppercase tracking-tighter">Runs</p>
+                            <Progress value={(p.current_step / p.total_steps) * 100} className="h-1.5" />
+                            <div className="flex items-center justify-between text-[10px] text-muted-foreground font-bold">
+                              <span className="flex items-center gap-1">
+                                <Layers className="h-3 w-3" /> Step {p.current_step}/{p.total_steps}
+                              </span>
+                              <span>{p.time}</span>
                             </div>
                           </div>
                         ))}
                       </div>
                     )}
                   </motion.div>
+
+                  {/* PERFORMANCE: Agent Leaderboard */}
+                  <motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="rounded-[2rem] border border-border/40 bg-card/30 backdrop-blur-xl p-6 shadow-2xl"
+                  >
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-sm font-black tracking-tight uppercase">Agent Performance</h2>
+                      <Button variant="ghost" size="sm" className="h-7 text-primary font-bold text-[9px] uppercase tracking-widest hover:bg-primary/5" onClick={() => handleAppOpen("agents")}>
+                        View Registry
+                      </Button>
+                    </div>
+
+                    {loading ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {[...Array(4)].map((_, i) => <div key={i} className="h-16 bg-muted/20 rounded-xl animate-pulse" />)}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3">
+                        {topAgents.slice(0, 4).map((agent, i) => (
+                          <div key={i} className="p-3 rounded-xl bg-secondary/20 border border-white/5 flex items-center gap-3">
+                            <div className="h-10 w-10 rounded-lg bg-background/40 flex items-center justify-center text-xl border border-white/5">
+                              {agent.emoji}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-bold truncate">{agent.name}</p>
+                              <p className="text-[9px] text-muted-foreground font-black uppercase tracking-wider">{agent.category}</p>
+                            </div>
+                            <div className="text-right px-1">
+                              <p className="text-sm font-black text-primary">{agent.runs}</p>
+                              <p className="text-[8px] text-muted-foreground font-black uppercase tracking-tighter">Runs</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </motion.div>
+
+                  {/* REGISTRY: Recent Workflows */}
+                  <motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="rounded-[2rem] border border-border/40 bg-card/20 backdrop-blur-xl overflow-hidden"
+                  >
+                    <div className="p-6 border-b border-white/5 flex items-center justify-between">
+                      <h2 className="text-sm font-black tracking-tight uppercase">Workflow Registry</h2>
+                      <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">{workflows.length} Total</p>
+                    </div>
+                    <div className="divide-y divide-white/5">
+                      {workflows.slice(0, 3).map((wf) => (
+                        <div key={wf.id} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors cursor-pointer" onClick={() => handleAppOpen("workflows")}>
+                          <div className="flex items-center gap-4">
+                            <div className={`h-2 w-2 rounded-full ${wf.status === "active" ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" : "bg-muted-foreground/30"}`} />
+                            <div>
+                              <p className="text-xs font-bold">{wf.name}</p>
+                              <p className="text-[9px] text-muted-foreground font-bold uppercase tracking-widest mt-0.5">{wf.agents} Agents · {wf.runs} Total Runs</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                             <p className="text-[10px] font-bold text-foreground/60">{wf.lastRun} ago</p>
+                             <div className="flex items-center gap-1 mt-1 justify-end">
+                                <Badge variant="outline" className="text-[8px] uppercase tracking-tighter py-0 h-4 border-white/10">SOP</Badge>
+                             </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+
                 </div>
 
-                {/* Right Column: Activity Ledger */}
-                <div className="xl:col-span-4 h-full">
+                {/* Right Column: Activity & Intelligence Insights (4/12) */}
+                <div className="xl:col-span-4 space-y-8">
+                  
+                  {/* AUDIT LEDGER */}
                   <motion.div 
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
-                    className="rounded-[2rem] border border-border/40 bg-card/40 backdrop-blur-xl p-6 flex flex-col shadow-2xl h-[480px]"
+                    className="rounded-[2rem] border border-border/40 bg-card/40 backdrop-blur-xl p-6 flex flex-col shadow-2xl h-[450px]"
                   >
                     <div className="flex items-center gap-2 mb-6">
                        <div className="h-2 w-2 rounded-full bg-primary" />
-                       <h2 className="text-lg font-black tracking-tight uppercase">Audit Ledger</h2>
+                       <h2 className="text-sm font-black tracking-tight uppercase">Audit Ledger</h2>
                     </div>
 
                     <ScrollArea className="flex-1 -mx-2 px-2">
-                      {activityFeed.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center space-y-3 opacity-20">
-                           <Layers className="h-10 w-10" />
-                           <p className="text-[10px] font-black uppercase tracking-widest text-center">Ledger Empty</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-6">
-                          {activityFeed.slice(0, 15).map((item, idx) => {
-                            const isError = item.action_type.includes("ERROR") || item.action_type.includes("FAIL");
-                            return (
-                              <div key={idx} className="relative pl-6 space-y-1">
-                                 <div className={`absolute left-0 top-1.5 h-2 w-2 rounded-full ${isError ? 'bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]' : 'bg-primary/40'}`} />
-                                 <p className={`text-[11px] font-bold leading-tight ${isError ? 'text-rose-300' : 'text-foreground/80'}`}>
-                                   {item.message}
-                                 </p>
-                                 <div className="flex items-center gap-2 text-[9px] text-muted-foreground font-bold uppercase tracking-tighter">
-                                    <span>{new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                    <span className="opacity-20">|</span>
-                                    <span className="text-primary/60">{item.action_type}</span>
-                                 </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                       <div className="space-y-6">
+                         {activityFeed.slice(0, 15).map((item, idx) => {
+                           const isError = item.action_type.includes("ERROR") || item.action_type.includes("FAIL");
+                           return (
+                             <div key={idx} className="relative pl-6 space-y-1">
+                                <div className={`absolute left-0 top-1.5 h-2 w-2 rounded-full ${isError ? 'bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]' : 'bg-primary/40'}`} />
+                                <p className={`text-[11px] font-bold leading-tight ${isError ? 'text-rose-300' : 'text-foreground/80'}`}>
+                                  {item.message}
+                                </p>
+                                <div className="flex items-center gap-2 text-[9px] text-muted-foreground font-bold uppercase tracking-tighter mt-1">
+                                   <span>{new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                   <span className="opacity-20">|</span>
+                                   <span className="text-primary/60">{item.action_type}</span>
+                                </div>
+                             </div>
+                           );
+                         })}
+                       </div>
                     </ScrollArea>
                   </motion.div>
+
+                  {/* INTELLIGENCE TRENDS: Token Chart */}
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="rounded-[2rem] border border-border/40 bg-card/30 backdrop-blur-xl p-6 shadow-2xl"
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h2 className="text-[10px] font-black tracking-widest uppercase text-muted-foreground">Intelligence Trends</h2>
+                        <h3 className="text-sm font-bold mt-0.5">Token Consumption</h3>
+                      </div>
+                      <Badge variant="outline" className="text-[8px] bg-primary/5 text-primary border-primary/20">7D REPORT</Badge>
+                    </div>
+
+                    <div className="h-32 flex items-end gap-1.5 mb-2 px-1">
+                       {tokenUsage.map((item, i) => (
+                         <div key={i} className="flex-1 flex flex-col justify-end group relative h-full">
+                            <motion.div 
+                              initial={{ height: 0 }}
+                              animate={{ height: `${(item.tokens / (maxTokens || 1)) * 100}%` }}
+                              className="w-full bg-primary/30 rounded-t-sm group-hover:bg-primary/50 transition-colors"
+                            />
+                            <div className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-[8px] font-black bg-primary text-black px-1 rounded shadow-lg pointer-events-none">
+                              {item.tokens}K
+                            </div>
+                         </div>
+                       ))}
+                    </div>
+                    <div className="flex justify-between px-1 mb-4">
+                       {tokenUsage.map((t, i) => (
+                         <span key={i} className="text-[8px] font-black text-muted-foreground uppercase">{t.day[0]}</span>
+                       ))}
+                    </div>
+
+                    <div className="pt-4 border-t border-white/5 flex items-center justify-between">
+                       <div>
+                          <p className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest">Total Usage</p>
+                          <p className="text-sm font-black mt-0.5">{formatTokens(totalTokens)}</p>
+                       </div>
+                       <div className="text-right">
+                          <p className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest">Peak Load</p>
+                          <p className="text-sm font-black mt-0.5 text-emerald-400">{maxTokens}K</p>
+                       </div>
+                    </div>
+                  </motion.div>
+
                 </div>
               </div>
             </div>
