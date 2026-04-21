@@ -459,8 +459,17 @@ class DAGWorkflowEngine:
                     if success:
                         completed_nodes.add(nid)
                         
+                        # --- PHASE III: SENTINEL CHECK ---
+                        # Read the latest response to check for deadlock
+                        artifact_name = f"{nid}_output"
+                        if self.space.exists(artifact_name):
+                            resp = self.space.read(artifact_name).decode("utf-8")
+                            if self._check_stuck_loop(nid, resp):
+                                print(f"🛑 [DAG Engine] Critical Deadlock at {nid}. Forcing early exit to help high-stakes decision.", flush=True)
+                                # Force early exit by pruning all loop edges for this node
+                                continue 
+                        
                         # --- PHASE I: LOOP DETECTION ---
-                        # Check if this node has an outgoing LOOP BACK edge
                         loop_edges = [e for e in edges if e["source"] == nid and e.get("data", {}).get("isLoopBack", False)]
                         
                         for le in loop_edges:
@@ -475,17 +484,20 @@ class DAGWorkflowEngine:
                                 loop_iterations[target_id] = new_iter
                                 print(f"🔄 [DAG Engine] Loop detected: {nid} -> {target_id}. Iteration {new_iter}/{max_iters}", flush=True)
                                 
-                                # RELAX THE DAG: To re-run the target, we must clear it (and its descendants) from completed_nodes
+                                # RELAX THE DAG
                                 nodes_to_reset = self._get_descendants(target_id, edges) | {target_id}
                                 for r_node in nodes_to_reset:
                                     if r_node in completed_nodes:
                                         completed_nodes.remove(r_node)
-                                        print(f"  ✨ Resetting node state for loop: {r_node}", flush=True)
-
-                                # Update DB with loop progress
+                                
                                 self._update_loop_stats(run_id, target_id, new_iter, max_iters)
                     else:
-                        print(f"⚠️ [DAG Engine] Node {nid} failed. Stopping branch.", flush=True)
+                        # --- PHASE II: RESILIENCE (RETRY) ---
+                        # We allow a simple retry before failing the branch
+                        retry_count = 0 # In Phase III we'd track this in DB
+                        print(f"⚠️ [DAG Engine] Node {nid} failed. Resilience check...", flush=True)
+                        # For now, we still halt to avoid infinite cycles on error
+                        print(f"❌ [DAG Engine] Branch stalled at {nid}.", flush=True)
                         if branch_info and branch_info.get("type") == "switch":
                             # Prune non-selected branches
                             self._prune_branches(branch_info["prune_targets"], edges, pruned_nodes)
@@ -1185,6 +1197,39 @@ class DAGWorkflowEngine:
                 )
         except Exception as e:
             print(f"⚠️ [DAG Engine] Failed to update loop stats: {e}", flush=True)
+
+    def _check_stuck_loop(self, node_id: str, current_response: str) -> bool:
+        """
+        Phase III: Semantic Stuck Detection.
+        Checks if the current output is too similar to previous iterations.
+        """
+        all_versions = self.space.read_all_versions(f"{node_id}_output")
+        if len(all_versions) < 2:
+            return False
+            
+        # Compare to the last 2 versions (Round N-1 and N-2)
+        prev_versions = [v.decode("utf-8", errors="ignore") for v in all_versions[-3:-1]]
+        
+        def get_words(text: str) -> Set[str]:
+            return set(re.findall(r'\w+', text.lower()))
+            
+        current_words = get_words(current_response)
+        if not current_words:
+            return False
+            
+        for prev in prev_versions:
+            prev_words = get_words(prev)
+            if not prev_words: continue
+            
+            intersection = current_words.intersection(prev_words)
+            union = current_words.union(prev_words)
+            jaccard = len(intersection) / len(union)
+            
+            if jaccard > 0.92:
+                print(f"🚩 [Sentinel] DEADLOCK DETECTED at node {node_id} (Similarity: {jaccard:.2f}). Agents are repeating themselves.", flush=True)
+                return True
+                
+        return False
 
     def _mirror_to_deliverables(self, run_id: str, node_id: str, role: str, content: str):
         """

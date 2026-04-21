@@ -1724,7 +1724,8 @@ async def get_pipeline_status():
     """Get current pipeline/workflow execution status with enriched details."""
     with sqlite3.connect(gov_instance.db_path) as conn:
         cursor = conn.execute("""
-            SELECT e.run_id, e.workflow_id, e.status, e.current_node, e.started_at, w.name, w.graph_json
+            SELECT e.run_id, e.workflow_id, e.status, e.current_node, e.started_at, w.name, w.graph_json,
+                   e.current_iteration, e.max_iterations
             FROM executions e
             LEFT JOIN workflows w ON e.workflow_id = w.id
             ORDER BY e.started_at DESC LIMIT 10
@@ -1732,7 +1733,7 @@ async def get_pipeline_status():
         
         pipelines = []
         for row in cursor.fetchall():
-            run_id, wf_id, status, current_node, started_at, name, graph_json = row
+            run_id, wf_id, status, current_node, started_at, name, graph_json, curr_iter, max_iter = row
             
             total_steps = 3
             display_node = current_node
@@ -1746,7 +1747,11 @@ async def get_pipeline_status():
                     # Resolve node ID (n1, n2) to its name/label
                     node_info = next((n for n in nodes if n.get("id") == current_node), None)
                     if node_info:
-                        display_node = node_info.get("data", {}).get("label") or node_info.get("id")
+                        label = node_info.get("data", {}).get("label") or node_info.get("id")
+                        if curr_iter and curr_iter > 1:
+                            display_node = f"{label} (Round {curr_iter}/{max_iter})"
+                        else:
+                            display_node = label
                 except:
                     pass
 
@@ -1759,7 +1764,9 @@ async def get_pipeline_status():
                 "current_step_index": int(current_node.replace('n', '')) if current_node and current_node.startswith('n') and current_node[1:].isdigit() else 1,
                 "total_steps": total_steps,
                 "started_at": started_at,
-                "time": _format_relative_time(started_at) if started_at else "unknown"
+                "time": _format_relative_time(started_at) if started_at else "unknown",
+                "iteration": curr_iter,
+                "max_iterations": max_iter
             })
         return pipelines
 
