@@ -1719,51 +1719,6 @@ async def get_token_usage(days: int = Query(default=7)):
     
     return result
 
-@app.get("/api/dashboard/agent-stats")
-async def get_dashboard_agent_stats():
-    """Get agent performance stats for leaderboard."""
-    audit_db_path = "data/ensemble_audit.db"
-    try:
-        with sqlite3.connect(audit_db_path) as audit_conn:
-            cursor = audit_conn.execute("""
-                SELECT agent_id, COUNT(*) as run_count, COALESCE(SUM(cost_usd), 0) as total_cost
-                FROM events WHERE agent_id IS NOT NULL AND agent_id != 'human_user'
-                GROUP BY agent_id ORDER BY run_count DESC LIMIT 10
-            """)
-            
-            rows_data = cursor.fetchall()
-    except:
-        rows_data = []
-    
-    skills = skill_registry.list_skills()
-    skill_map = {s["id"]: s for s in skills}
-    
-    agent_stats = []
-    rank = 1
-    for row in rows_data:
-        agent_id, run_count, total_cost = row
-        skill = skill_map.get(agent_id, {})
-        
-        # Clean name logic
-        clean_name = skill.get("name")
-        if not clean_name:
-            parts = agent_id.split('_')
-            name_parts = [p for p in parts if not p.isdigit()]
-            clean_name = " ".join(name_parts).title() if name_parts else agent_id
-            
-        agent_stats.append({
-            "rank": rank,
-            "agent_id": agent_id,
-            "name": clean_name,
-            "emoji": skill.get("emoji", "🤖"),
-            "category": skill.get("category", "General"),
-            "runs": run_count,
-            "cost": float(total_cost)
-        })
-        rank += 1
-    
-    return agent_stats
-
 @app.get("/api/dashboard/pipeline-status")
 async def get_pipeline_status():
     """Get current pipeline/workflow execution status."""
@@ -3871,16 +3826,24 @@ async def get_dashboard_agent_stats():
             cursor = conn.execute("""
                 SELECT agent_id, COUNT(*), SUM(cost_usd)
                 FROM events
-                WHERE action_type = 'RESULT'
+                WHERE agent_id IS NOT NULL AND agent_id NOT IN ('human_user', 'system', 'unknown', '')
                 GROUP BY agent_id
                 ORDER BY COUNT(*) DESC
-                LIMIT 5
+                LIMIT 6
             """)
             stats = []
             for i, row in enumerate(cursor.fetchall()):
                 agent_id = row[0]
                 # Look up agent name in registry
-                agent_info = skill_registry.get_skill(agent_id) or {"name": agent_id, "emoji": "🤖", "category": "General"}
+                agent_info = skill_registry.get_skill(agent_id)
+                
+                # Robust naming logic
+                clean_name = agent_info.get("name") if agent_info else None
+                if not clean_name:
+                    parts = agent_id.split('_')
+                    name_parts = [p for p in parts if not p.isdigit()]
+                    clean_name = " ".join(name_parts).title() if name_parts else agent_id
+
                 stats.append({
                     "rank": i + 1,
                     "agent_id": agent_id,
