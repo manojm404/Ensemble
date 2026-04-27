@@ -303,7 +303,7 @@ class ManagedAgent(Agent):
             'website', 'web page', 'full html', 'complete html', 'single html',
             'single file', 'self-contained'
         ])
-        timeout_seconds = 180.0 if is_coding else 90.0
+        timeout_seconds = 300.0 if is_coding else 180.0
 
         print(f"⏱️ [ManagedAgent] Agent {self.agent_id} timeout: {timeout_seconds}s (coding={is_coding})", flush=True)
 

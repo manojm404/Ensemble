@@ -462,7 +462,7 @@ class LLMProvider:
         # 🛰️ Telemetry: Log the payload for protocol verification
         # print(f"DEBUG: Gemini Payload -> {json.dumps(payload, indent=2)}")
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             try:
                 resp = await client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
@@ -567,7 +567,7 @@ class LLMProvider:
         if system_instruction:
             payload["system_instruction"] = {"parts": [{"text": system_instruction}]}
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             async with client.stream("POST", url, headers=headers, json=payload) as response:
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):
@@ -616,7 +616,7 @@ class LLMProvider:
         if not endpoint.endswith("/chat/completions"):
             endpoint += "/chat/completions"
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             try:
                 resp = await client.post(endpoint, headers=headers, json=payload)
                 resp.raise_for_status()
@@ -673,7 +673,7 @@ class LLMProvider:
         if not endpoint.endswith("/chat/completions"):
             endpoint += "/chat/completions"
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             async with client.stream("POST", endpoint, headers=headers, json=payload) as response:
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):
