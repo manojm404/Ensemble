@@ -1,7 +1,7 @@
 import os
 import pytest
 import shutil
-from core.ensemble_space import EnsembleSpace
+from backend.ensemble.storage.ensemble_space import EnsembleSpace
 
 def test_space_cas_write_read():
     base_dir = "/tmp/test_space/"

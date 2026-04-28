@@ -72,7 +72,7 @@ cp .env.example .env
 
 # Start with Gunicorn (production)
 pip install gunicorn
-gunicorn core.governance:app \
+gunicorn backend.ensemble.api.governance:app \
   --bind 0.0.0.0:8088 \
   --workers 4 \
   --worker-class uvicorn.workers.UvicornWorker \
@@ -94,7 +94,7 @@ User=ensemble
 Group=ensemble
 WorkingDirectory=/opt/ensemble
 EnvironmentFile=/opt/ensemble/.env
-ExecStart=/opt/ensemble/venv/bin/gunicorn core.governance:app \
+ExecStart=/opt/ensemble/venv/bin/gunicorn backend.ensemble.api.governance:app \
   --bind 0.0.0.0:8088 \
   --workers 4 \
   --worker-class uvicorn.workers.UvicornWorker \

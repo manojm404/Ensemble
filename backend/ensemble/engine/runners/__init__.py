@@ -5,12 +5,14 @@ Runner package for the Universal Agent Importer.
 Provides execution runners for different agent formats.
 Each runner knows how to execute agents in its native format.
 """
-from core.runners.base_runner import BaseRunner, RunnerResult
-from core.runners.markdown_runner import MarkdownRunner
-from core.runners.python_runner import PythonRunner
-from core.runners.yaml_runner import YAMLRunner
-from core.runners.json_runner import JSONRunner
-from core.parsers.agent_data import AgentFormat
+
+from backend.ensemble.parsers.agent_data import AgentFormat
+
+from .base_runner import BaseRunner, RunnerResult
+from .json_runner import JSONRunner
+from .markdown_runner import MarkdownRunner
+from .python_runner import PythonRunner
+from .yaml_runner import YAMLRunner
 
 __all__ = [
     "BaseRunner",
@@ -22,17 +24,18 @@ __all__ = [
     "RunnerFactory",
 ]
 
+
 class RunnerFactory:
     """Factory for creating the appropriate runner for an agent format."""
-    
+
     _runners = {
         AgentFormat.MARKDOWN: MarkdownRunner(),
         AgentFormat.PYTHON: PythonRunner(),
         AgentFormat.YAML: YAMLRunner(),
         AgentFormat.JSON: JSONRunner(),
-        AgentFormat.TEXT: MarkdownRunner(), # Text agents run as simple Markdown
+        AgentFormat.TEXT: MarkdownRunner(),  # Text agents run as simple Markdown
     }
-    
+
     @classmethod
     def get_runner(cls, format: AgentFormat) -> BaseRunner:
         """Get the runner for the specified format."""
@@ -41,6 +44,6 @@ class RunnerFactory:
             raise ValueError(f"No runner found for agent format: {format}")
         return runner
 
+
 # Global instance
 runner_factory = RunnerFactory()
-

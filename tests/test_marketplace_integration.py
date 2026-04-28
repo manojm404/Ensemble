@@ -14,11 +14,11 @@ from pathlib import Path
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.skill_registry import skill_registry, SkillSource
-from core.marketplace_sync import MarketplaceSource, MarketplaceSync
-from core.github_pack_builder import GitHubPackBuilder
-from core.pack_eval import PackEvaluator, QualityBadge, AntiPattern
-from core.auto_update_service import AutoUpdateService
+from backend.ensemble.engine.skill_registry import skill_registry, SkillSource
+from backend.ensemble.integrations.marketplace_sync import MarketplaceSource, MarketplaceSync
+from backend.ensemble.integrations.github_pack_builder import GitHubPackBuilder
+from backend.ensemble.storage.pack_eval import PackEvaluator, QualityBadge, AntiPattern
+from backend.ensemble.integrations.auto_update_service import AutoUpdateService
 
 
 class TestNamespaceIsolation:
@@ -198,11 +198,11 @@ class TestIntegration:
     
     def test_all_components_importable(self):
         """Verify all components can be imported."""
-        from core.skill_registry import SkillSource
-        from core.marketplace_sync import MarketplaceSource
-        from core.github_pack_builder import GitHubPackBuilder
-        from core.pack_eval import PackEvaluator, QualityBadge
-        from core.auto_update_service import AutoUpdateService
+        from backend.ensemble.engine.skill_registry import SkillSource
+        from backend.ensemble.integrations.marketplace_sync import MarketplaceSource
+        from backend.ensemble.integrations.github_pack_builder import GitHubPackBuilder
+        from backend.ensemble.storage.pack_eval import PackEvaluator, QualityBadge
+        from backend.ensemble.integrations.auto_update_service import AutoUpdateService
         
         assert all([SkillSource, MarketplaceSource, GitHubPackBuilder, 
                    PackEvaluator, QualityBadge, AutoUpdateService])

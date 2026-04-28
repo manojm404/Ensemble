@@ -12,7 +12,8 @@ import asyncio
 import logging
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, TypeVar
 
@@ -37,6 +38,7 @@ class ExecutionResult:
 # ---------------------------------------------------------------------------
 # TimeoutManager
 # ---------------------------------------------------------------------------
+
 
 class TimeoutManager:
     """Enforces execution timeouts with precise billing semantics.

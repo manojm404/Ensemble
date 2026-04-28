@@ -4,12 +4,14 @@ Runner for Markdown-format agents.
 
 Executes agents by loading their prompt content and calling the LLM provider.
 """
-import time
-import logging
-from typing import Any, Optional
 
-from core.parsers.agent_data import AgentData, AgentFormat
-from core.runners.base_runner import BaseRunner, RunnerResult
+import logging
+import time
+from typing import Any
+
+from backend.ensemble.parsers.agent_data import AgentData, AgentFormat
+
+from .base_runner import BaseRunner, RunnerResult
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +40,8 @@ class MarkdownRunner(BaseRunner):
     def llm_provider(self):
         """Lazily initialize the LLM provider."""
         if self._llm_provider is None:
-            from core.llm_provider import LLMProvider
+            from backend.ensemble.llm_provider import LLMProvider
+
             self._llm_provider = LLMProvider()
         return self._llm_provider
 
@@ -72,7 +75,9 @@ class MarkdownRunner(BaseRunner):
             kwargs = self._build_kwargs(agent_data)
 
             # Call LLM
-            response = await self.llm_provider.chat(messages, agent_name=agent_data.name, **kwargs)
+            response = await self.llm_provider.chat(
+                messages, agent_name=agent_data.name, **kwargs
+            )
 
             execution_time = time.time() - start_time
 
@@ -103,9 +108,7 @@ class MarkdownRunner(BaseRunner):
             self._log_execution_end(result, agent_data)
             return result
 
-    def _build_messages(
-        self, agent_data: AgentData, input_data: Any
-    ) -> list:
+    def _build_messages(self, agent_data: AgentData, input_data: Any) -> list:
         """Build the message list for the LLM call."""
         messages = []
 
@@ -117,10 +120,12 @@ class MarkdownRunner(BaseRunner):
             system_parts.append(agent_data.description)
 
         if system_parts:
-            messages.append({
-                "role": "system",
-                "content": "\n".join(system_parts),
-            })
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "\n".join(system_parts),
+                }
+            )
 
         # Body prompt + user input
         body_parts = []
@@ -130,17 +135,21 @@ class MarkdownRunner(BaseRunner):
             body_parts.append(str(input_data))
 
         if body_parts:
-            messages.append({
-                "role": "user",
-                "content": "\n\n".join(body_parts),
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "\n\n".join(body_parts),
+                }
+            )
 
         # Fallback if no messages
         if not messages:
-            messages.append({
-                "role": "user",
-                "content": "Hello, please respond.",
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "Hello, please respond.",
+                }
+            )
 
         return messages
 

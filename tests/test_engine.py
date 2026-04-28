@@ -3,7 +3,7 @@ import shutil
 import yaml
 import pytest
 from unittest.mock import MagicMock
-from core.engine import SOPEngine
+from backend.ensemble.engine.engine import SOPEngine
 
 @pytest.mark.asyncio
 async def test_engine_workflow_execution():

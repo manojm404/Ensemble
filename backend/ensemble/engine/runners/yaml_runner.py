@@ -5,15 +5,16 @@ Runner for YAML-format agents.
 Loads YAML configuration and executes agents based on the config structure.
 Supports LangChain-style and generic YAML agent configurations.
 """
-import os
-import time
+
 import logging
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Dict
 
 import yaml
 
-from core.parsers.agent_data import AgentData, AgentFormat
-from core.runners.base_runner import BaseRunner, RunnerResult
+from backend.ensemble.parsers.agent_data import AgentData, AgentFormat
+
+from .base_runner import BaseRunner, RunnerResult
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,8 @@ class YAMLRunner(BaseRunner):
     def llm_provider(self):
         """Lazily initialize the LLM provider."""
         if self._llm_provider is None:
-            from core.llm_provider import LLMProvider
+            from backend.ensemble.llm_provider import LLMProvider
+
             self._llm_provider = LLMProvider()
         return self._llm_provider
 
@@ -117,9 +119,7 @@ class YAMLRunner(BaseRunner):
 
         return agent_data.config
 
-    def _determine_strategy(
-        self, config: Dict[str, Any], agent_data: AgentData
-    ) -> str:
+    def _determine_strategy(self, config: Dict[str, Any], agent_data: AgentData) -> str:
         """
         Determine execution strategy from config.
 
@@ -177,10 +177,7 @@ class YAMLRunner(BaseRunner):
         Processes each step/sequence in the config.
         """
         chain_steps = (
-            config.get("chain")
-            or config.get("steps")
-            or config.get("sequence")
-            or []
+            config.get("chain") or config.get("steps") or config.get("sequence") or []
         )
 
         result_text = ""
@@ -191,7 +188,10 @@ class YAMLRunner(BaseRunner):
                 # Simple string step
                 messages = [
                     {"role": "system", "content": agent_data.system_prompt or ""},
-                    {"role": "user", "content": f"{step}\n\nContext: {current_context}"},
+                    {
+                        "role": "user",
+                        "content": f"{step}\n\nContext: {current_context}",
+                    },
                 ]
             elif isinstance(step, dict):
                 # Step with configuration
@@ -200,14 +200,18 @@ class YAMLRunner(BaseRunner):
 
                 messages = []
                 if agent_data.system_prompt:
-                    messages.append({
-                        "role": "system",
-                        "content": agent_data.system_prompt,
-                    })
-                messages.append({
-                    "role": step_role,
-                    "content": f"{step_prompt}\n\nContext: {current_context}",
-                })
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": agent_data.system_prompt,
+                        }
+                    )
+                messages.append(
+                    {
+                        "role": step_role,
+                        "content": f"{step_prompt}\n\nContext: {current_context}",
+                    }
+                )
             else:
                 continue
 
@@ -266,10 +270,12 @@ class YAMLRunner(BaseRunner):
             system_parts.append(agent_data.description)
 
         if system_parts:
-            messages.append({
-                "role": "system",
-                "content": "\n".join(system_parts),
-            })
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "\n".join(system_parts),
+                }
+            )
 
         # User message
         body_parts = []
@@ -284,22 +290,24 @@ class YAMLRunner(BaseRunner):
             body_parts.append(str(input_data))
 
         if body_parts:
-            messages.append({
-                "role": "user",
-                "content": "\n\n".join(body_parts),
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "\n\n".join(body_parts),
+                }
+            )
 
         if not messages:
-            messages.append({
-                "role": "user",
-                "content": "Hello",
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "Hello",
+                }
+            )
 
         return messages
 
-    def _build_kwargs(
-        self, agent_data: AgentData, config: Dict[str, Any]
-    ) -> dict:
+    def _build_kwargs(self, agent_data: AgentData, config: Dict[str, Any]) -> dict:
         """Build LLM call kwargs."""
         kwargs = {}
 

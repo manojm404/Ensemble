@@ -8,7 +8,7 @@ checking before each call and maintains a complete call stack for
 auditing.
 
 Usage:
-    from core.security.recursion_guard import RecursionGuard
+    from backend.ensemble.security.recursion_guard import RecursionGuard
 
     guard = RecursionGuard(max_depth=3)
 
@@ -28,10 +28,9 @@ Usage:
     print(stack)
 """
 
+import contextvars
 import logging
 import threading
-import time
-import contextvars
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -42,22 +41,25 @@ logger = logging.getLogger(__name__)
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class RecursionError(Exception):
     """Raised when max recursion depth is exceeded or budget is insufficient."""
-    pass
+
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_MAX_DEPTH = 10 # Increased from 3 to 10 for complex workflows
+DEFAULT_MAX_DEPTH = 10  # Increased from 3 to 10 for complex workflows
 DEFAULT_BUDGET_THRESHOLD = 0.0  # Minimum budget to proceed (dollars)
 
 # ---------------------------------------------------------------------------
 # Context Variable for Call Stack
 # ---------------------------------------------------------------------------
 
-_call_stack: contextvars.ContextVar[Optional[List['CallFrame']]] = contextvars.ContextVar("call_stack", default=None)
+_call_stack: contextvars.ContextVar[Optional[List["CallFrame"]]] = (
+    contextvars.ContextVar("call_stack", default=None)
+)
 
 # ---------------------------------------------------------------------------
 # Data models
@@ -109,6 +111,7 @@ class CallStackSnapshot:
 # ---------------------------------------------------------------------------
 # RecursionGuard
 # ---------------------------------------------------------------------------
+
 
 class RecursionGuard:
     """Thread-safe guard enforcing max recursion depth and budget checks.
@@ -233,7 +236,7 @@ class RecursionGuard:
             estimated_cost=estimated_cost,
             metadata=metadata or {},
         )
-        
+
         # Use a copy to avoid affecting parent contexts
         new_stack = stack.copy()
         new_stack.append(frame)
@@ -276,7 +279,7 @@ class RecursionGuard:
         new_stack = stack.copy()
         frame = new_stack.pop()
         _call_stack.set(new_stack)
-        
+
         duration = self._frame_duration(frame)
 
         logger.debug(

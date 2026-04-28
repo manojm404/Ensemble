@@ -72,7 +72,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 ## Step 4: Start the Backend
 
 ```bash
-uvicorn core.governance:app --host 0.0.0.0 --port 8088 --reload
+uvicorn backend.ensemble.api.governance:app --host 0.0.0.0 --port 8088 --reload
 ```
 
 Verify it's running:

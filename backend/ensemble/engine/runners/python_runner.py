@@ -5,22 +5,21 @@ Runner for Python-format agents.
 Executes Python agent classes in a controlled environment with
 AST security guards, dependency management, and sandboxed execution.
 """
-import os
-import sys
-import ast
-import time
-import json
-import logging
-import importlib
-import tempfile
-import subprocess
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
-from contextlib import contextmanager
-from dataclasses import dataclass
 
-from core.parsers.agent_data import AgentData, AgentFormat
-from core.runners.base_runner import BaseRunner, RunnerResult
+import ast
+import importlib
+import logging
+import os
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, Dict, Optional, Set
+
+from backend.ensemble.parsers.agent_data import AgentData, AgentFormat
+
+from .base_runner import BaseRunner, RunnerResult
 
 logger = logging.getLogger(__name__)
 
@@ -30,39 +29,74 @@ DANGEROUS_NODES = set()
 _exec_node = getattr(ast, "Exec", None)
 if _exec_node is not None:
     DANGEROUS_NODES.add(_exec_node)
-DANGEROUS_NODES.update({
-    ast.Import,  # Imports are handled separately with allowlist
-    ast.ImportFrom,
-})
+DANGEROUS_NODES.update(
+    {
+        ast.Import,  # Imports are handled separately with allowlist
+        ast.ImportFrom,
+    }
+)
 
 # Allowed import modules (security allowlist)
 ALLOWED_IMPORTS = {
-    "os", "sys", "re", "json", "math", "datetime", "time",
-    "typing", "collections", "itertools", "functools",
-    "pathlib", "io", "string", "textwrap",
-    "logging", "warnings", "traceback",
-    "dataclasses", "enum", "abc",
-    "numpy", "pandas", "requests", "httpx",
-    "yaml", "toml", "dotenv",
-    "hashlib", "hmac", "secrets",
-    "urllib", "urllib.parse", "urllib.request",
+    "os",
+    "sys",
+    "re",
+    "json",
+    "math",
+    "datetime",
+    "time",
+    "typing",
+    "collections",
+    "itertools",
+    "functools",
+    "pathlib",
+    "io",
+    "string",
+    "textwrap",
+    "logging",
+    "warnings",
+    "traceback",
+    "dataclasses",
+    "enum",
+    "abc",
+    "numpy",
+    "pandas",
+    "requests",
+    "httpx",
+    "yaml",
+    "toml",
+    "dotenv",
+    "hashlib",
+    "hmac",
+    "secrets",
+    "urllib",
+    "urllib.parse",
+    "urllib.request",
 }
 
 # Method names considered safe for execution
 SAFE_EXEC_METHODS = {
-    "run", "execute", "act", "process", "call", "invoke", "forward",
-    "respond", "generate", "answer", "handle", "perform",
+    "run",
+    "execute",
+    "act",
+    "process",
+    "call",
+    "invoke",
+    "forward",
+    "respond",
+    "generate",
+    "answer",
+    "handle",
+    "perform",
 }
 
 
 class SecurityError(Exception):
     """Raised when code fails security checks."""
-    pass
 
 
 class DependencyError(Exception):
     """Raised when required dependencies are not available."""
-    pass
 
 
 class AgentRunner:
@@ -352,8 +386,7 @@ class PythonRunner(BaseRunner):
 
         if disallowed:
             self.logger.warning(
-                f"Agent {agent_name} uses imports not in allowlist: "
-                f"{disallowed}"
+                f"Agent {agent_name} uses imports not in allowlist: " f"{disallowed}"
             )
             # Warning only, don't block execution
             # This allows flexibility while logging for audit
@@ -419,9 +452,14 @@ class PythonRunner(BaseRunner):
 
             result = subprocess.run(
                 [
-                    sys.executable, "-m", "pip", "install",
-                    "-r", str(requirements_path),
-                    "--quiet", "--no-warn-script-location",
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "-r",
+                    str(requirements_path),
+                    "--quiet",
+                    "--no-warn-script-location",
                 ],
                 capture_output=True,
                 text=True,

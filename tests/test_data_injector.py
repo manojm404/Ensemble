@@ -9,7 +9,7 @@ Tests:
 import pytest
 import json
 from unittest.mock import MagicMock, patch
-from core.dag_engine import DAGWorkflowEngine
+from backend.ensemble.engine.dag_engine import DAGWorkflowEngine
 
 
 class TestExtractJsonPath:

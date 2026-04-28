@@ -1,7 +1,13 @@
+"""
+Module: python_interpreter.py
+Description: Part of the Ensemble backend system.
+"""
+
+import os
 import subprocess
 import sys
 import tempfile
-import os
+
 
 def python_interpreter(code: str) -> str:
     """
@@ -11,16 +17,13 @@ def python_interpreter(code: str) -> str:
     Returns:
         str: The output of the code execution.
     """
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(code)
         temp_path = f.name
 
     try:
         result = subprocess.run(
-            [sys.executable, temp_path],
-            capture_output=True,
-            text=True,
-            timeout=30
+            [sys.executable, temp_path], capture_output=True, text=True, timeout=30
         )
         output = result.stdout
         if result.stderr:
@@ -33,6 +36,7 @@ def python_interpreter(code: str) -> str:
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
 
 if __name__ == "__main__":
     # Test

@@ -12,7 +12,7 @@ All sizes are tracked in bytes. The quota manager can be integrated with
 the EnsembleSpace CAS backend or any filesystem-based storage.
 
 Usage:
-    from core.security.storage_quota import QuotaManager, UserTier
+    from backend.ensemble.security.storage_quota import QuotaManager, UserTier
 
     mgr = QuotaManager()
     mgr.register_user("user_1", tier=UserTier.FREE)
@@ -34,10 +34,8 @@ Usage:
 """
 
 import logging
-import os
-import shutil
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -49,8 +47,8 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-GB = 1024 ** 3
-MB = 1024 ** 2
+GB = 1024**3
+MB = 1024**2
 
 # Storage quotas by tier (in bytes)
 USER_STORAGE_QUOTAS = {
@@ -67,24 +65,26 @@ AGENT_VENV_LIMITS = {
 }
 
 # Packages that are expensive to install (disk + compute cost)
-BLOCKED_PACKAGES = frozenset({
-    "tensorflow",
-    "tensorflow-gpu",
-    "tensorflow-cpu",
-    "torch",
-    "pytorch",
-    "torchvision",
-    "torchaudio",
-    "cuda-python",
-    "cupy",
-    "cupy-cuda11x",
-    "cupy-cuda12x",
-    "nvidia-cublas-cu11",
-    "nvidia-cuda-runtime-cu11",
-    "nvidia-cudnn-cu11",
-    "jax[cuda]",
-    "tensorflow-probability",
-})
+BLOCKED_PACKAGES = frozenset(
+    {
+        "tensorflow",
+        "tensorflow-gpu",
+        "tensorflow-cpu",
+        "torch",
+        "pytorch",
+        "torchvision",
+        "torchaudio",
+        "cuda-python",
+        "cupy",
+        "cupy-cuda11x",
+        "cupy-cuda12x",
+        "nvidia-cublas-cu11",
+        "nvidia-cuda-runtime-cu11",
+        "nvidia-cudnn-cu11",
+        "jax[cuda]",
+        "tensorflow-probability",
+    }
+)
 
 # Warning threshold (percentage of quota)
 WARNING_THRESHOLD = 0.80
@@ -93,6 +93,7 @@ WARNING_THRESHOLD = 0.80
 # ---------------------------------------------------------------------------
 # Enums and data models
 # ---------------------------------------------------------------------------
+
 
 class UserTier(Enum):
     """Subscription tier determining storage quota."""
@@ -185,7 +186,9 @@ class QuotaWarning:
     """A warning about approaching or exceeding a quota limit."""
 
     user_id: str
-    warning_type: str  # "storage_warning", "storage_exceeded", "venv_warning", "venv_exceeded"
+    warning_type: (
+        str  # "storage_warning", "storage_exceeded", "venv_warning", "venv_exceeded"
+    )
     current_usage: int
     quota_limit: int
     usage_percentage: float
@@ -209,6 +212,7 @@ class QuotaWarning:
 # ---------------------------------------------------------------------------
 # QuotaManager
 # ---------------------------------------------------------------------------
+
 
 class QuotaManager:
     """Manage and enforce storage quotas for users and agent environments.

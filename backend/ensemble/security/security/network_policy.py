@@ -7,7 +7,7 @@ allowing only explicitly whitelisted domains. Designed to be consumed by
 container startup scripts or applied directly on the host.
 
 Usage:
-    from core.security.network_policy import NetworkPolicy
+    from backend.ensemble.security.network_policy import NetworkPolicy
 
     policy = NetworkPolicy()
     policy.add_domain("api.openai.com")
@@ -31,7 +31,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,7 @@ class NetworkPolicySummary:
 # Resolver
 # ---------------------------------------------------------------------------
 
+
 class DomainResolver:
     """Thread-safe DNS resolver with caching.
 
@@ -143,6 +144,7 @@ class DomainResolver:
 # ---------------------------------------------------------------------------
 # NetworkPolicy
 # ---------------------------------------------------------------------------
+
 
 class NetworkPolicy:
     """Manage a whitelist of allowed outbound domains and generate iptables rules.
@@ -294,12 +296,10 @@ class NetworkPolicy:
         # 5. Allow DNS resolution (so the container can resolve domains at runtime)
         for dns_ip in self._dns_servers:
             rules.append(
-                f"iptables -A {chain_name} -p udp "
-                f"--dport 53 -d {dns_ip} -j ACCEPT"
+                f"iptables -A {chain_name} -p udp " f"--dport 53 -d {dns_ip} -j ACCEPT"
             )
             rules.append(
-                f"iptables -A {chain_name} -p tcp "
-                f"--dport 53 -d {dns_ip} -j ACCEPT"
+                f"iptables -A {chain_name} -p tcp " f"--dport 53 -d {dns_ip} -j ACCEPT"
             )
 
         # 6. Allow whitelisted domains
@@ -312,7 +312,9 @@ class NetworkPolicy:
                 try:
                     ipaddress.ip_address(ip)
                 except ValueError:
-                    logger.warning("Skipping invalid IP %s for domain %s", ip, entry.domain)
+                    logger.warning(
+                        "Skipping invalid IP %s for domain %s", ip, entry.domain
+                    )
                     continue
 
                 for port in entry.ports:
@@ -326,7 +328,7 @@ class NetworkPolicy:
         if self._log_blocked:
             rules.append(
                 f"iptables -A {chain_name} -j LOG "
-                f"--log-prefix \"{LOG_PREFIX}\" --log-level 4"
+                f'--log-prefix "{LOG_PREFIX}" --log-level 4'
             )
 
         # 8. Default DROP
@@ -380,7 +382,7 @@ class NetworkPolicy:
 
         if self._log_blocked:
             lines.append(
-                f"-A {chain_name} -j LOG --log-prefix \"{LOG_PREFIX}\" --log-level 4"
+                f'-A {chain_name} -j LOG --log-prefix "{LOG_PREFIX}" --log-level 4'
             )
 
         lines.append(f"-A {chain_name} -j DROP")

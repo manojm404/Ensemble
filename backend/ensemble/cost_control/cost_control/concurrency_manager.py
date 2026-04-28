@@ -9,9 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
@@ -21,6 +20,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Tier configuration
 # ---------------------------------------------------------------------------
+
 
 class Tier(str, Enum):
     FREE = "free"
@@ -36,9 +36,9 @@ class TierLimits:
 
 
 TIER_LIMITS: dict[Tier, TierLimits] = {
-    Tier.FREE:        TierLimits(max_parallel=2,  max_queue=10),
-    Tier.PRO:         TierLimits(max_parallel=10, max_queue=50),
-    Tier.ENTERPRISE:  TierLimits(max_parallel=50, max_queue=200),
+    Tier.FREE: TierLimits(max_parallel=2, max_queue=10),
+    Tier.PRO: TierLimits(max_parallel=10, max_queue=50),
+    Tier.ENTERPRISE: TierLimits(max_parallel=50, max_queue=200),
 }
 
 
@@ -46,10 +46,13 @@ TIER_LIMITS: dict[Tier, TierLimits] = {
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class ConcurrencyError(Exception):
     """Raised when concurrency limits prevent execution."""
 
-    def __init__(self, message: str, *, active_count: int = 0, queue_depth: int = 0) -> None:
+    def __init__(
+        self, message: str, *, active_count: int = 0, queue_depth: int = 0
+    ) -> None:
         super().__init__(message)
         self.active_count = active_count
         self.queue_depth = queue_depth
@@ -69,6 +72,7 @@ class ConcurrencyResult:
 # ---------------------------------------------------------------------------
 # ConcurrencyManager
 # ---------------------------------------------------------------------------
+
 
 class ConcurrencyManager:
     """Async-safe concurrency manager with per-tier limits and FIFO queuing.
@@ -105,9 +109,13 @@ class ConcurrencyManager:
         limits = TIER_LIMITS[tier]
 
         self._tier = tier
-        self._max_parallel = max_parallel if max_parallel is not None else limits.max_parallel
+        self._max_parallel = (
+            max_parallel if max_parallel is not None else limits.max_parallel
+        )
         self._max_queue = max_queue if max_queue is not None else limits.max_queue
-        self._queue_timeout = queue_timeout if queue_timeout is not None else limits.queue_timeout
+        self._queue_timeout = (
+            queue_timeout if queue_timeout is not None else limits.queue_timeout
+        )
 
         if self._max_parallel < 1:
             raise ValueError("max_parallel must be >= 1")
@@ -119,9 +127,11 @@ class ConcurrencyManager:
         self._semaphore = asyncio.Semaphore(self._max_parallel)
 
         # State
-        self._active: set[str] = set()          # agent_ids currently running
-        self._queue: asyncio.Queue[str] = asyncio.Queue()  # FIFO queue of waiting agent_ids
-        self._queued: set[str] = set()          # agent_ids currently in the queue
+        self._active: set[str] = set()  # agent_ids currently running
+        self._queue: asyncio.Queue[str] = (
+            asyncio.Queue()
+        )  # FIFO queue of waiting agent_ids
+        self._queued: set[str] = set()  # agent_ids currently in the queue
         self._queue_times: dict[str, float] = {}  # agent_id -> enqueue timestamp
 
         # Metrics

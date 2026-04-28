@@ -233,7 +233,7 @@ Ensemble/
 ```bash
 # Terminal 1 — Backend
 pip install -r requirements.txt
-uvicorn core.governance:app --reload --port 8088
+uvicorn backend.ensemble.api.governance:app --reload --port 8088
 
 # Terminal 2 — Frontend
 cd ui && npm install && npm run dev
@@ -243,7 +243,7 @@ cd ui && npm install && npm run dev
 ### Option 2: Desktop App (Production)
 ```bash
 # Terminal 1 — Backend
-uvicorn core.governance:app --reload --port 8088
+uvicorn backend.ensemble.api.governance:app --reload --port 8088
 
 # Terminal 2 — Desktop App
 cd ui && npm run tauri dev

@@ -9,21 +9,22 @@ Executes workflows defined as directed acyclic graphs (DAGs) where:
 
 Follows AGENTS.md rules: CAS commits, audit logging, budget checks, handover protocol.
 """
-import hashlib
+
+import asyncio
 import json
 import os
 import re
 import sqlite3
 import time
-import asyncio
 import uuid
 import zlib
 from enum import Enum
-from typing import Dict, Any, List, Optional, Set, Tuple
-from core.managed_agent import ManagedAgent
-from core.ensemble_space import EnsembleSpace
-from core.audit import AuditLogger
-from core.llm_provider import LLMProvider
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from backend.ensemble.security.audit import AuditLogger
+from backend.ensemble.storage.ensemble_space import EnsembleSpace
+from backend.ensemble.integrations.llm_provider import LLMProvider
+from backend.ensemble.engine.managed_agent import ManagedAgent
 
 
 class WorkflowState(Enum):
@@ -44,7 +45,9 @@ class DAGWorkflowEngine:
     5. Supports resume from failure
     """
 
-    def __init__(self, space: EnsembleSpace, audit: AuditLogger, llm: LLMProvider, gov: Any):
+    def __init__(
+        self, space: EnsembleSpace, audit: AuditLogger, llm: LLMProvider, gov: Any
+    ):
         self.space = space
         self.audit = audit
         self.llm = llm
@@ -67,19 +70,29 @@ class DAGWorkflowEngine:
         """Load skill instruction from skill registry using role_id."""
         import os
         import re
-        
+
         # First try to find matching skill in the registry
         try:
-            all_skills = self.gov.skill_registry.list_skills() if hasattr(self.gov, 'skill_registry') else []
+            all_skills = (
+                self.gov.skill_registry.list_skills()
+                if hasattr(self.gov, "skill_registry")
+                else []
+            )
             for skill in all_skills:
                 skill_id = skill.get("id", "")
                 skill_name = skill.get("name", "").lower()
                 role_lower = role_id.lower()
-                
+
                 # Match by ID or name
-                if skill_id == role_id or skill_id in role_lower or role_lower in skill_id:
+                if (
+                    skill_id == role_id
+                    or skill_id in role_lower
+                    or role_lower in skill_id
+                ):
                     # Found matching skill, load its file
-                    skills_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
+                    skills_dir = os.path.join(
+                        os.path.dirname(os.path.dirname(__file__)), "skills"
+                    )
                     # Find the file for this skill
                     for fname in os.listdir(skills_dir):
                         if fname.endswith(".md"):
@@ -87,48 +100,58 @@ class DAGWorkflowEngine:
                             with open(file_path, "r", encoding="utf-8") as f:
                                 content = f.read()
                             # Check if this file's frontmatter name matches
-                            fm_match = re.match(r'^---\s*\nname:\s*(.+)', content)
-                            if fm_match and fm_match.group(1).strip().lower() in role_lower:
+                            fm_match = re.match(r"^---\s*\nname:\s*(.+)", content)
+                            if (
+                                fm_match
+                                and fm_match.group(1).strip().lower() in role_lower
+                            ):
                                 # Extract body after frontmatter
-                                body_match = re.match(r'^---\s*\n.*?\n---\s*\n(.*)$', content, re.DOTALL)
+                                body_match = re.match(
+                                    r"^---\s*\n.*?\n---\s*\n(.*)$", content, re.DOTALL
+                                )
                                 if body_match:
                                     return body_match.group(1).strip()
                                 return content
         except Exception as e:
             print(f"⚠️ [DAG Engine] Skill registry lookup failed: {e}", flush=True)
-        
+
         # Fallback: try to load directly from skills/ directory by filename
         skills_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
         if not os.path.exists(skills_dir):
             return ""
-        
+
         # Try exact filename match
         skill_file = os.path.join(skills_dir, f"{role_id}.md")
         if os.path.exists(skill_file):
             try:
                 with open(skill_file, "r", encoding="utf-8") as f:
                     content = f.read()
-                body_match = re.match(r'^---\s*\n.*?\n---\s*\n(.*)$', content, re.DOTALL)
+                body_match = re.match(
+                    r"^---\s*\n.*?\n---\s*\n(.*)$", content, re.DOTALL
+                )
                 if body_match:
                     return body_match.group(1).strip()
                 return content
             except Exception as e:
                 print(f"⚠️ [DAG Engine] Failed to load {skill_file}: {e}", flush=True)
-        
+
         # Try partial match
         import glob
+
         matches = glob.glob(os.path.join(skills_dir, f"*{role_id}*.md"))
         if matches:
             try:
                 with open(matches[0], "r", encoding="utf-8") as f:
                     content = f.read()
-                body_match = re.match(r'^---\s*\n.*?\n---\s*\n(.*)$', content, re.DOTALL)
+                body_match = re.match(
+                    r"^---\s*\n.*?\n---\s*\n(.*)$", content, re.DOTALL
+                )
                 if body_match:
                     return body_match.group(1).strip()
                 return content
             except Exception as e:
                 print(f"⚠️ [DAG Engine] Failed to load {matches[0]}: {e}", flush=True)
-        
+
         return ""
 
     @staticmethod
@@ -143,7 +166,7 @@ class DAGWorkflowEngine:
         files = {}
 
         # Pattern to match fenced code blocks with language
-        pattern = r'```(\w+)\n(.*?)```'
+        pattern = r"```(\w+)\n(.*?)```"
         matches = re.findall(pattern, markdown, re.DOTALL)
 
         for lang, code in matches:
@@ -154,54 +177,63 @@ class DAGWorkflowEngine:
                 continue
 
             # Map language to filename
-            if lang_lower in ('html', 'htm'):
-                if 'index.html' not in files:
-                    files['index.html'] = code
-            elif lang_lower == 'css':
-                if 'style.css' not in files:
-                    files['style.css'] = code
+            if lang_lower in ("html", "htm"):
+                if "index.html" not in files:
+                    files["index.html"] = code
+            elif lang_lower == "css":
+                if "style.css" not in files:
+                    files["style.css"] = code
                 else:
-                    idx = len([f for f in files if f.endswith('.css')]) + 1
-                    files[f'style{idx}.css'] = code
-            elif lang_lower in ('js', 'javascript', 'typescript', 'ts'):
-                if 'script.js' not in files:
-                    files['script.js'] = code
+                    idx = len([f for f in files if f.endswith(".css")]) + 1
+                    files[f"style{idx}.css"] = code
+            elif lang_lower in ("js", "javascript", "typescript", "ts"):
+                if "script.js" not in files:
+                    files["script.js"] = code
                 else:
-                    idx = len([f for f in files if f.endswith('.js')]) + 1
-                    files[f'script{idx}.js'] = code
-            elif lang_lower in ('py', 'python'):
-                if 'main.py' not in files:
-                    files['main.py'] = code
+                    idx = len([f for f in files if f.endswith(".js")]) + 1
+                    files[f"script{idx}.js"] = code
+            elif lang_lower in ("py", "python"):
+                if "main.py" not in files:
+                    files["main.py"] = code
                 else:
-                    idx = len([f for f in files if f.endswith('.py')]) + 1
-                    files[f'module{idx}.py'] = code
-            elif lang_lower in ('json',):
-                if 'data.json' not in files:
-                    files['data.json'] = code
+                    idx = len([f for f in files if f.endswith(".py")]) + 1
+                    files[f"module{idx}.py"] = code
+            elif lang_lower in ("json",):
+                if "data.json" not in files:
+                    files["data.json"] = code
 
         # FALLBACK: If no fenced blocks found, try to extract raw HTML
-        if not files and ('<html' in markdown.lower() or '<!doctype' in markdown.lower()):
+        if not files and (
+            "<html" in markdown.lower() or "<!doctype" in markdown.lower()
+        ):
             # Extract complete HTML document
-            html_match = re.search(r'(<html[\s\S]*?</html>|<!DOCTYPE\s+html[\s\S]*?</html>)',
-                                   markdown, re.IGNORECASE)
+            html_match = re.search(
+                r"(<html[\s\S]*?</html>|<!DOCTYPE\s+html[\s\S]*?</html>)",
+                markdown,
+                re.IGNORECASE,
+            )
             if html_match:
                 html_content = html_match.group(1)
                 # Clean up markdown artifacts (backticks, language hints)
-                html_content = re.sub(r'```[\w]*', '', html_content).strip()
+                html_content = re.sub(r"```[\w]*", "", html_content).strip()
                 if html_content:
-                    files['index.html'] = html_content
+                    files["index.html"] = html_content
 
             # Extract CSS from <style> tags or standalone CSS blocks
-            css_blocks = re.findall(r'<style[^>]*>([\s\S]*?)</style>', markdown, re.IGNORECASE)
+            css_blocks = re.findall(
+                r"<style[^>]*>([\s\S]*?)</style>", markdown, re.IGNORECASE
+            )
             if css_blocks:
-                combined_css = '\n\n'.join(css_blocks)
-                files['style.css'] = combined_css.strip()
+                combined_css = "\n\n".join(css_blocks)
+                files["style.css"] = combined_css.strip()
 
             # Extract JS from <script> tags
-            js_blocks = re.findall(r'<script[^>]*>([\s\S]*?)</script>', markdown, re.IGNORECASE)
+            js_blocks = re.findall(
+                r"<script[^>]*>([\s\S]*?)</script>", markdown, re.IGNORECASE
+            )
             if js_blocks:
-                combined_js = '\n\n'.join(js_blocks)
-                files['script.js'] = combined_js.strip()
+                combined_js = "\n\n".join(js_blocks)
+                files["script.js"] = combined_js.strip()
 
         return files
 
@@ -242,7 +274,9 @@ class DAGWorkflowEngine:
         # In a loop-enabled DAG, we only care about cycles in the FORWARD path
         if len(order) != len(node_ids):
             # Try to identify which nodes are truly stuck vs which are loop targets
-            raise ValueError("Cycle detected in forward workflow graph — topological sort impossible")
+            raise ValueError(
+                "Cycle detected in forward workflow graph — topological sort impossible"
+            )
 
         return order
 
@@ -255,10 +289,12 @@ class DAGWorkflowEngine:
         except ValueError:
             return True
 
-    async def _expand_macros(self, nodes: List[Dict], edges: List[Dict], visited_macros: Set[str] = None) -> Tuple[List[Dict], List[Dict]]:
+    async def _expand_macros(
+        self, nodes: List[Dict], edges: List[Dict], visited_macros: Set[str] = None
+    ) -> Tuple[List[Dict], List[Dict]]:
         """
         Recursively flattens macroNode types into their sub-graphs.
-        
+
         Args:
             nodes: List of nodes in the current graph level
             edges: List of edges in the current graph level
@@ -267,7 +303,7 @@ class DAGWorkflowEngine:
         visited_macros = visited_macros or set()
         new_nodes = []
         new_edges = []
-        
+
         has_macros = any(n.get("type") == "macroNode" for n in nodes)
         if not has_macros:
             return nodes, edges
@@ -276,63 +312,78 @@ class DAGWorkflowEngine:
             if node.get("type") != "macroNode":
                 new_nodes.append(node)
                 continue
-            
+
             # --- MACRO EXPANSION ---
             macro_id = node.get("data", {}).get("macro_id")
             version = node.get("data", {}).get("version", "latest")
-            instance_uuid = f"m_{uuid.uuid4().hex[:6]}" # Recursive ID Collision Guard
-            
+            instance_uuid = f"m_{uuid.uuid4().hex[:6]}"  # Recursive ID Collision Guard
+
             if not macro_id:
-                print(f"⚠️ [DAG Engine] Macro node {node['id']} missing macro_id. Skipping expansion.", flush=True)
+                print(
+                    f"⚠️ [DAG Engine] Macro node {node['id']} missing macro_id. Skipping expansion.",
+                    flush=True,
+                )
                 new_nodes.append(node)
                 continue
-                
+
             # Circular Dependency Protection (Chaos Test)
             if macro_id in visited_macros:
-                raise ValueError(f"Circular macro dependency detected: {macro_id} is nested within itself.")
-            
+                raise ValueError(
+                    f"Circular macro dependency detected: {macro_id} is nested within itself."
+                )
+
             # Fetch sub-graph from governance
-            sub_graph = self.gov.get_macro(macro_id) # Should return {nodes, edges}
+            sub_graph = self.gov.get_macro(macro_id)  # Should return {nodes, edges}
             if not sub_graph:
-                print(f"⚠️ [DAG Engine] Macro {macro_id} not found in registry. Skipping expansion.", flush=True)
+                print(
+                    f"⚠️ [DAG Engine] Macro {macro_id} not found in registry. Skipping expansion.",
+                    flush=True,
+                )
                 new_nodes.append(node)
                 continue
-            
-            print(f"📦 [DAG Engine] Expanding macro '{macro_id}' (Instance: {instance_uuid})", flush=True)
-            
+
+            print(
+                f"📦 [DAG Engine] Expanding macro '{macro_id}' (Instance: {instance_uuid})",
+                flush=True,
+            )
+
             # Recursive expansion for nested macros
             sub_nodes, sub_edges = await self._expand_macros(
-                sub_graph.get("nodes", []), 
-                sub_graph.get("edges", []), 
-                visited_macros | {macro_id}
+                sub_graph.get("nodes", []),
+                sub_graph.get("edges", []),
+                visited_macros | {macro_id},
             )
-            
+
             # 1. Prefix sub-nodes with instance UUID to prevent collisions
             prefixed_sub_nodes = []
             for sn in sub_nodes:
-                new_sn = json.loads(json.dumps(sn)) # Deep copy
+                new_sn = json.loads(json.dumps(sn))  # Deep copy
                 new_sn["id"] = f"{instance_uuid}_{sn['id']}"
                 # Preserve data lineage in metadata for UI clustering
                 new_sn["data"] = {
-                    **new_sn.get("data", {}), 
-                    "macro_instance_id": instance_uuid, 
-                    "parent_macro_id": macro_id
+                    **new_sn.get("data", {}),
+                    "macro_instance_id": instance_uuid,
+                    "parent_macro_id": macro_id,
                 }
                 prefixed_sub_nodes.append(new_sn)
-            
+
             # 2. Map entrance and exit nodes of the sub-graph
             # Entrance = no incoming edges within sub-graph
             sub_node_ids = {sn["id"] for sn in prefixed_sub_nodes}
             sub_targets = {f"{instance_uuid}_{e['target']}" for e in sub_edges}
-            entrance_nodes = [sn["id"] for sn in prefixed_sub_nodes if sn["id"] not in sub_targets]
-            
+            entrance_nodes = [
+                sn["id"] for sn in prefixed_sub_nodes if sn["id"] not in sub_targets
+            ]
+
             # Exit = no outgoing edges within sub-graph
             sub_sources = {f"{instance_uuid}_{e['source']}" for e in sub_edges}
-            exit_nodes = [sn["id"] for sn in prefixed_sub_nodes if sn["id"] not in sub_sources]
-            
+            exit_nodes = [
+                sn["id"] for sn in prefixed_sub_nodes if sn["id"] not in sub_sources
+            ]
+
             # 3. Add prefixed sub-nodes to current batch
             new_nodes.extend(prefixed_sub_nodes)
-            
+
             # 4. Add prefixed sub-edges
             for se in sub_edges:
                 new_se = json.loads(json.dumps(se))
@@ -340,33 +391,37 @@ class DAGWorkflowEngine:
                 new_se["source"] = f"{instance_uuid}_{se['source']}"
                 new_se["target"] = f"{instance_uuid}_{se['target']}"
                 new_edges.append(new_se)
-            
+
             # 5. Rewire host edges that were connected to the macroNode
             # Incoming to MacroNode -> Entrance Nodes of Sub-Graph
             for h_edge in edges:
                 if h_edge["target"] == node["id"]:
                     for ent_id in entrance_nodes:
-                        new_edges.append({
-                            **h_edge,
-                            "id": f"edge_{h_edge['id']}_{ent_id}",
-                            "target": ent_id
-                        })
-                
+                        new_edges.append(
+                            {
+                                **h_edge,
+                                "id": f"edge_{h_edge['id']}_{ent_id}",
+                                "target": ent_id,
+                            }
+                        )
+
                 # Outgoing from MacroNode -> Children of the Host Graph
                 if h_edge["source"] == node["id"]:
                     for ext_id in exit_nodes:
-                        new_edges.append({
-                            **h_edge,
-                            "id": f"edge_{ext_id}_{h_edge['id']}",
-                            "source": ext_id
-                        })
+                        new_edges.append(
+                            {
+                                **h_edge,
+                                "id": f"edge_{ext_id}_{h_edge['id']}",
+                                "source": ext_id,
+                            }
+                        )
 
         # Add remaining host edges that are not connected to macroNodes
         macro_ids = {n["id"] for n in nodes if n.get("type") == "macroNode"}
         for h_edge in edges:
             if h_edge["source"] not in macro_ids and h_edge["target"] not in macro_ids:
                 new_edges.append(h_edge)
-                
+
         return new_nodes, new_edges
 
     async def execute_workflow(
@@ -393,7 +448,10 @@ class DAGWorkflowEngine:
         # --- V3 MACRO EXPANSION ---
         try:
             nodes, edges = await self._expand_macros(nodes, edges)
-            print(f"📉 [DAG Engine] Flattened DAG: {len(nodes)} nodes, {len(edges)} edges", flush=True)
+            print(
+                f"📉 [DAG Engine] Flattened DAG: {len(nodes)} nodes, {len(edges)} edges",
+                flush=True,
+            )
         except ValueError as e:
             raise ValueError(f"Macro Expansion Failed: {str(e)}")
 
@@ -403,16 +461,28 @@ class DAGWorkflowEngine:
 
         # Acquire lock
         if not self._acquire_lock(workflow_id):
-            raise RuntimeError(f"Workflow {workflow_id} is already running (mutex lock)")
+            raise RuntimeError(
+                f"Workflow {workflow_id} is already running (mutex lock)"
+            )
 
         run_id = run_id or f"run_{int(time.time())}"
 
         try:
             # 📝 HOTFIX: Ensure initial_input is recorded in CAS for all nodes to see
             if initial_input:
-                self.space.write(initial_input.encode(), "user_initial_input", "start", self.company_id)
-                self.audit.log(self.company_id, "human_user", "USER_INPUT", {"text": initial_input})
-                print(f"📥 [DAG Engine] Recorded user task: {initial_input[:50]}...", flush=True)
+                self.space.write(
+                    initial_input.encode(),
+                    "user_initial_input",
+                    "start",
+                    self.company_id,
+                )
+                self.audit.log(
+                    self.company_id, "human_user", "USER_INPUT", {"text": initial_input}
+                )
+                print(
+                    f"📥 [DAG Engine] Recorded user task: {initial_input[:50]}...",
+                    flush=True,
+                )
 
             # Always initialize the run record
             self._init_run(workflow_id, run_id, nodes)
@@ -421,22 +491,33 @@ class DAGWorkflowEngine:
             node_map = {n["id"]: n for n in nodes}
             completed_nodes: Set[str] = set()
             pruned_nodes: Set[str] = set()
-            
+
             # Loop Management (Phase I)
-            loop_iterations: Dict[str, int] = {} # target_node_id -> current_iteration
-            
-            print(f"🔀 [DAG Engine] Starting Dynamic Execution (V3 Protocol) with Loop Support", flush=True)
+            loop_iterations: Dict[str, int] = {}  # target_node_id -> current_iteration
+
+            print(
+                f"🔀 [DAG Engine] Starting Dynamic Execution (V3 Protocol) with Loop Support",
+                flush=True,
+            )
 
             while len(completed_nodes | pruned_nodes) < len(nodes):
                 # 1. Identify nodes that are "Ready" (all parents are completed or pruned)
-                ready_ids = self._get_ready_nodes(nodes, edges, completed_nodes, pruned_nodes)
-                
+                ready_ids = self._get_ready_nodes(
+                    nodes, edges, completed_nodes, pruned_nodes
+                )
+
                 if not ready_ids:
-                    print(f"🏁 [DAG Engine] Execution halted. Total: {len(nodes)}, Done: {len(completed_nodes)}, Pruned: {len(pruned_nodes)}", flush=True)
+                    print(
+                        f"🏁 [DAG Engine] Execution halted. Total: {len(nodes)}, Done: {len(completed_nodes)}, Pruned: {len(pruned_nodes)}",
+                        flush=True,
+                    )
                     break
-                
-                print(f"🚀 [DAG Engine] Batch: Executing {len(ready_ids)} nodes in parallel", flush=True)
-                
+
+                print(
+                    f"🚀 [DAG Engine] Batch: Executing {len(ready_ids)} nodes in parallel",
+                    flush=True,
+                )
+
                 # 2. Execute all ready nodes concurrently
                 tasks = [
                     self._execute_node(
@@ -451,75 +532,110 @@ class DAGWorkflowEngine:
                     )
                     for nid in ready_ids
                 ]
-                
+
                 results = await asyncio.gather(*tasks)
-                
+
                 # 3. Process results and handle branching/looping
                 for nid, (success, branch_info) in zip(ready_ids, results):
                     if success:
                         completed_nodes.add(nid)
-                        
+
                         # --- PHASE III: SENTINEL CHECK ---
                         # Read the latest response to check for deadlock
                         artifact_name = f"{nid}_output"
                         if self.space.exists(artifact_name):
                             resp = self.space.read(artifact_name).decode("utf-8")
                             if self._check_stuck_loop(nid, resp):
-                                print(f"🛑 [DAG Engine] Critical Deadlock at {nid}. Forcing early exit to help high-stakes decision.", flush=True)
+                                print(
+                                    f"🛑 [DAG Engine] Critical Deadlock at {nid}. Forcing early exit to help high-stakes decision.",
+                                    flush=True,
+                                )
                                 # Force early exit by pruning all loop edges for this node
-                                continue 
-                        
+                                continue
+
                         # --- PHASE I: LOOP DETECTION ---
-                        loop_edges = [e for e in edges if e["source"] == nid and e.get("data", {}).get("isLoopBack", False)]
-                        
+                        loop_edges = [
+                            e
+                            for e in edges
+                            if e["source"] == nid
+                            and e.get("data", {}).get("isLoopBack", False)
+                        ]
+
                         for le in loop_edges:
                             target_id = le["target"]
                             loop_config = le.get("data", {})
                             max_iters = int(loop_config.get("maxIterations", 1))
-                            
+
                             current_iter = loop_iterations.get(target_id, 0)
-                            
+
                             if current_iter < max_iters:
                                 new_iter = current_iter + 1
                                 loop_iterations[target_id] = new_iter
-                                print(f"🔄 [DAG Engine] Loop detected: {nid} -> {target_id}. Iteration {new_iter}/{max_iters}", flush=True)
-                                
+                                print(
+                                    f"🔄 [DAG Engine] Loop detected: {nid} -> {target_id}. Iteration {new_iter}/{max_iters}",
+                                    flush=True,
+                                )
+
                                 # RELAX THE DAG
-                                nodes_to_reset = self._get_descendants(target_id, edges) | {target_id}
+                                nodes_to_reset = self._get_descendants(
+                                    target_id, edges
+                                ) | {target_id}
                                 for r_node in nodes_to_reset:
                                     if r_node in completed_nodes:
                                         completed_nodes.remove(r_node)
-                                
-                                self._update_loop_stats(run_id, target_id, new_iter, max_iters)
+
+                                self._update_loop_stats(
+                                    run_id, target_id, new_iter, max_iters
+                                )
                     else:
                         # --- PHASE II: RESILIENCE (RETRY) ---
                         # We allow a simple retry before failing the branch
-                        retry_count = 0 # In Phase III we'd track this in DB
-                        print(f"⚠️ [DAG Engine] Node {nid} failed. Resilience check...", flush=True)
+                        retry_count = 0  # In Phase III we'd track this in DB
+                        print(
+                            f"⚠️ [DAG Engine] Node {nid} failed. Resilience check...",
+                            flush=True,
+                        )
                         # For now, we still halt to avoid infinite cycles on error
                         print(f"❌ [DAG Engine] Branch stalled at {nid}.", flush=True)
                         if branch_info and branch_info.get("type") == "switch":
                             # Prune non-selected branches
-                            self._prune_branches(branch_info["prune_targets"], edges, pruned_nodes)
-                    else:
-                        print(f"❌ [DAG Engine] Node {nid} failed. Halting workflow.", flush=True)
-                        self._update_run_status(run_id, WorkflowState.FAILED.value)
-                        
-                        # PERSISTENT NOTIFICATION for Failure
-                        self.audit.notify(
-                            user_id="dev_user",
-                            company_id=self.company_id,
-                            title="❌ Workflow Failed",
-                            preview=f"Workflow {workflow_id} failed at node {nid}.",
-                            content=f"An error occurred during the execution of node {nid} in run {run_id}. The workflow has been halted.",
-                            category="error"
-                        )
-                        return {"status": "failed", "run_id": run_id, "failed_node": nid}
+                            self._prune_branches(
+                                branch_info["prune_targets"], edges, pruned_nodes
+                            )
+                        else:
+                            print(
+                                f"❌ [DAG Engine] Node {nid} failed. Halting workflow.",
+                                flush=True,
+                            )
+                            self._update_run_status(run_id, WorkflowState.FAILED.value)
+
+                            # PERSISTENT NOTIFICATION for Failure
+                            self.audit.notify(
+                                user_id="dev_user",
+                                company_id=self.company_id,
+                                title="❌ Workflow Failed",
+                                preview=f"Workflow {workflow_id} failed at node {nid}.",
+                                content=f"An error occurred during the execution of node {nid} in run {run_id}. The workflow has been halted.",
+                                category="error",
+                            )
+                            return {
+                                "status": "failed",
+                                "run_id": run_id,
+                                "failed_node": nid,
+                            }
+                        return {
+                            "status": "failed",
+                            "run_id": run_id,
+                            "failed_node": nid,
+                        }
 
             # All required nodes completed
             self._update_run_status(run_id, WorkflowState.COMPLETED.value)
-            print(f"✅ [DAG Engine] Workflow {workflow_id} completed successfully", flush=True)
-            
+            print(
+                f"✅ [DAG Engine] Workflow {workflow_id} completed successfully",
+                flush=True,
+            )
+
             # PERSISTENT NOTIFICATION for Completion
             self.audit.notify(
                 user_id="dev_user",
@@ -527,21 +643,27 @@ class DAGWorkflowEngine:
                 title="🏁 Workflow Completed",
                 preview=f"Custom DAG {workflow_id} finished.",
                 content=f"Your Sovereign workflow {workflow_id} (Run: {run_id}) has finished all required states.",
-                category="success"
+                category="success",
             )
             return {"status": "completed", "run_id": run_id}
 
         finally:
             self._release_lock(workflow_id)
 
-    def _get_ready_nodes(self, nodes: List[Dict], edges: List[Dict], completed_nodes: Set[str], pruned_nodes: Set[str]) -> List[str]:
+    def _get_ready_nodes(
+        self,
+        nodes: List[Dict],
+        edges: List[Dict],
+        completed_nodes: Set[str],
+        pruned_nodes: Set[str],
+    ) -> List[str]:
         """Nodes where all predecessors are in (completed | pruned) and node itself is not in either."""
         ready = []
         for node in nodes:
             nid = node["id"]
             if nid in completed_nodes or nid in pruned_nodes:
                 continue
-            
+
             predecessors = [e["source"] for e in edges if e["target"] == nid]
             if not predecessors:
                 ready.append(nid)
@@ -553,7 +675,9 @@ class DAGWorkflowEngine:
                 ready.append(nid)
         return ready
 
-    def _prune_branches(self, targets: List[str], edges: List[Dict], pruned_nodes: Set[str]):
+    def _prune_branches(
+        self, targets: List[str], edges: List[Dict], pruned_nodes: Set[str]
+    ):
         """Recursively mark branches as pruned."""
         to_prune = list(targets)
         while to_prune:
@@ -591,39 +715,56 @@ class DAGWorkflowEngine:
             if instruction:
                 print(f"📋 [DAG Engine] Loaded skill prompt for {role}", flush=True)
         else:
-            print(f"🎯 [DAG Engine] Using node instruction for role='{role}', instruction length={len(instruction)}, is_custom={node_data.get('is_custom', False)}", flush=True)
+            print(
+                f"🎯 [DAG Engine] Using node instruction for role='{role}', instruction length={len(instruction)}, is_custom={node_data.get('is_custom', False)}",
+                flush=True,
+            )
 
         # GLOBAL PANIC CHECK
         if self.gov.is_panic:
-            print(f"🛑 [DAG Engine] Node {node_id} ABORTED due to PANIC signal.", flush=True)
+            print(
+                f"🛑 [DAG Engine] Node {node_id} ABORTED due to PANIC signal.",
+                flush=True,
+            )
             self._update_node_status(run_id, node_id, "failed")
             return False, None
 
-        print(f"⚙️ [DAG Engine] Executing node '{node_id}' (type: {node_type}, role: {role})", flush=True)
+        print(
+            f"⚙️ [DAG Engine] Executing node '{node_id}' (type: {node_type}, role: {role})",
+            flush=True,
+        )
 
         # Update node status to RUNNING
         self._update_node_status(run_id, node_id, "running")
 
         # --- CASE 1: APPROVAL NODE ---
         if node_type == "approvalNode":
-            print(f"⚖️ [DAG Engine] Node {node_id} is an APPROVAL GATE. Pausing...", flush=True)
+            print(
+                f"⚖️ [DAG Engine] Node {node_id} is an APPROVAL GATE. Pausing...",
+                flush=True,
+            )
             self._update_node_status(run_id, node_id, "paused_approval")
-            
+
             # Request human approval via governance
             details = {"workflow_id": workflow_id, "run_id": run_id, "node_id": node_id}
             approved = await self.gov.request_human_approval(
                 agent_id=f"approval_{node_id}",
                 action="DAG_EXECUTION_STEP",
                 details=details,
-                reason=node_data.get("label", "Manual checkpoint required")
+                reason=node_data.get("label", "Manual checkpoint required"),
             )
-            
+
             if approved:
-                print(f"✅ [DAG Engine] Node {node_id} APPROVED. Continuing.", flush=True)
+                print(
+                    f"✅ [DAG Engine] Node {node_id} APPROVED. Continuing.", flush=True
+                )
                 self._update_node_status(run_id, node_id, "completed")
                 return True, None
             else:
-                print(f"❌ [DAG Engine] Node {node_id} DENIED or PANIC. Halting.", flush=True)
+                print(
+                    f"❌ [DAG Engine] Node {node_id} DENIED or PANIC. Halting.",
+                    flush=True,
+                )
                 self._update_node_status(run_id, node_id, "failed")
                 return False, None
 
@@ -636,13 +777,34 @@ class DAGWorkflowEngine:
             return False, None
 
         # 2. Assemble input context
-        context = self._assemble_node_context(run_id, node_id, node_map, edges, initial_input)
+        context = self._assemble_node_context(
+            run_id, node_id, node_map, edges, initial_input
+        )
 
         # 3. Create and run agent
         agent_id = f"{role.lower().replace(' ', '_')}_{node_id}_{int(time.time())}"
 
         # Detect coding tasks (need longer timeout and special handling)
-        coding_keywords = ['html', 'css', 'javascript', 'code', 'develop', 'frontend', 'coder', 'developer', 'implement', 'write code', 'create the', 'html formatter', 'format html', 'build the page', 'web developer', 'html dashboard', 'chart', 'dashboard']
+        coding_keywords = [
+            "html",
+            "css",
+            "javascript",
+            "code",
+            "develop",
+            "frontend",
+            "coder",
+            "developer",
+            "implement",
+            "write code",
+            "create the",
+            "html formatter",
+            "format html",
+            "build the page",
+            "web developer",
+            "html dashboard",
+            "chart",
+            "dashboard",
+        ]
         is_coding_task = any(kw in instruction.lower() for kw in coding_keywords)
 
         enhanced_instruction = instruction
@@ -665,19 +827,29 @@ class DAGWorkflowEngine:
         )
 
         if is_coding_task:
-            enhanced_instruction = instruction + role_isolation + strict_format + (
-                "\n\nIMPORTANT: You MUST output ALL code files inside fenced code blocks. "
-                "For each file, use:\n"
-                "```html\n...full HTML code...\n```\n"
-                "```css\n...full CSS code...\n```\n"
-                "```js\n...full JavaScript code...\n```\n"
-                "Do NOT describe code in prose. Output complete, working files. "
-                "Each file must be in its own fenced code block with the language specified."
+            enhanced_instruction = (
+                instruction
+                + role_isolation
+                + strict_format
+                + (
+                    "\n\nIMPORTANT: You MUST output ALL code files inside fenced code blocks. "
+                    "For each file, use:\n"
+                    "```html\n...full HTML code...\n```\n"
+                    "```css\n...full CSS code...\n```\n"
+                    "```js\n...full JavaScript code...\n```\n"
+                    "Do NOT describe code in prose. Output complete, working files. "
+                    "Each file must be in its own fenced code block with the language specified."
+                )
             )
         else:
             # Non-coding agents: enforce strict output format
-            enhanced_instruction = instruction + role_isolation + strict_format + (
-                "\n\nIf your role requires structured data output, use JSON format with no surrounding text."
+            enhanced_instruction = (
+                instruction
+                + role_isolation
+                + strict_format
+                + (
+                    "\n\nIf your role requires structured data output, use JSON format with no surrounding text."
+                )
             )
 
         # Extract tools from node definition
@@ -705,15 +877,18 @@ class DAGWorkflowEngine:
 
         try:
             # Check panic again right before LLM call
-            if self.gov.is_panic: return False, None
+            if self.gov.is_panic:
+                return False, None
 
             # 📝 CRITICAL FIX: Ensure user's project goal is the PRIMARY instruction
             user_task = ""
             if self.space.exists("user_initial_input"):
-                user_task = self.space.read("user_initial_input").decode("utf-8", errors="ignore")
-            
+                user_task = self.space.read("user_initial_input").decode(
+                    "utf-8", errors="ignore"
+                )
+
             final_prompt = f"### YOUR ACCURATE TASK:\n{user_task}\n\n### ROLE INSTRUCTIONS:\n{enhanced_instruction}\n\n### FULL CONTEXT:\n{context}"
-            
+
             response = await agent.run(final_prompt)
 
             if "Execution aborted" in response or "Budget exhausted" in response:
@@ -722,12 +897,19 @@ class DAGWorkflowEngine:
                 return False, None
 
             # 4. Commit output artifact to CAS
-            artifact_hash = self.space.write(response.encode(), f"{node_id}_output", node_id, self.company_id)
-            print(f"📦 [DAG Engine] Artifact committed: {artifact_hash[:16]}...", flush=True)
+            artifact_hash = self.space.write(
+                response.encode(), f"{node_id}_output", node_id, self.company_id
+            )
+            print(
+                f"📦 [DAG Engine] Artifact committed: {artifact_hash[:16]}...",
+                flush=True,
+            )
 
             # 5. Generate handover summary (AGENTS.md compliance)
             handover = self._generate_handover_summary(node_id, role, response)
-            self.space.write(handover.encode(), f"{node_id}_handover", node_id, self.company_id)
+            self.space.write(
+                handover.encode(), f"{node_id}_handover", node_id, self.company_id
+            )
 
             # 6. Create snapshot for Time Machine
             self._create_snapshot(run_id, node_id, artifact_hash, "completed")
@@ -737,7 +919,12 @@ class DAGWorkflowEngine:
                 self.company_id,
                 agent_id,
                 "RESULT",
-                {"result": response, "agent_id": agent_id, "node_id": node_id, "artifact_hash": artifact_hash},
+                {
+                    "result": response,
+                    "agent_id": agent_id,
+                    "node_id": node_id,
+                    "artifact_hash": artifact_hash,
+                },
                 broadcast=True,
             )
 
@@ -747,14 +934,24 @@ class DAGWorkflowEngine:
             # 9. Auto-detect and extract code blocks into proper files
             extracted_files = self._extract_code_blocks(response)
             if extracted_files:
-                print(f"📁 [DAG Engine] Extracted {len(extracted_files)} files from node {node_id}", flush=True)
+                print(
+                    f"📁 [DAG Engine] Extracted {len(extracted_files)} files from node {node_id}",
+                    flush=True,
+                )
                 for filename, content in extracted_files.items():
-                    self.space.write(content.encode(), f"{node_id}_{filename}", node_id, self.company_id)
+                    self.space.write(
+                        content.encode(),
+                        f"{node_id}_{filename}",
+                        node_id,
+                        self.company_id,
+                    )
                     print(f"  📄 Saved: {filename}", flush=True)
 
             # Also save to physical workspace for preview
             if extracted_files:
-                workspace_dir = os.path.join("data", "workspace", f"workflow_{workflow_id}", node_id)
+                workspace_dir = os.path.join(
+                    "data", "workspace", f"workflow_{workflow_id}", node_id
+                )
                 os.makedirs(workspace_dir, exist_ok=True)
                 for filename, content in extracted_files.items():
                     file_path = os.path.join(workspace_dir, filename)
@@ -763,8 +960,13 @@ class DAGWorkflowEngine:
                     print(f"  💾 Physical file saved: {file_path}", flush=True)
 
             # 10. Legacy HTML detection (for backward compatibility)
-            if not extracted_files and ("<!DOCTYPE html>" in response or "<html>" in response.lower()):
-                print(f"🌐 [DAG Engine] Web deliverable detected for node {node_id}. Auto-saving index.html", flush=True)
+            if not extracted_files and (
+                "<!DOCTYPE html>" in response or "<html>" in response.lower()
+            ):
+                print(
+                    f"🌐 [DAG Engine] Web deliverable detected for node {node_id}. Auto-saving index.html",
+                    flush=True,
+                )
                 # Extract HTML content if it's wrapped in markdown blocks
                 html_content = response
                 if "```html" in response:
@@ -773,12 +975,17 @@ class DAGWorkflowEngine:
                     html_content = response.split("```")[1].split("```")[0].strip()
 
                 # Save to workflow-specific directory for the UI to pick up
-                wf_workspace = os.path.join("data", "workspace", f"workflow_{workflow_id}")
+                wf_workspace = os.path.join(
+                    "data", "workspace", f"workflow_{workflow_id}"
+                )
                 os.makedirs(wf_workspace, exist_ok=True)
                 preview_path = os.path.join(wf_workspace, "preview.html")
                 with open(preview_path, "w", encoding="utf-8") as f:
                     f.write(html_content)
-                print(f"🌐 [DAG Engine] Web deliverable saved to {preview_path}", flush=True)
+                print(
+                    f"🌐 [DAG Engine] Web deliverable saved to {preview_path}",
+                    flush=True,
+                )
 
             # Update node status
             self._update_node_status(run_id, node_id, "completed")
@@ -787,11 +994,17 @@ class DAGWorkflowEngine:
             # --- V3 SWITCH LOGIC ---
             if node_type == "switchNode":
                 import re
+
                 condition = node_data.get("condition", "")
-                print(f"🔀 [DAG Engine] Switch Node '{node_id}' logic check: '{condition}'", flush=True)
-                
+                print(
+                    f"🔀 [DAG Engine] Switch Node '{node_id}' logic check: '{condition}'",
+                    flush=True,
+                )
+
                 # Simple regex branching: "If output contains 'X' -> case1"
-                match = re.search(r"contains ['\"](.+)['\"]\s*->\s*([\w.-]+)", condition)
+                match = re.search(
+                    r"contains ['\"](.+)['\"]\s*->\s*([\w.-]+)", condition
+                )
                 prune_targets = []
                 if match:
                     pattern, selected_handle = match.groups()
@@ -805,9 +1018,11 @@ class DAGWorkflowEngine:
                         # Fallback: prune case handles, keep default (unlabeled)
                         all_edges = [e for e in edges if e["source"] == node_id]
                         for e in all_edges:
-                            if e.get("sourceHandle"): # If it has a case label, prune it
+                            if e.get(
+                                "sourceHandle"
+                            ):  # If it has a case label, prune it
                                 prune_targets.append(e["target"])
-                
+
                 return True, {"type": "switch", "prune_targets": prune_targets}
 
             return True, None
@@ -822,7 +1037,12 @@ class DAGWorkflowEngine:
             self.gov.deregister_agent(agent_id)
 
     def _assemble_node_context(
-        self, run_id: str, node_id: str, node_map: Dict, edges: List[Dict], initial_input: str = None
+        self,
+        run_id: str,
+        node_id: str,
+        node_map: Dict,
+        edges: List[Dict],
+        initial_input: str = None,
     ) -> str:
         """
         Assemble input context for a node from:
@@ -834,7 +1054,9 @@ class DAGWorkflowEngine:
 
         # 1. Include initial user task/goal (Universal context)
         if self.space.exists("user_initial_input"):
-            input_val = self.space.read("user_initial_input").decode("utf-8", errors="ignore")
+            input_val = self.space.read("user_initial_input").decode(
+                "utf-8", errors="ignore"
+            )
             context_parts.append(f"### PROJECT GOAL / TASK:\n{input_val}")
 
         # Get predecessor artifacts using the passed edges list
@@ -843,38 +1065,50 @@ class DAGWorkflowEngine:
             # Phase I: Loop-Aware Context Assembly
             # Fetch ALL versions of the predecessor's output to ensure history is preserved in loops
             all_versions = self.space.read_all_versions(f"{pred_id}_output")
-            
+
             if all_versions:
                 if len(all_versions) > 1:
-                    print(f"📚 [DAG Engine] Gathering full history for looping predecessor {pred_id} ({len(all_versions)} rounds)", flush=True)
+                    print(
+                        f"📚 [DAG Engine] Gathering full history for looping predecessor {pred_id} ({len(all_versions)} rounds)",
+                        flush=True,
+                    )
                     history_blocks = []
                     for i, content in enumerate(all_versions):
                         round_text = content.decode("utf-8", errors="ignore")
-                        history_blocks.append(f"### MISSION ROUND {i+1} OUTPUT ({pred_id}):\n{round_text}")
+                        history_blocks.append(
+                            f"### MISSION ROUND {i+1} OUTPUT ({pred_id}):\n{round_text}"
+                        )
                     context_parts.append("\n\n---\n\n".join(history_blocks))
                 else:
                     response = all_versions[0].decode("utf-8", errors="ignore")
                     context_parts.append(f"### Outcome of {pred_id}:\n{response}")
-            
+
             # Include handover summary
             handover_name = f"{pred_id}_handover"
             if self.space.exists(handover_name):
                 # We usually only need the latest handover to understand the current state
-                handover = self.space.read(handover_name).decode("utf-8", errors="ignore")
+                handover = self.space.read(handover_name).decode(
+                    "utf-8", errors="ignore"
+                )
                 context_parts.append(f"### Handover Summary ({pred_id}):\n{handover}")
 
-        context_str = "\n\n".join(context_parts) if context_parts else "No previous context."
-        print(f"📝 [DAG Engine] Context for {node_id}: {len(context_str)} chars, predecessors: {predecessors}", flush=True)
-        
+        context_str = (
+            "\n\n".join(context_parts) if context_parts else "No previous context."
+        )
+        print(
+            f"📝 [DAG Engine] Context for {node_id}: {len(context_str)} chars, predecessors: {predecessors}",
+            flush=True,
+        )
+
         # DATA INJECTOR: Resolve {{agent_id.field.path}} placeholders
         context_str = self._resolve_data_bindings(context_str, run_id, predecessors)
-        
+
         return context_str
 
     def _extract_json_path(self, data: Any, path: str) -> str:
         """
         Safely extract a value from nested JSON using dot-notation path.
-        
+
         Examples:
             _extract_json_path({"price": 100}, "price") → "100"
             _extract_json_path({"rsi": {"value": 68.5}}, "rsi.value") → "68.5"
@@ -883,14 +1117,14 @@ class DAGWorkflowEngine:
         """
         if not path:
             return str(data) if data is not None else "N/A"
-        
+
         keys = path.split(".")
         current = data
-        
+
         for key in keys:
             if current is None:
                 return f"N/A (null at: {key})"
-            
+
             # Try dict key first
             if isinstance(current, dict):
                 if key in current:
@@ -916,11 +1150,12 @@ class DAGWorkflowEngine:
                     return f"N/A (invalid index: {key})"
             else:
                 return f"N/A (cannot traverse: {type(current).__name__}.{key})"
-        
+
         # Format the final value
         if isinstance(current, (dict, list)):
             # For complex structures, return compact JSON
             import json as _json
+
             return _json.dumps(current, ensure_ascii=False)
         elif isinstance(current, bool):
             return str(current).lower()
@@ -929,27 +1164,29 @@ class DAGWorkflowEngine:
         else:
             return str(current)
 
-    def _resolve_data_bindings(self, text: str, run_id: str, predecessors: List[str]) -> str:
+    def _resolve_data_bindings(
+        self, text: str, run_id: str, predecessors: List[str]
+    ) -> str:
         """
         Resolve {{agent_id.field.path}} placeholders with actual values from previous agents' outputs.
-        
+
         Supports two binding styles:
         1. Position-based: {{Agent1.price}}, {{Agent2.rsi}} — matches 1st, 2nd predecessor by order
         2. Name-based: {{data_fetcher.price}}, {{technical_analyst.rsi}} — matches by substring in node ID
         """
         import re
-        
+
         # Pattern: {{agent_id.field.path}} or {{agent_id}} (entire output)
-        pattern = r'\{\{([^}]+)\}\}'
-        
+        pattern = r"\{\{([^}]+)\}\}"
+
         def replace_binding(match):
             binding = match.group(1).strip()
             parts = binding.split(".")
             agent_key = parts[0]
             field_path = ".".join(parts[1:]) if len(parts) > 1 else ""
-            
+
             # POSITION-BASED: Agent1 → 1st predecessor, Agent2 → 2nd, etc.
-            pos_match = re.match(r'[Aa]gent(\d+)', agent_key)
+            pos_match = re.match(r"[Aa]gent(\d+)", agent_key)
             if pos_match:
                 position = int(pos_match.group(1)) - 1  # 0-indexed
                 if 0 <= position < len(predecessors):
@@ -964,39 +1201,43 @@ class DAGWorkflowEngine:
                         pred_id = pid
                         break
                 if pred_id is None:
-                    return f"[N/A: agent '{agent_key}' not found in {predecessors}]"
-            
+                    return f"[N/A: agent '{agent_key}' not found]"
+
             # Fetch output from CAS
             artifact_name = f"{pred_id}_output"
             if not self.space.exists(artifact_name):
                 return f"[N/A: no output for {pred_id}]"
-            
+
             raw = self.space.read(artifact_name).decode("utf-8", errors="ignore")
-            
+
             # Try to parse as JSON
             try:
                 import json as _json_mod
+
                 pred_output = _json_mod.loads(raw)
             except (_json_mod.JSONDecodeError, ValueError):
                 pred_output = raw
-            
+
             # If no field path, return entire output (truncated if too long)
             if not field_path:
                 if isinstance(pred_output, str):
                     return pred_output[:500] if len(pred_output) > 500 else pred_output
                 return str(pred_output)
-            
+
             # Extract the specific field
             return self._extract_json_path(pred_output, field_path)
-        
+
         # Count bindings for logging
         bindings = re.findall(pattern, text)
         if bindings:
-            print(f"💉 [Data Injector] Resolving {len(bindings)} bindings: {bindings}", flush=True)
-        
+            print(
+                f"💉 [Data Injector] Resolving {len(bindings)} bindings: {bindings}",
+                flush=True,
+            )
+
         # Replace all bindings
         resolved = re.sub(pattern, replace_binding, text)
-        
+
         return resolved
 
     def _get_predecessors(self, node_id: str, edges: List[Dict]) -> List[str]:
@@ -1019,11 +1260,17 @@ class DAGWorkflowEngine:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "ticker": {"type": "string", "description": "Stock ticker symbol (e.g., AAPL, NVDA, TSLA)"},
-                        "period": {"type": "string", "description": "Time period: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max"}
+                        "ticker": {
+                            "type": "string",
+                            "description": "Stock ticker symbol (e.g., AAPL, NVDA, TSLA)",
+                        },
+                        "period": {
+                            "type": "string",
+                            "description": "Time period: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max",
+                        },
                     },
-                    "required": ["ticker"]
-                }
+                    "required": ["ticker"],
+                },
             },
             "get_technical_indicators": {
                 "name": "get_technical_indicators",
@@ -1031,11 +1278,17 @@ class DAGWorkflowEngine:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "ticker": {"type": "string", "description": "Stock ticker symbol"},
-                        "period": {"type": "string", "description": "Time period for analysis"}
+                        "ticker": {
+                            "type": "string",
+                            "description": "Stock ticker symbol",
+                        },
+                        "period": {
+                            "type": "string",
+                            "description": "Time period for analysis",
+                        },
                     },
-                    "required": ["ticker"]
-                }
+                    "required": ["ticker"],
+                },
             },
             "get_company_fundamentals": {
                 "name": "get_company_fundamentals",
@@ -1043,10 +1296,13 @@ class DAGWorkflowEngine:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "ticker": {"type": "string", "description": "Stock ticker symbol"}
+                        "ticker": {
+                            "type": "string",
+                            "description": "Stock ticker symbol",
+                        }
                     },
-                    "required": ["ticker"]
-                }
+                    "required": ["ticker"],
+                },
             },
             "get_market_news": {
                 "name": "get_market_news",
@@ -1054,11 +1310,17 @@ class DAGWorkflowEngine:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "ticker": {"type": "string", "description": "Stock ticker symbol (optional, leave empty for general market news)"},
-                        "limit": {"type": "integer", "description": "Number of articles to fetch"}
+                        "ticker": {
+                            "type": "string",
+                            "description": "Stock ticker symbol (optional, leave empty for general market news)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Number of articles to fetch",
+                        },
                     },
-                    "required": []
-                }
+                    "required": [],
+                },
             },
             "search_web": {
                 "name": "search_web",
@@ -1068,8 +1330,8 @@ class DAGWorkflowEngine:
                     "properties": {
                         "query": {"type": "string", "description": "The search query."}
                     },
-                    "required": ["query"]
-                }
+                    "required": ["query"],
+                },
             },
             "read_artifact": {
                 "name": "read_artifact",
@@ -1077,10 +1339,13 @@ class DAGWorkflowEngine:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "Name or path of the file to read."}
+                        "path": {
+                            "type": "string",
+                            "description": "Name or path of the file to read.",
+                        }
                     },
-                    "required": ["path"]
-                }
+                    "required": ["path"],
+                },
             },
             "write_artifact": {
                 "name": "write_artifact",
@@ -1088,16 +1353,22 @@ class DAGWorkflowEngine:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "Name or path of the file to create."},
-                        "content": {"type": "string", "description": "Content to write to the file."}
+                        "path": {
+                            "type": "string",
+                            "description": "Name or path of the file to create.",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Content to write to the file.",
+                        },
                     },
-                    "required": ["path", "content"]
-                }
+                    "required": ["path", "content"],
+                },
             },
             "list_artifacts": {
                 "name": "list_artifacts",
                 "description": "List all files available in the current workspace.",
-                "parameters": {"type": "object", "properties": {}}
+                "parameters": {"type": "object", "properties": {}},
             },
         }
 
@@ -1123,10 +1394,18 @@ class DAGWorkflowEngine:
                 """INSERT OR REPLACE INTO executions 
                    (run_id, workflow_id, status, current_node, started_at)
                    VALUES (?, ?, ?, ?, ?)""",
-                (run_id, workflow_id, "running", nodes[0]["id"], time.strftime("%Y-%m-%dT%H:%M:%SZ")),
+                (
+                    run_id,
+                    workflow_id,
+                    "running",
+                    nodes[0]["id"],
+                    time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                ),
             )
 
-    def _update_run_status(self, run_id: str, status: str, current_node: str = None, agent_id: str = None):
+    def _update_run_status(
+        self, run_id: str, status: str, current_node: str = None, agent_id: str = None
+    ):
         """Update the execution run status."""
         with sqlite3.connect(self.gov.db_path) as conn:
             if current_node and agent_id:
@@ -1135,7 +1414,10 @@ class DAGWorkflowEngine:
                     (status, current_node, agent_id, run_id),
                 )
             else:
-                conn.execute("UPDATE executions SET status = ? WHERE run_id = ?", (status, run_id))
+                conn.execute(
+                    "UPDATE executions SET status = ? WHERE run_id = ?",
+                    (status, run_id),
+                )
 
     def _update_node_status(self, run_id: str, node_id: str, status: str):
         """Update individual node execution status."""
@@ -1147,7 +1429,14 @@ class DAGWorkflowEngine:
                 (run_id, node_id, status, time.strftime("%Y-%m-%dT%H:%M:%SZ")),
             )
 
-    def _create_snapshot(self, run_id: str, node_id: str, artifact_hash: str, status: str, graph_state: Dict = None):
+    def _create_snapshot(
+        self,
+        run_id: str,
+        node_id: str,
+        artifact_hash: str,
+        status: str,
+        graph_state: Dict = None,
+    ):
         """Create a compressed execution snapshot for Time Machine."""
         compressed_state = None
         if graph_state:
@@ -1158,7 +1447,14 @@ class DAGWorkflowEngine:
                 """INSERT INTO snapshots 
                    (run_id, node_id, artifact_hash, graph_state_compressed, status, created_at)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                (run_id, node_id, artifact_hash, compressed_state, status, time.strftime("%Y-%m-%dT%H:%M:%SZ")),
+                (
+                    run_id,
+                    node_id,
+                    artifact_hash,
+                    compressed_state,
+                    status,
+                    time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                ),
             )
 
     def _get_completed_nodes(self, run_id: str) -> List[str]:
@@ -1176,24 +1472,32 @@ class DAGWorkflowEngine:
         to_process = [node_id]
         while to_process:
             nid = to_process.pop(0)
-            children = [e["target"] for e in edges if e["source"] == nid and not e.get("data", {}).get("isLoopBack", False)]
+            children = [
+                e["target"]
+                for e in edges
+                if e["source"] == nid and not e.get("data", {}).get("isLoopBack", False)
+            ]
             for child in children:
                 if child not in descendants:
                     descendants.add(child)
                     to_process.append(child)
         return descendants
 
-    def _update_loop_stats(self, run_id: str, target_node_id: str, current_iter: int, max_iters: int):
+    def _update_loop_stats(
+        self, run_id: str, target_node_id: str, current_iter: int, max_iters: int
+    ):
         """Update DB with iteration count and loop metadata."""
         try:
             with sqlite3.connect(self.gov.db_path) as conn:
-                metadata = json.dumps({
-                    "target_node": target_node_id,
-                    "last_loop_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
-                })
+                metadata = json.dumps(
+                    {
+                        "target_node": target_node_id,
+                        "last_loop_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    }
+                )
                 conn.execute(
                     "UPDATE executions SET current_iteration = ?, max_iterations = ?, loop_metadata = ? WHERE run_id = ?",
-                    (current_iter, max_iters, metadata, run_id)
+                    (current_iter, max_iters, metadata, run_id),
                 )
         except Exception as e:
             print(f"⚠️ [DAG Engine] Failed to update loop stats: {e}", flush=True)
@@ -1206,42 +1510,57 @@ class DAGWorkflowEngine:
         all_versions = self.space.read_all_versions(f"{node_id}_output")
         if len(all_versions) < 2:
             return False
-            
+
         # Compare to the last 2 versions (Round N-1 and N-2)
-        prev_versions = [v.decode("utf-8", errors="ignore") for v in all_versions[-3:-1]]
-        
+        prev_versions = [
+            v.decode("utf-8", errors="ignore") for v in all_versions[-3:-1]
+        ]
+
         def get_words(text: str) -> Set[str]:
-            return set(re.findall(r'\w+', text.lower()))
-            
+            return set(re.findall(r"\w+", text.lower()))
+
         current_words = get_words(current_response)
         if not current_words:
             return False
-            
+
         for prev in prev_versions:
             prev_words = get_words(prev)
-            if not prev_words: continue
-            
+            if not prev_words:
+                continue
+
             intersection = current_words.intersection(prev_words)
             union = current_words.union(prev_words)
             jaccard = len(intersection) / len(union)
-            
+
             if jaccard > 0.92:
-                print(f"🚩 [Sentinel] DEADLOCK DETECTED at node {node_id} (Similarity: {jaccard:.2f}). Agents are repeating themselves.", flush=True)
+                print(
+                    f"🚩 [Sentinel] DEADLOCK DETECTED at node {node_id} (Similarity: {jaccard:.2f}). Agents are repeating themselves.",
+                    flush=True,
+                )
                 return True
-                
+
         return False
 
-    def _mirror_to_deliverables(self, run_id: str, node_id: str, role: str, content: str):
+    def _mirror_to_deliverables(
+        self, run_id: str, node_id: str, role: str, content: str
+    ):
         """
         Mirror node output to a physical file in 'deliverables/' for easy access.
         Supports specific filename detection via 'FILE: filename.ext' marker.
         """
-        import os
-        from pathlib import Path
         import re
+        from pathlib import Path
 
         # Role filter for physical mirroring
-        target_roles = ["architect", "planner", "designer", "product_manager", "writer", "developer", "coder"]
+        target_roles = [
+            "architect",
+            "planner",
+            "designer",
+            "product_manager",
+            "writer",
+            "developer",
+            "coder",
+        ]
         if not any(r in role.lower() for r in target_roles):
             return
 
@@ -1257,7 +1576,7 @@ class DAGWorkflowEngine:
             else:
                 # Sanitize default filename
                 filename = f"{node_id}_{role.lower().replace(' ', '_')}.md"
-            
+
             file_path = base_dir / filename
 
             # Write content
@@ -1265,7 +1584,12 @@ class DAGWorkflowEngine:
                 f.write(content)
 
             print(f"📁 [DAG Engine] Mirrored deliverable to: {file_path}", flush=True)
-            self.audit.log(self.company_id, node_id, "DELIVERABLE_EXPORTED", {"path": str(file_path)})
+            self.audit.log(
+                self.company_id,
+                node_id,
+                "DELIVERABLE_EXPORTED",
+                {"path": str(file_path)},
+            )
 
         except Exception as e:
             print(f"⚠️ [DAG Engine] Failed to mirror deliverable: {e}", flush=True)

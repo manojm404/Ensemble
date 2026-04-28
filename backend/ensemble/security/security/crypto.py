@@ -7,7 +7,7 @@ Provides AES-256 encryption (via Fernet) for sensitive data storage:
 - Any data that needs encryption at rest
 
 Usage:
-    from core.security.crypto import encrypt_api_key, decrypt_api_key
+    from backend.ensemble.security.crypto import encrypt_api_key, decrypt_api_key
 
     # Encrypt before storing in Supabase
     encrypted = encrypt_api_key("sk-abc123...")
@@ -19,8 +19,9 @@ Environment:
     API_KEY_ENCRYPTION_KEY - Fernet key (generate with Fernet.generate_key())
 """
 
-import os
 import logging
+import os
+
 from cryptography.fernet import Fernet, InvalidToken
 
 logger = logging.getLogger(__name__)
@@ -88,8 +89,12 @@ def decrypt_api_key(encrypted: str) -> str:
     try:
         return fernet.decrypt(encrypted.encode()).decode()
     except InvalidToken as e:
-        logger.error("Failed to decrypt API key: wrong encryption key or corrupted data")
-        raise ValueError("Failed to decrypt API key. Encryption key may have changed.") from e
+        logger.error(
+            "Failed to decrypt API key: wrong encryption key or corrupted data"
+        )
+        raise ValueError(
+            "Failed to decrypt API key. Encryption key may have changed."
+        ) from e
 
 
 def mask_key(key: str, visible_chars: int = 4) -> str:

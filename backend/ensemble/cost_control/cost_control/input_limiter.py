@@ -14,7 +14,7 @@ import logging
 import math
 import re
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,7 @@ class InputResult:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _estimate_tokens(text: str) -> int:
     """Return a conservative token estimate based on character count.
 
@@ -59,7 +60,9 @@ def _truncate_text(text: str, max_tokens: int) -> tuple[str, str]:
     head_size = int(max_chars * 0.85)
     tail_size = max_chars - head_size
 
-    truncated = text[:head_size] + "\n\n... [content truncated] ...\n\n" + text[-tail_size:]
+    truncated = (
+        text[:head_size] + "\n\n... [content truncated] ...\n\n" + text[-tail_size:]
+    )
 
     # Build a short summary of what was removed.
     removed = text[head_size:-tail_size]
@@ -92,7 +95,9 @@ def _strip_markdown(text: str) -> str:
 def _strip_html(text: str) -> str:
     """Return readable text from an HTML string."""
     # Remove script and style elements.
-    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(
+        r"<(script|style)[^>]*>.*?</\1>", "", text, flags=re.DOTALL | re.IGNORECASE
+    )
     # Remove all other tags.
     text = re.sub(r"<[^>]+>", " ", text)
     # Decode common entities.
@@ -110,6 +115,7 @@ def _compact_json(obj: Any) -> str:
 # ---------------------------------------------------------------------------
 # InputLimiter
 # ---------------------------------------------------------------------------
+
 
 class InputLimiter:
     """Thread-safe, stateless limiter for LLM input payloads.

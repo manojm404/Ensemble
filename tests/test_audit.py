@@ -1,7 +1,7 @@
 import sys
 import os
 import pytest
-from core.audit import AuditLogger
+from backend.ensemble.security.audit import AuditLogger
 
 def test_audit_log_and_replay():
     db_path = "/tmp/test_audit.db"

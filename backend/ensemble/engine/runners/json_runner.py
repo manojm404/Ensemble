@@ -5,13 +5,15 @@ Runner for JSON-format agents.
 Parses JSON manifest and executes based on the configuration.
 Supports SuperAGI and generic JSON agent formats.
 """
-import json
-import time
-import logging
-from typing import Any, Dict, Optional
 
-from core.parsers.agent_data import AgentData, AgentFormat
-from core.runners.base_runner import BaseRunner, RunnerResult
+import json
+import logging
+import time
+from typing import Any, Dict
+
+from backend.ensemble.parsers.agent_data import AgentData, AgentFormat
+
+from .base_runner import BaseRunner, RunnerResult
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,8 @@ class JSONRunner(BaseRunner):
     def llm_provider(self):
         """Lazily initialize the LLM provider."""
         if self._llm_provider is None:
-            from core.llm_provider import LLMProvider
+            from backend.ensemble.llm_provider import LLMProvider
+
             self._llm_provider = LLMProvider()
         return self._llm_provider
 
@@ -95,7 +98,9 @@ class JSONRunner(BaseRunner):
             result = self._create_error_result(e, execution_time)
             result.metadata = {
                 "agent_format": "json",
-                "config_keys": list(agent_data.config.keys()) if agent_data.config else [],
+                "config_keys": (
+                    list(agent_data.config.keys()) if agent_data.config else []
+                ),
             }
             self._log_execution_end(result, agent_data)
             return result
@@ -115,9 +120,7 @@ class JSONRunner(BaseRunner):
 
         return agent_data.config
 
-    def _determine_type(
-        self, config: Dict[str, Any], agent_data: AgentData
-    ) -> str:
+    def _determine_type(self, config: Dict[str, Any], agent_data: AgentData) -> str:
         """
         Determine agent type from config.
 
@@ -143,7 +146,9 @@ class JSONRunner(BaseRunner):
 
         # Check agent_data config
         if agent_data.config.get("agent_type", "").lower() in (
-            "conversational", "chat", "chatbot"
+            "conversational",
+            "chat",
+            "chatbot",
         ):
             return "conversational"
 
@@ -167,18 +172,22 @@ class JSONRunner(BaseRunner):
             system_parts.append(f"You are {config['role']}.")
 
         if system_parts:
-            messages.append({
-                "role": "system",
-                "content": "\n".join(system_parts),
-            })
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "\n".join(system_parts),
+                }
+            )
 
         # Greeting (if any)
         greeting = config.get("greeting", "")
         if greeting:
-            messages.append({
-                "role": "assistant",
-                "content": greeting,
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": greeting,
+                }
+            )
 
         # User input
         user_content = str(input_data) if input_data else ""
@@ -186,16 +195,20 @@ class JSONRunner(BaseRunner):
             user_content = agent_data.body_prompt
 
         if user_content:
-            messages.append({
-                "role": "user",
-                "content": user_content,
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": user_content,
+                }
+            )
 
         if not messages:
-            messages.append({
-                "role": "user",
-                "content": "Hello",
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "Hello",
+                }
+            )
 
         kwargs = self._build_kwargs(agent_data, config)
         response = await self.llm_provider.chat(
@@ -216,10 +229,7 @@ class JSONRunner(BaseRunner):
     ) -> RunnerResult:
         """Execute as a task-based agent."""
         steps = (
-            config.get("steps")
-            or config.get("workflow")
-            or config.get("tasks")
-            or []
+            config.get("steps") or config.get("workflow") or config.get("tasks") or []
         )
 
         if not steps and agent_data.body_prompt:
@@ -234,21 +244,27 @@ class JSONRunner(BaseRunner):
             if isinstance(step, str):
                 step_prompt = step
             elif isinstance(step, dict):
-                step_prompt = step.get("prompt", step.get("instruction", step.get("task", "")))
+                step_prompt = step.get(
+                    "prompt", step.get("instruction", step.get("task", ""))
+                )
 
             if not step_prompt:
                 continue
 
             messages = []
             if agent_data.system_prompt:
-                messages.append({
-                    "role": "system",
-                    "content": agent_data.system_prompt,
-                })
-            messages.append({
-                "role": "user",
-                "content": f"{step_prompt}\n\nInput/Context: {current_context}",
-            })
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": agent_data.system_prompt,
+                    }
+                )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"{step_prompt}\n\nInput/Context: {current_context}",
+                }
+            )
 
             response = await self.llm_provider.chat(
                 messages, agent_name=agent_data.name
@@ -268,9 +284,7 @@ class JSONRunner(BaseRunner):
         """Execute with generic strategy (fallback to conversational)."""
         return await self._execute_conversational(agent_data, config, input_data)
 
-    def _build_kwargs(
-        self, agent_data: AgentData, config: Dict[str, Any]
-    ) -> dict:
+    def _build_kwargs(self, agent_data: AgentData, config: Dict[str, Any]) -> dict:
         """Build LLM call kwargs."""
         kwargs = {}
 

@@ -5,14 +5,14 @@ Abstract base class for agent execution runners.
 Defines the interface that all format-specific runners must implement.
 Provides common error handling, timeout wrapping, and logging.
 """
-import time
+
 import logging
 import traceback
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
 from dataclasses import dataclass, field
+from typing import Any, Dict, Optional
 
-from core.parsers.agent_data import AgentData
+from backend.ensemble.parsers.agent_data import AgentData
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ class RunnerResult:
 
     Contains the output, metadata, and any errors.
     """
+
     success: bool
     output: Any = None
     error: Optional[str] = None
@@ -82,7 +83,6 @@ class BaseRunner(ABC):
         Returns:
             RunnerResult with output and metadata.
         """
-        pass
 
     def can_execute(self, agent_data: AgentData) -> bool:
         """

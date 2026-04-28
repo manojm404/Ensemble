@@ -3,12 +3,15 @@ core/ensemble_space.py
 EnsembleSpace with content-addressable storage (CAS) and artifact manifest.
 Phase 3: Added user_id scoping for multi-tenant isolation.
 """
-import os
+
 import hashlib
+import os
 import sqlite3
 import time
-from typing import List, Dict, Any, Optional
-from core.space_base import Space
+from typing import List, Optional
+
+from backend.ensemble.storage.space_base import Space
+
 
 class EnsembleSpace(Space):
     def __init__(self, base_dir: str = "data/ensemble_space/"):
@@ -46,7 +49,14 @@ class EnsembleSpace(Space):
             except sqlite3.OperationalError:
                 pass  # Column already exists
 
-    def write(self, content: bytes, symbolic_name: str, state_name: str = None, company_id: str = None, user_id: str = None) -> str:
+    def write(
+        self,
+        content: bytes,
+        symbolic_name: str,
+        state_name: str = None,
+        company_id: str = None,
+        user_id: str = None,
+    ) -> str:
         """Store content in CAS and record in manifest. Phase 3: user_id scoping."""
         user_dir = self._get_user_dir(user_id)
         content_hash = hashlib.sha256(content).hexdigest()
@@ -59,23 +69,37 @@ class EnsembleSpace(Space):
         # Update manifest
         timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         with sqlite3.connect(self.manifest_db) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO artifacts (symbolic_name, hash, state_name, company_id, user_id, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (symbolic_name, content_hash, state_name, company_id, user_id, timestamp))
+            """,
+                (
+                    symbolic_name,
+                    content_hash,
+                    state_name,
+                    company_id,
+                    user_id,
+                    timestamp,
+                ),
+            )
 
         # --- RAG Indexing Hook ---
         try:
-            text_content = content.decode('utf-8')
-            from core.rag import get_vector_store
+            text_content = content.decode("utf-8")
+            from backend.ensemble.rag import get_vector_store
+
             store = get_vector_store()
-            store.add(text_content, {
-                "symbolic_name": symbolic_name,
-                "state_name": state_name,
-                "company_id": company_id,
-                "user_id": user_id,
-                "hash": content_hash
-            })
+            store.add(
+                text_content,
+                {
+                    "symbolic_name": symbolic_name,
+                    "state_name": state_name,
+                    "company_id": company_id,
+                    "user_id": user_id,
+                    "hash": content_hash,
+                },
+            )
         except (UnicodeDecodeError, ImportError, Exception) as e:
             print(f"RAG Indexing skipped for {symbolic_name}: {e}")
 
@@ -118,7 +142,7 @@ class EnsembleSpace(Space):
                 query += " AND (user_id = ? OR user_id IS NULL)"
                 params.append(user_id)
 
-            query += " ORDER BY created_at ASC" # Oldest first
+            query += " ORDER BY created_at ASC"  # Oldest first
 
             cursor = conn.execute(query, params)
             for row in cursor.fetchall():

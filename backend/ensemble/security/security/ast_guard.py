@@ -7,7 +7,7 @@ Returns a SecurityReport with a list of SecurityViolation objects.
 Designed to run as a pre-execution gate in the Ensemble sandbox pipeline.
 
 Usage:
-    from core.security.ast_guard import ASTSecurityAnalyzer, SecurityViolation
+    from backend.ensemble.security.ast_guard import ASTSecurityAnalyzer, SecurityViolation
 
     analyzer = ASTSecurityAnalyzer()
     report = analyzer.analyze("import os; os.system('rm -rf /')")
@@ -16,7 +16,7 @@ Usage:
             print(f"[{v.severity}] {v.rule}: {v.message}")
 
 Docstring examples (doctest-style):
-    >>> from core.security.ast_guard import ASTSecurityAnalyzer
+    >>> from backend.ensemble.security.ast_guard import ASTSecurityAnalyzer
     >>> analyzer = ASTSecurityAnalyzer()
     >>> report = analyzer.analyze("import os")
     >>> len(report.violations) > 0
@@ -42,7 +42,6 @@ Docstring examples (doctest-style):
 import ast
 import hashlib
 import logging
-import textwrap
 from dataclasses import dataclass, field
 from typing import List, Optional, Set, Tuple
 
@@ -109,6 +108,7 @@ OBFUSCATION_PATTERNS: List[Tuple[str, str]] = [
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class SecurityViolation:
@@ -192,6 +192,7 @@ class SecurityViolationError(Exception):
 # ---------------------------------------------------------------------------
 # Analyzer
 # ---------------------------------------------------------------------------
+
 
 class ASTSecurityAnalyzer:
     """Walks Python AST to detect dangerous imports, builtins, and obfuscation.
@@ -308,7 +309,7 @@ class ASTSecurityAnalyzer:
                             )
                         )
             elif isinstance(node, ast.ImportFrom):
-                module = (node.module or "")
+                module = node.module or ""
                 # Check if the top-level module is dangerous
                 top_level = module.split(".")[0]
                 if top_level in self.dangerous_modules:
@@ -460,10 +461,7 @@ class ASTSecurityAnalyzer:
     def _is_subscript_builtins(self, node: ast.AST) -> bool:
         """Detect __builtins__['eval'] or __builtins__.get('eval')."""
         if isinstance(node, ast.Subscript):
-            return (
-                isinstance(node.value, ast.Name)
-                and node.value.id == "__builtins__"
-            )
+            return isinstance(node.value, ast.Name) and node.value.id == "__builtins__"
         if isinstance(node, ast.Call):
             func = node.func
             if isinstance(func, ast.Attribute) and func.attr == "get":
@@ -482,8 +480,7 @@ class ASTSecurityAnalyzer:
         if node.value.func.id != "globals":
             return False
         return (
-            isinstance(node.slice, ast.Constant)
-            and node.slice.value == "__builtins__"
+            isinstance(node.slice, ast.Constant) and node.slice.value == "__builtins__"
         )
 
     def _is_importlib_import(self, node: ast.AST) -> bool:
@@ -507,6 +504,7 @@ class ASTSecurityAnalyzer:
         Heuristic: 3+ chr() calls on the same line suggests obfuscation.
         """
         import re
+
         violations: List[SecurityViolation] = []
         chr_pattern = re.compile(r"chr\s*\(\s*\d+\s*\)")
 

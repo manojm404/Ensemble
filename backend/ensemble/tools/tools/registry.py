@@ -2,7 +2,9 @@
 core/tools/registry.py
 Global registry for tools.
 """
-from typing import Dict, Any, Callable
+
+from typing import Any, Callable, Dict
+
 
 class ToolRegistry:
     def __init__(self):
@@ -16,5 +18,6 @@ class ToolRegistry:
 
     def list_tools(self) -> Dict[str, Any]:
         return {name: getattr(func, "_schema", {}) for name, func in self.tools.items()}
+
 
 tool_registry = ToolRegistry()

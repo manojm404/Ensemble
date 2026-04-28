@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock
-from core.managed_agent import ManagedAgent
+from backend.ensemble.engine.managed_agent import ManagedAgent
 
 def test_agent_stuck_detection():
     gov = MagicMock()

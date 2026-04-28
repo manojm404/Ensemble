@@ -5,11 +5,12 @@ Shared data model for parsed agents.
 AgentData is the universal intermediate representation used by all parsers
 and consumed by the pack builder and runners.
 """
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
-from enum import Enum
+
 import time
 import uuid
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 try:
     import yaml
@@ -19,6 +20,7 @@ except ImportError:
 
 class AgentCategory(str, Enum):
     """Standard agent categories for marketplace organization."""
+
     DEVELOPMENT = "development"
     AI_ML = "ai_ml"
     SECURITY = "security"
@@ -41,6 +43,7 @@ class AgentCategory(str, Enum):
 
 class AgentFormat(str, Enum):
     """Source format of the agent."""
+
     MARKDOWN = "markdown"
     PYTHON = "python"
     YAML = "yaml"
@@ -56,6 +59,7 @@ class AgentData:
     This is the canonical representation of an agent, regardless of source format.
     All parsers produce AgentData objects.
     """
+
     # Required fields
     name: str
     format: AgentFormat
@@ -92,7 +96,9 @@ class AgentData:
 
     # Internal metadata
     agent_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    created_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    created_at: str = field(
+        default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    )
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary."""
@@ -100,11 +106,19 @@ class AgentData:
             "agent_id": self.agent_id,
             "name": self.name,
             "description": self.description,
-            "category": self.category.value if isinstance(self.category, AgentCategory) else self.category,
+            "category": (
+                self.category.value
+                if isinstance(self.category, AgentCategory)
+                else self.category
+            ),
             "emoji": self.emoji,
             "version": self.version,
             "author": self.author,
-            "format": self.format.value if isinstance(self.format, AgentFormat) else self.format,
+            "format": (
+                self.format.value
+                if isinstance(self.format, AgentFormat)
+                else self.format
+            ),
             "source_path": self.source_path,
             "system_prompt": self.system_prompt,
             "body_prompt": self.body_prompt,
@@ -163,7 +177,9 @@ class AgentData:
             content_hash=data.get("content_hash", ""),
             raw_content=data.get("raw_content", ""),
             agent_id=data.get("agent_id", str(uuid.uuid4())),
-            created_at=data.get("created_at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
+            created_at=data.get(
+                "created_at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            ),
         )
 
     def get_full_prompt(self) -> str:
@@ -188,7 +204,11 @@ class AgentData:
         frontmatter = {
             "name": self.name,
             "description": self.description,
-            "category": self.category.value if isinstance(self.category, AgentCategory) else self.category,
+            "category": (
+                self.category.value
+                if isinstance(self.category, AgentCategory)
+                else self.category
+            ),
             "emoji": self.emoji or "🤖",
             "tools": self.tools,
             "model": self.model or "gemini-2.5-flash",

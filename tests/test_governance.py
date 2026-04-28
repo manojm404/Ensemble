@@ -1,7 +1,7 @@
 import os
 import sqlite3
 import pytest
-from core.governance import Governance
+from backend.ensemble.api.governance import Governance
 
 def test_governance_budget_tracking():
     db_path = "/tmp/test_gov.db"

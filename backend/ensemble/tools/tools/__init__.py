@@ -1,15 +1,16 @@
 import os
-import json
+
 
 def read_artifact(path: str = None, file_id: str = None) -> str:
     """Reads the content of a file from uploads or workspace with auto-truncation."""
     workspace_dir = "data/workspace"
-    TRUNCATE_LIMIT = 5000 # Increased for higher-fidelity analysis
+    TRUNCATE_LIMIT = 5000  # Increased for higher-fidelity analysis
 
     def _safe_read(full_path: str, ext: str) -> str:
         if ext in [".xlsx", ".xls", ".ods"]:
             try:
                 import pandas as pd
+
                 df = pd.read_excel(full_path)
                 schema = f"Sheet: {full_path.split('/')[-1]}\nColumns: {', '.join(df.columns)}\nShape: {df.shape[0]} rows x {df.shape[1]} columns\n\n"
                 stats = f"### Statistical Summary:\n{df.describe().to_markdown()}\n\n"
@@ -17,10 +18,11 @@ def read_artifact(path: str = None, file_id: str = None) -> str:
                 return f"[DATA EXTRACTED]\n{schema}{stats}{sample}"
             except Exception as e:
                 return f"[INFO] Spreadsheet Extraction failed: {str(e)}."
-        
+
         if ext == ".docx":
             try:
                 import docx
+
                 doc = docx.Document(full_path)
                 content = "\n".join([p.text for p in doc.paragraphs])
             except Exception as e:
@@ -33,7 +35,10 @@ def read_artifact(path: str = None, file_id: str = None) -> str:
                 return f"Error reading file: {str(e)}"
 
         if len(content) > TRUNCATE_LIMIT:
-            return content[:TRUNCATE_LIMIT] + f"\n\n... [TRUNCATED. Size: {len(content)} bytes] ..."
+            return (
+                content[:TRUNCATE_LIMIT]
+                + f"\n\n... [TRUNCATED. Size: {len(content)} bytes] ..."
+            )
         return content
 
     # Standardize to data/workspace sandbox for all file lookups
@@ -41,14 +46,17 @@ def read_artifact(path: str = None, file_id: str = None) -> str:
         full_p = os.path.join(workspace_dir, path)
         if os.path.exists(full_p):
             return _safe_read(full_p, os.path.splitext(full_p)[1].lower())
-            
+
     if file_id and os.path.exists(workspace_dir):
         # Fallback to scanning for file_id match
         for f in os.listdir(workspace_dir):
             if f.startswith(file_id):
-                return _safe_read(os.path.join(workspace_dir, f), os.path.splitext(f)[1].lower())
+                return _safe_read(
+                    os.path.join(workspace_dir, f), os.path.splitext(f)[1].lower()
+                )
 
     return f"Error: File '{path or file_id}' not found in agent sandbox."
+
 
 def search_web(query: str) -> str:
     """Search the web for real-time information using DuckDuckGo."""
@@ -58,25 +66,31 @@ def search_web(query: str) -> str:
             from ddgs import DDGS
         except ImportError:
             from duckduckgo_search import DDGS
-        
+
         with DDGS() as ddgs:
             # Stage 1: Standard Text Search
             print(f"🔍 [Search] Attempting Standard Search: {query}", flush=True)
             results = list(ddgs.text(query, max_results=5))
-            
+
             # Filter out empty or useless results
-            results = [r for r in results if r.get('body') or r.get('snippet')]
-            
+            results = [r for r in results if r.get("body") or r.get("snippet")]
+
             # Stage 2: Fallback to News if Text Search is blocked
             if not results:
-                print(f"🔄 [Search] Standard search empty or blocked, trying News fallback...", flush=True)
+                print(
+                    f"🔄 [Search] Standard search empty or blocked, trying News fallback...",
+                    flush=True,
+                )
                 results = list(ddgs.news(query, max_results=5))
-            
+
             # Stage 3: Broad Fallback (Last Resort)
             if not results:
-                 broad_query = query.split(" ")[0] + " market trends 2025"
-                 print(f"⚠️ [Search] Specific search failed. Trying broad fallback: {broad_query}", flush=True)
-                 results = list(ddgs.text(broad_query, max_results=3))
+                broad_query = query.split(" ")[0] + " market trends 2025"
+                print(
+                    f"⚠️ [Search] Specific search failed. Trying broad fallback: {broad_query}",
+                    flush=True,
+                )
+                results = list(ddgs.text(broad_query, max_results=3))
 
         if not results:
             print(f"❌ [Search] All search attempts failed for: {query}", flush=True)
@@ -87,17 +101,17 @@ SUGGESTION: Try searching for broader terms like "AI coding assistants" or "AI m
 """
 
         print(f"✅ [Search] Successfully retrieved {len(results)} results", flush=True)
-        output = [f"🔍 Search Results for: \"{query}\"\n"]
+        output = [f'🔍 Search Results for: "{query}"\n']
         for i, r in enumerate(results, 1):
-            title = r.get('title', 'No title')
-            url = r.get('href', r.get('link', 'No URL'))
-            snippet = r.get('body', r.get('snippet', 'No description'))
+            title = r.get("title", "No title")
+            url = r.get("href", r.get("link", "No URL"))
+            snippet = r.get("body", r.get("snippet", "No description"))
             output.append(f"{i}. **{title}**")
             output.append(f"   URL: {url}")
             output.append(f"   {snippet}\n")
-        
+
         return "\n".join(output)
-    
+
     except Exception as e:
         return f"""⚠️ Web search encountered an error: {str(e)}
 
@@ -108,6 +122,7 @@ This may be due to:
 
 Try again or search manually at: https://duckduckgo.com/?q={query.replace(' ', '+')}"""
 
+
 def write_artifact(path: str, content: str, is_binary: bool = False) -> str:
     """Saves content to a file in the project workspace."""
     try:
@@ -115,19 +130,25 @@ def write_artifact(path: str, content: str, is_binary: bool = False) -> str:
         os.makedirs("data/workspace", exist_ok=True)
         full_path = os.path.join("data/workspace", path)
         mode = "wb" if is_binary else "w"
-        
+
         if is_binary:
             import base64
+
             # Handle common base64 data URL prefixes if present
-            raw_data = content.split("base64,", 1)[1] if "base64," in content else content
+            raw_data = (
+                content.split("base64,", 1)[1] if "base64," in content else content
+            )
             data = base64.b64decode(raw_data)
-            with open(full_path, "wb") as f: f.write(data)
+            with open(full_path, "wb") as f:
+                f.write(data)
         else:
-            with open(full_path, "w", encoding="utf-8") as f: f.write(content)
-            
+            with open(full_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
         return f"Successfully wrote {os.path.getsize(full_path)} bytes to '{path}' (Sandboxed in data/workspace)."
     except Exception as e:
         return f"Error writing artifact: {str(e)}"
+
 
 def list_artifacts(directory: str = "data/workspace") -> str:
     """Lists visible files in the agent sandbox directory."""
@@ -136,9 +157,12 @@ def list_artifacts(directory: str = "data/workspace") -> str:
         target_dir = "data/workspace"
         os.makedirs(target_dir, exist_ok=True)
         visible = [f for f in os.listdir(target_dir) if not f.startswith(".")]
-        return f"Visible files in agent sandbox:\n" + "\n".join([f"- {f}" for f in visible])
+        return f"Visible files in agent sandbox:\n" + "\n".join(
+            [f"- {f}" for f in visible]
+        )
     except Exception as e:
         return f"Error listing artifacts: {str(e)}"
+
 
 def execute_tool(name: str, args: dict) -> str:
     """Route tool calls."""
@@ -160,6 +184,7 @@ def execute_tool(name: str, args: dict) -> str:
 # ============================================================
 # Financial Data Tools (TradingAgents Integration)
 # ============================================================
+
 
 def get_stock_data(ticker: str, period: str = "1y") -> str:
     """
@@ -187,24 +212,28 @@ def get_stock_data(ticker: str, period: str = "1y") -> str:
             return f"❌ No data found for ticker: {ticker}\n\nPossible reasons:\n- Invalid ticker symbol\n- Delisted stock\n- Market is closed\n\nTry a different ticker or period."
 
         # Current price info
-        current_price = hist['Close'].iloc[-1]
-        prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
+        current_price = hist["Close"].iloc[-1]
+        prev_price = hist["Close"].iloc[-2] if len(hist) > 1 else current_price
         price_change = current_price - prev_price
         pct_change = (price_change / prev_price) * 100
 
         # Key metrics
-        high_52w = info.get('fiftyTwoWeekHigh', 'N/A')
-        low_52w = info.get('fiftyTwoWeekLow', 'N/A')
-        market_cap = info.get('marketCap', 'N/A')
-        volume = info.get('volume', hist['Volume'].iloc[-1])
-        avg_volume = info.get('averageVolume', 'N/A')
+        high_52w = info.get("fiftyTwoWeekHigh", "N/A")
+        low_52w = info.get("fiftyTwoWeekLow", "N/A")
+        market_cap = info.get("marketCap", "N/A")
+        volume = info.get("volume", hist["Volume"].iloc[-1])
+        avg_volume = info.get("averageVolume", "N/A")
 
         # Format market cap
-        if market_cap != 'N/A' and isinstance(market_cap, (int, float)):
-            if market_cap >= 1e12: market_cap = f"${market_cap/1e12:.2f}T"
-            elif market_cap >= 1e9: market_cap = f"${market_cap/1e9:.2f}B"
-            elif market_cap >= 1e6: market_cap = f"${market_cap/1e6:.2f}M"
-            else: market_cap = f"${market_cap:,.0f}"
+        if market_cap != "N/A" and isinstance(market_cap, (int, float)):
+            if market_cap >= 1e12:
+                market_cap = f"${market_cap/1e12:.2f}T"
+            elif market_cap >= 1e9:
+                market_cap = f"${market_cap/1e9:.2f}B"
+            elif market_cap >= 1e6:
+                market_cap = f"${market_cap/1e6:.2f}M"
+            else:
+                market_cap = f"${market_cap:,.0f}"
 
         output = f"""📊 Stock Data: {ticker.upper()}
 
@@ -227,7 +256,7 @@ def get_stock_data(ticker: str, period: str = "1y") -> str:
             output += f"| {date.strftime('%Y-%m-%d')} | ${row['Open']:.2f} | ${row['High']:.2f} | ${row['Low']:.2f} | ${row['Close']:.2f} | {int(row['Volume']):,} |\n"
 
         # Company name if available
-        company_name = info.get('shortName', info.get('longName', ''))
+        company_name = info.get("shortName", info.get("longName", ""))
         if company_name:
             output = f"🏢 {company_name} ({ticker.upper()})\n\n" + output
 
@@ -265,56 +294,65 @@ def get_technical_indicators(ticker: str, period: str = "6mo") -> str:
 
         # Calculate indicators
         # RSI (Relative Strength Index) — try 14-day first, fallback to 7-day if insufficient data
-        df.get('rsi_14')
-        rsi = df.iloc[-1].get('rsi_14', None)
+        df.get("rsi_14")
+        rsi = df.iloc[-1].get("rsi_14", None)
         rsi_period = 14
         if rsi is None or (isinstance(rsi, float) and (rsi < 0 or rsi > 100)):
             # Fallback to 7-day RSI
             try:
-                df.get('rsi_7')
-                rsi = df.iloc[-1].get('rsi_7', None)
+                df.get("rsi_7")
+                rsi = df.iloc[-1].get("rsi_7", None)
                 rsi_period = 7
             except Exception:
                 rsi = None
                 rsi_period = 14
 
         # MACD
-        df.get('macd')
-        df.get('macds')  # MACD signal
-        df.get('macdh')  # MACD histogram
+        df.get("macd")
+        df.get("macds")  # MACD signal
+        df.get("macdh")  # MACD histogram
         # Bollinger Bands
-        df.get('boll')
-        df.get('boll_ub')  # Upper band
-        df.get('boll_lb')  # Lower band
+        df.get("boll")
+        df.get("boll_ub")  # Upper band
+        df.get("boll_lb")  # Lower band
         # KD (Stochastic)
-        df.get('kdjk')
-        df.get('kdjd')
+        df.get("kdjk")
+        df.get("kdjd")
         # CCI (Commodity Channel Index)
-        df.get('cci_20')
+        df.get("cci_20")
         # ATR (Average True Range)
-        df.get('atr_14')
+        df.get("atr_14")
 
         # Get latest values
         last = df.iloc[-1]
 
-        macd = last.get('macd', None)
-        macd_signal = last.get('macds', None)
-        macd_hist = last.get('macdh', None)
-        boll_mid = last.get('boll', None)
-        boll_upper = last.get('boll_ub', None)
-        boll_lower = last.get('boll_lb', None)
-        kdj_k = last.get('kdjk', None)
-        kdj_d = last.get('kdjd', None)
-        cci = last.get('cci_20', None)
-        atr = last.get('atr_14', None)
+        macd = last.get("macd", None)
+        macd_signal = last.get("macds", None)
+        macd_hist = last.get("macdh", None)
+        boll_mid = last.get("boll", None)
+        boll_upper = last.get("boll_ub", None)
+        boll_lower = last.get("boll_lb", None)
+        kdj_k = last.get("kdjk", None)
+        kdj_d = last.get("kdjd", None)
+        cci = last.get("cci_20", None)
+        atr = last.get("atr_14", None)
 
         # Interpretations
-        rsi_signal = "OVERBOUGHT (sell pressure likely)" if rsi and rsi > 70 else \
-                     "OVERSOLD (buy opportunity)" if rsi and rsi < 30 else \
-                     "NEUTRAL" if rsi else "N/A"
+        rsi_signal = (
+            "OVERBOUGHT (sell pressure likely)"
+            if rsi and rsi > 70
+            else (
+                "OVERSOLD (buy opportunity)"
+                if rsi and rsi < 30
+                else "NEUTRAL" if rsi else "N/A"
+            )
+        )
 
-        macd_signal_text = "BULLISH crossover" if macd_hist and macd_hist > 0 else \
-                          "BEARISH crossover" if macd_hist else "N/A"
+        macd_signal_text = (
+            "BULLISH crossover"
+            if macd_hist and macd_hist > 0
+            else "BEARISH crossover" if macd_hist else "N/A"
+        )
 
         rsi_display = f"{rsi:.2f}" if rsi is not None else "N/A"
 
@@ -378,52 +416,58 @@ def get_company_fundamentals(ticker: str) -> str:
             return f"❌ No fundamental data found for ticker: {ticker}\n\nPossible reasons:\n- Invalid ticker\n- Company is not publicly traded\n- Data temporarily unavailable"
 
         # Key fundamentals
-        company_name = info.get('longName', info.get('shortName', ticker.upper()))
-        sector = info.get('sector', 'N/A')
-        industry = info.get('industry', 'N/A')
-        market_cap = info.get('marketCap', 'N/A')
+        company_name = info.get("longName", info.get("shortName", ticker.upper()))
+        sector = info.get("sector", "N/A")
+        industry = info.get("industry", "N/A")
+        market_cap = info.get("marketCap", "N/A")
 
         # Valuation metrics
-        pe_ratio = info.get('trailingPE', info.get('forwardPE', 'N/A'))
-        pb_ratio = info.get('priceToBook', 'N/A')
-        ps_ratio = info.get('priceToSalesTrailing12Months', 'N/A')
-        peg_ratio = info.get('pegRatio', 'N/A')
-        ev_ebitda = info.get('enterpriseToEbitda', 'N/A')
+        pe_ratio = info.get("trailingPE", info.get("forwardPE", "N/A"))
+        pb_ratio = info.get("priceToBook", "N/A")
+        ps_ratio = info.get("priceToSalesTrailing12Months", "N/A")
+        peg_ratio = info.get("pegRatio", "N/A")
+        ev_ebitda = info.get("enterpriseToEbitda", "N/A")
 
         # Financial health
-        revenue = info.get('totalRevenue', 'N/A')
-        gross_profit = info.get('grossMargins', 'N/A')
-        operating_margin = info.get('operatingMargins', 'N/A')
-        profit_margin = info.get('profitMargins', 'N/A')
-        roe = info.get('returnOnEquity', 'N/A')
-        roa = info.get('returnOnAssets', 'N/A')
-        debt_to_equity = info.get('debtToEquity', 'N/A')
-        current_ratio = info.get('currentRatio', 'N/A')
-        quick_ratio = info.get('quickRatio', 'N/A')
+        revenue = info.get("totalRevenue", "N/A")
+        gross_profit = info.get("grossMargins", "N/A")
+        operating_margin = info.get("operatingMargins", "N/A")
+        profit_margin = info.get("profitMargins", "N/A")
+        roe = info.get("returnOnEquity", "N/A")
+        roa = info.get("returnOnAssets", "N/A")
+        debt_to_equity = info.get("debtToEquity", "N/A")
+        current_ratio = info.get("currentRatio", "N/A")
+        quick_ratio = info.get("quickRatio", "N/A")
 
         # Per share metrics
-        eps = info.get('trailingEps', info.get('forwardEps', 'N/A'))
-        book_value = info.get('bookValue', 'N/A')
-        revenue_per_share = info.get('revenuePerShare', 'N/A')
+        eps = info.get("trailingEps", info.get("forwardEps", "N/A"))
+        book_value = info.get("bookValue", "N/A")
+        revenue_per_share = info.get("revenuePerShare", "N/A")
 
         # Dividends
-        dividend_yield = info.get('dividendYield', 'N/A')
-        payout_ratio = info.get('payoutRatio', 'N/A')
+        dividend_yield = info.get("dividendYield", "N/A")
+        payout_ratio = info.get("payoutRatio", "N/A")
 
-        def fmt(val, suffix='', precision=2):
-            if val == 'N/A' or val is None:
-                return 'N/A'
+        def fmt(val, suffix="", precision=2):
+            if val == "N/A" or val is None:
+                return "N/A"
             if isinstance(val, (int, float)):
-                if val >= 1e12: return f"${val/1e12:.2f}T{suffix}"
-                if val >= 1e9: return f"${val/1e9:.2f}B{suffix}"
-                if val >= 1e6: return f"${val/1e6:.2f}M{suffix}"
-                if isinstance(val, float) and val < 10: return f"{val:.{precision}f}{suffix}"
+                if val >= 1e12:
+                    return f"${val/1e12:.2f}T{suffix}"
+                if val >= 1e9:
+                    return f"${val/1e9:.2f}B{suffix}"
+                if val >= 1e6:
+                    return f"${val/1e6:.2f}M{suffix}"
+                if isinstance(val, float) and val < 10:
+                    return f"{val:.{precision}f}{suffix}"
                 return f"{val:,.0f}{suffix}"
             return f"{val}{suffix}"
 
         def pct(val):
-            if val == 'N/A' or val is None: return 'N/A'
-            if isinstance(val, (int, float)): return f"{val*100:.2f}%"
+            if val == "N/A" or val is None:
+                return "N/A"
+            if isinstance(val, (int, float)):
+                return f"{val*100:.2f}%"
             return f"{val}"
 
         output = f"""🏢 {company_name} ({ticker.upper()})
@@ -502,33 +546,64 @@ def get_market_news(ticker: str = "", limit: int = 10) -> str:
 """
         for i, article in enumerate(news_list[:limit], 1):
             # Extract title with fallbacks
-            title = article.get('title') or article.get('relatedStocks', [{}])[0].get('name', '')
-            if not title or title.strip() == '':
+            title = article.get("title") or article.get("relatedStocks", [{}])[0].get(
+                "name", ""
+            )
+            if not title or title.strip() == "":
                 # Try extracting from description/summary
-                desc = article.get('content', {}).get('content', '') if isinstance(article.get('content'), dict) else ''
+                desc = (
+                    article.get("content", {}).get("content", "")
+                    if isinstance(article.get("content"), dict)
+                    else ""
+                )
                 if not desc:
                     # Use the thumbnail or link as a last resort
-                    link = article.get('link', '#')
+                    link = article.get("link", "#")
                     # Extract stock name from URL as fallback
                     title = f"News about {ticker.upper() if ticker else 'Market'}"
                 else:
-                    title = desc[:120] + '...' if len(desc) > 120 else desc
+                    title = desc[:120] + "..." if len(desc) > 120 else desc
 
-            publisher = article.get('publisher', 'Unknown')
-            link = article.get('link', '#')
-            published = article.get('providerPublishTime', 0)
+            publisher = article.get("publisher", "Unknown")
+            link = article.get("link", "#")
+            published = article.get("providerPublishTime", 0)
 
             # Convert timestamp
             from datetime import datetime
+
             if published:
-                pub_date = datetime.fromtimestamp(published).strftime('%Y-%m-%d %H:%M')
+                pub_date = datetime.fromtimestamp(published).strftime("%Y-%m-%d %H:%M")
             else:
-                pub_date = 'N/A'
+                pub_date = "N/A"
 
             # Simple sentiment hint from title keywords
             title_lower = title.lower()
-            bullish_words = ['up', 'rise', 'gain', 'bullish', 'rally', 'surge', 'jump', 'beat', 'strong', 'growth', 'profit']
-            bearish_words = ['down', 'fall', 'drop', 'bearish', 'crash', 'slump', 'miss', 'weak', 'loss', 'decline', 'cut']
+            bullish_words = [
+                "up",
+                "rise",
+                "gain",
+                "bullish",
+                "rally",
+                "surge",
+                "jump",
+                "beat",
+                "strong",
+                "growth",
+                "profit",
+            ]
+            bearish_words = [
+                "down",
+                "fall",
+                "drop",
+                "bearish",
+                "crash",
+                "slump",
+                "miss",
+                "weak",
+                "loss",
+                "decline",
+                "cut",
+            ]
 
             bullish_count = sum(1 for w in bullish_words if w in title_lower)
             bearish_count = sum(1 for w in bearish_words if w in title_lower)

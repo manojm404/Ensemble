@@ -10,9 +10,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +219,13 @@ class BudgetEnforcer:
             )
             self._escrows[escrow_id] = entry
 
-        logger.info("Escrowed %.2f for agent=%s workflow=%s [%s]", amount, agent_id, workflow_id, escrow_id)
+        logger.info(
+            "Escrowed %.2f for agent=%s workflow=%s [%s]",
+            amount,
+            agent_id,
+            workflow_id,
+            escrow_id,
+        )
         return BudgetCheckResult(
             allowed=True,
             reason=f"Escrowed: {escrow_id}",
@@ -280,7 +285,11 @@ class BudgetEnforcer:
                     allowed=False,
                     reason=f"Escrow '{escrow_id}' not found",
                 )
-            if entry.status in (EscrowStatus.CONFIRMED, EscrowStatus.RELEASED, EscrowStatus.EXPIRED):
+            if entry.status in (
+                EscrowStatus.CONFIRMED,
+                EscrowStatus.RELEASED,
+                EscrowStatus.EXPIRED,
+            ):
                 return BudgetCheckResult(
                     allowed=False,
                     reason=f"Escrow '{escrow_id}' cannot be released (status: {entry.status.value})",
@@ -356,6 +365,7 @@ class BudgetEnforcer:
     @staticmethod
     def _current_month() -> str:
         from datetime import datetime
+
         return datetime.utcnow().strftime("%Y-%m")
 
     def _get_or_create_agent(self, agent_id: str) -> _AgentBudget:
@@ -412,14 +422,16 @@ class BudgetEnforcer:
         )
 
     # Backwards compatibility aliases
-    def confirm_execution(self, agent_id: str, actual_cost: float, workflow_id: str = "default"):
+    def confirm_execution(
+        self, agent_id: str, actual_cost: float, workflow_id: str = "default"
+    ):
         """Backwards compatibility - records cost directly without escrow."""
         # Just update the spending totals without escrow mechanics
         with self._lock:
             ab = self._get_or_create_agent(agent_id)
             wb = self._get_or_create_workflow(workflow_id)
             mb = self._get_or_create_monthly(self._current_month())
-            
+
             ab.spent += actual_cost
             wb.spent += actual_cost
             mb.spent += actual_cost
