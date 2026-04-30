@@ -30,6 +30,7 @@ ui/src-tauri/binaries/
 out/
 .npm
 .yarn-error.log
+ui/.vite/
 
 # Ensemble Runtime Data (CAS & Governance)
 data/
