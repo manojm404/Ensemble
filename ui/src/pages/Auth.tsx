@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,21 @@ const Auth = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
+
+  useEffect(() => {
+    // This component is used for both login and logout.
+    // If the user lands here, we assume they want to log out.
+    // Clear all auth-related local storage.
+    localStorage.removeItem('ensemble_auth_token');
+    localStorage.removeItem('ensemble_refresh_token');
+    localStorage.removeItem('ensemble_token_expires_at');
+    
+    // Optional: Let the user know they've been logged out.
+    // toast.success("You have been logged out");
+
+    // No need to navigate here, as the AuthRedirectWrapper will handle it.
+    // The checkAuth() will now fail, and the user will be sent to the /landing page.
+  }, []);
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
