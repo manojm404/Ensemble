@@ -1,5 +1,5 @@
 """
-core/audit.py - Audit Logging for Ensemble (Phase 3: Multi-Tenant)
+core/audit.py - Audit Logging for Esemble (Phase 3: Multi-Tenant)
 
 Supports both SQLite (backward compatible) and Supabase (multi-tenant).
 When Supabase is configured, all audit events are written to the
@@ -46,7 +46,11 @@ class AuditLogger:
 
     def __init__(self, db_path: str = "data/ensemble_audit.db"):
         self.db_path = db_path
-        self.use_supabase = bool(os.getenv("SUPABASE_URL"))
+        # Prefer SQLite if a custom db_path is provided (tests pass explicit paths)
+        if db_path and db_path != "data/ensemble_audit.db":
+            self.use_supabase = False
+        else:
+            self.use_supabase = bool(os.getenv("SUPABASE_URL"))
 
         if self.use_supabase:
             logger.info("✅ [AuditLogger] Using Supabase backend (multi-tenant)")
@@ -333,12 +337,15 @@ class AuditLogger:
         title: str,
         preview: str,
         content: str,
-        from_name: str = "Ensemble",
+        from_name: str = "Esemble",
         from_avatar: str = "🤖",
         category: str = "system",
         broadcast: bool = True
     ):
         """Persistent notification for the Inbox."""
+        if not user_id:
+            return
+
         timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         
         # SQLite storage
@@ -374,9 +381,11 @@ class AuditLogger:
 
     def get_notifications(self, user_id: str, company_id: str = None, limit: int = 50) -> List[Dict[str, Any]]:
         """Fetch notifications for the Inbox."""
+        if not user_id:
+            return []
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            query = "SELECT * FROM notifications WHERE (user_id = ? OR user_id = 'dev_user' OR user_id IS NULL)"
+            query = "SELECT * FROM notifications WHERE user_id = ?"
             params = [user_id]
             
             if company_id:

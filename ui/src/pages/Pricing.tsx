@@ -7,7 +7,7 @@ const Pricing = () => {
   const navigate = useNavigate();
 
   return (
-    <div className="w-full min-h-screen bg-background font-sans pt-32 pb-20">
+    <div className="w-full min-h-screen bg-[linear-gradient(180deg,#e8edf3_0%,#eef2f7_100%)] font-sans pt-32 pb-20 text-foreground">
       <div className="max-w-7xl mx-auto px-6">
         <div className="text-center max-w-3xl mx-auto mb-20">
           <motion.h1 
@@ -69,7 +69,7 @@ const PricingCard = ({ tier, price, description, features, buttonText, highlight
     initial={{ opacity: 0, y: 20 }}
     whileInView={{ opacity: 1, y: 0 }}
     viewport={{ once: true }}
-    className={`p-8 rounded-[2.5rem] border ${highlight ? 'border-primary bg-primary/5 shadow-[0_0_40px_rgba(var(--primary),0.1)]' : 'border-white/10 bg-white/[0.02]'} flex flex-col`}
+    className={`p-8 rounded-[2.5rem] border ${highlight ? 'border-slate-300 bg-white shadow-[0_0_40px_rgba(15,23,42,0.08)]' : 'border-slate-200/80 bg-white/75'} flex flex-col shadow-[0_12px_40px_rgba(15,23,42,0.06)]`}
   >
     <div className="mb-8">
       <h3 className="text-xl font-bold mb-2">{tier}</h3>
@@ -86,14 +86,14 @@ const PricingCard = ({ tier, price, description, features, buttonText, highlight
           <div className="w-5 h-5 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0 mt-0.5">
             <Check className="w-3.5 h-3.5 text-emerald-500" />
           </div>
-          <span className="text-foreground/80">{f}</span>
+          <span className="text-foreground">{f}</span>
         </div>
       ))}
     </div>
 
     <Button 
       variant={highlight ? 'default' : 'outline'} 
-      className={`w-full h-12 rounded-full font-bold ${!highlight && 'border-white/20 hover:bg-white/5'}`}
+      className={`w-full h-12 rounded-full font-bold ${!highlight && 'border-slate-200/80 bg-white/80 hover:bg-white'}`}
       onClick={onClick}
     >
       {buttonText} {highlight && <ArrowRight className="w-4 h-4 ml-2" />}

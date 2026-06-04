@@ -13,9 +13,10 @@ export function AppLayout() {
   const location = useLocation();
 
   return (
-      <div className="h-screen flex flex-col w-full overflow-hidden">
+      <div className="relative h-screen flex flex-col w-full overflow-hidden bg-background text-foreground">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.08),transparent_24%),radial-gradient(circle_at_bottom_right,rgba(59,130,246,0.06),transparent_28%)]" />
         <TopBar />
-        <main className="flex-1 min-h-0 overflow-hidden border-t border-border/20 shadow-inner">
+        <main className="relative flex-1 min-h-0 overflow-hidden border-t border-border/20 shadow-inner">
           <InspectorProvider>
             <AnimatePresence mode="popLayout">
               <motion.div
@@ -33,7 +34,7 @@ export function AppLayout() {
         </main>
         
         {/* Professional Bottom Border / Status Bar */}
-        <footer className="h-6 shrink-0 bg-secondary/80 border-t border-border/20 px-3 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50 select-none">
+        <footer className="relative h-7 shrink-0 bg-background/75 backdrop-blur-xl border-t border-border/30 px-3 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 select-none">
           <div className="flex items-center gap-3">
              <div className="flex items-center gap-1.5">
                <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
@@ -43,7 +44,7 @@ export function AppLayout() {
              <span>Local Port: 8000</span>
           </div>
           <div className="flex items-center gap-4">
-             <span>Ensemble V1.0.4-Stable</span>
+             <span>Esemble v1.0.4-stable</span>
              <span className="opacity-30">|</span>
              <span className="text-primary/40">SOP Engine Active</span>
           </div>

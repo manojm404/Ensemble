@@ -25,6 +25,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Building2, Bot, Zap, ChevronRight, ChevronLeft, Check } from "lucide-react";
+import { scopedStorageKey } from "@/lib/storage-scope";
 
 interface FoundingWizardDialogProps {
     open: boolean;
@@ -106,10 +107,10 @@ export function FoundingWizardDialog({ open, onOpenChange }: FoundingWizardDialo
         };
 
         // Save to localStorage
-        const existing = JSON.parse(localStorage.getItem("ensemble_companies") || "{}");
+        const existing = JSON.parse(localStorage.getItem(scopedStorageKey("ensemble_companies")) || "{}");
         existing[companyId] = newOrg;
-        localStorage.setItem("ensemble_companies", JSON.stringify(existing));
-        localStorage.setItem("ensemble_current_company", companyId);
+        localStorage.setItem(scopedStorageKey("ensemble_companies"), JSON.stringify(existing));
+        localStorage.setItem(scopedStorageKey("ensemble_current_company"), companyId);
 
         toast.success(`Organization "${companyName}" founded!`);
         reset();

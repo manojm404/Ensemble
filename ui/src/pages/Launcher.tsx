@@ -35,7 +35,7 @@ const Launcher = () => {
             <span className="text-[10px] font-bold uppercase tracking-widest text-primary">Sovereign Core OS</span>
           </div>
           <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-foreground mb-4 drop-shadow-sm">
-            Ensemble Intelligence
+            Esemble Intelligence
           </h1>
           <p className="text-base md:text-lg text-muted-foreground max-w-lg mx-auto">
             Choose an application to begin your autonomous workflow session.

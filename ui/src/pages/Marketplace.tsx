@@ -196,7 +196,7 @@ const ConflictResolutionDialog = ({
               </Button>
               <Button
                 variant="outline"
-                className="flex-1 h-11 rounded-xl bg-white/5 border-white/10 hover:bg-white/10 text-muted-foreground gap-2"
+                className="flex-1 h-11 rounded-xl bg-secondary/40 border-border/50 hover:bg-secondary/60 text-muted-foreground gap-2"
                 onClick={() => onResolve("cancel")}
               >
                 <X className="h-4 w-4" />
@@ -350,7 +350,7 @@ const Marketplace = () => {
         {/* Header Area */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="h-9 w-9 rounded-lg hover:bg-white/5">
+            <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="h-9 w-9 rounded-lg hover:bg-secondary/50">
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center border border-primary/20 shadow-lg shadow-primary/5">
@@ -358,10 +358,10 @@ const Marketplace = () => {
             </div>
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-foreground">Agent Marketplace</h1>
-              <p className="text-sm text-muted-foreground mt-0.5 font-medium italic opacity-60">System manifest sync: Community specialist packs</p>
+              <p className="text-sm text-muted-foreground/75 mt-0.5 font-medium italic">System manifest sync: Community specialist packs</p>
             </div>
           </div>
-          <Button variant="outline" size="sm" className="h-9 px-4 rounded-xl border-border/30 hover:bg-white/5 font-bold uppercase tracking-widest text-[9px] gap-2" onClick={loadData} disabled={loading}>
+          <Button variant="outline" size="sm" className="h-9 px-4 rounded-xl border-border/30 hover:bg-secondary/50 font-bold uppercase tracking-widest text-[9px] gap-2" onClick={loadData} disabled={loading}>
             <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
             Sync
           </Button>
@@ -391,9 +391,9 @@ const Marketplace = () => {
 
         <div>
         {loading && packs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 space-y-4">
-            <RefreshCw className="h-8 w-8 animate-spin text-primary/30" />
-            <p className="text-sm text-muted-foreground">Connecting to Ensemble Manifest...</p>
+            <div className="flex flex-col items-center justify-center h-64 space-y-4">
+            <RefreshCw className="h-8 w-8 animate-spin text-primary/40" />
+            <p className="text-sm text-muted-foreground">Connecting to Esemble Manifest...</p>
           </div>
         ) : (
           <StaggerContainer className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
@@ -404,7 +404,7 @@ const Marketplace = () => {
               return (
                 <StaggerItem key={pack.id}>
                   <MotionCard 
-                    className="p-0 border-border/40 hover:border-primary/30 transition-all overflow-hidden group flex flex-col h-full bg-card/40 backdrop-blur-md"
+                    className="p-0 border-border/40 hover:border-primary/30 transition-all overflow-hidden group flex flex-col h-full bg-card/70 backdrop-blur-md"
                   >
                     <div className="p-6 flex-1 space-y-4">
                       <div className="flex items-center justify-between">
@@ -418,13 +418,13 @@ const Marketplace = () => {
                               Installed
                             </Badge>
                           ) : (
-                            <Badge variant="outline" className="text-[10px] uppercase tracking-widest opacity-60">
+                            <Badge variant="outline" className="text-[10px] uppercase tracking-widest text-foreground/65 border-border/60">
                               Available
                             </Badge>
                           )}
                           {/* 🆕 Source Badge */}
                           {pack.source && (
-                            <Badge variant="outline" className="text-[8px] px-2 py-0.5 opacity-70">
+                            <Badge variant="outline" className="text-[8px] px-2 py-0.5 text-foreground/60 border-border/60">
                               {pack.source === "github" ? "🐙 GitHub" : pack.source === "local" ? "💾 Local" : pack.source}
                             </Badge>
                           )}
@@ -497,10 +497,10 @@ const Marketplace = () => {
       <Dialog open={!!activePack} onOpenChange={(open) => !open && setActivePack(null)}>
         <DialogContent className="glass sm:max-w-xl border-primary/20 p-0 overflow-hidden">
           {activePack && (
-            <div className="flex flex-col h-full max-h-[85vh]">
+          <div className="flex flex-col h-full max-h-[85vh]">
               <div className="p-8 pb-4 space-y-6">
                 <div className="flex items-start gap-5">
-                  <div className="h-20 w-20 rounded-3xl bg-secondary/50 flex items-center justify-center text-5xl shadow-xl border border-border/30">
+                <div className="h-20 w-20 rounded-3xl bg-secondary/50 flex items-center justify-center text-5xl shadow-xl border border-border/30">
                     {activePack.emoji}
                   </div>
                   <div className="flex-1 min-w-0 pt-2">
@@ -591,7 +591,7 @@ const Marketplace = () => {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-8 gap-3">
-            <AlertDialogCancel className="h-11 rounded-xl bg-white/5 border-white/10 hover:bg-white/10 hover:text-foreground text-muted-foreground font-bold uppercase tracking-widest text-[10px]">
+            <AlertDialogCancel className="h-11 rounded-xl bg-secondary/40 border-border/50 hover:bg-secondary/60 hover:text-foreground text-muted-foreground font-bold uppercase tracking-widest text-[10px]">
               Abort Operation
             </AlertDialogCancel>
             <AlertDialogAction

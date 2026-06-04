@@ -1,7 +1,7 @@
 """
 core/supabase_client.py - Supabase Client Singleton
 
-Provides a thread-safe, lazily-initialized Supabase client for the Ensemble backend.
+Provides a thread-safe, lazily-initialized Supabase client for the Esemble backend.
 Supports both the anon key (for client-side operations) and the service role key
 (for admin operations that bypass RLS).
 
@@ -27,11 +27,12 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
+from supabase import create_client, Client
+
 logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
-
 
 class SupabaseClient:
     """
@@ -66,8 +67,6 @@ class SupabaseClient:
             )
 
         try:
-            from supabase import create_client, Client
-
             self._client: Client = create_client(self._url, self._key)
             logger.info(
                 "✅ [SupabaseClient] Connected to %s",
@@ -138,8 +137,6 @@ class SupabaseAdminClient:
             )
 
         try:
-            from supabase import create_client, Client
-
             self._client: Client = create_client(self._url, self._key)
             logger.info("✅ [SupabaseAdmin] Admin client initialized")
         except ImportError:

@@ -1,16 +1,16 @@
 import { useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
   Inbox,
   Building2,
+  Workflow,
   Sparkles,
   Settings,
-  FileText,
   Plus,
-  ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Grid3X3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,24 +20,17 @@ import { useTabContext, allApps } from "@/lib/tab-context";
 import { useCompanyContext } from "@/lib/company-context";
 import { MagicCompanyDialog } from "./MagicCompanyDialog";
 
-const MOCK_PROJECTS = [
-    { id: "p1", name: "Code Review Bot", color: "bg-emerald-400" },
-    { id: "p2", name: "Content Pipeline", color: "bg-blue-400" },
-    { id: "p3", name: "Bug Triage System", color: "bg-orange-400" },
-    { id: "p4", name: "Doc Generator", color: "bg-purple-400" },
-];
-
 export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { openApp } = useTabContext();
+  const { openApp, openRouteTab } = useTabContext();
   const { companies, currentCompany, setCurrentCompanyId } = useCompanyContext();
-  const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [companiesExpanded, setCompaniesExpanded] = useState(true);
+  const [utilitiesExpanded, setUtilitiesExpanded] = useState(false);
   const [magicCompanyOpen, setMagicCompanyOpen] = useState(false);
 
   const isActive = (path: string) => {
-    if (path === "/" && location.pathname === "/") return true;
+    if (path === "/" && (location.pathname === "/" || location.pathname === "/dashboard")) return true;
     if (path !== "/" && location.pathname.startsWith(path)) return true;
     return false;
   };
@@ -48,8 +41,20 @@ export function Sidebar() {
     if (route) navigate(route);
   };
 
+  const openPageTab = (tab: { id: string; title: string; route: string; icon: any; iconName?: string }) => {
+    openRouteTab({
+      id: tab.id,
+      title: tab.title,
+      url: tab.route,
+      icon: tab.icon,
+      iconName: tab.iconName,
+      closable: true,
+    });
+    navigate(tab.route);
+  };
+
   return (
-    <aside className="w-64 shrink-0 h-full border-r border-border/20 bg-background/30 backdrop-blur-md flex flex-col z-20">
+    <aside className="w-64 shrink-0 h-full border-r border-border/50 bg-card/60 backdrop-blur-md flex flex-col z-20">
       <ScrollArea className="flex-1">
         <div className="px-4 py-6 space-y-2">
           {/* Action Button */}
@@ -62,35 +67,52 @@ export function Sidebar() {
             icon={LayoutDashboard}
             label="Dashboard"
             active={isActive("/")}
-            onClick={() => navigate("/")}
+            onClick={() => {
+              openRouteTab({ id: "home", title: "Home", url: "/dashboard", icon: LayoutDashboard, iconName: "LayoutGrid", closable: false });
+              navigate("/dashboard");
+            }}
           />
           <SidebarItem
-            icon={Inbox}
-            label="Inbox"
-            active={isActive("/inbox")}
-            onClick={() => navigate("/inbox")}
-            badge="3"
+            icon={Workflow}
+            label="Workflows"
+            active={isActive("/workflows")}
+            onClick={() => openPageTab({ id: "workflows", title: "Workflows", route: "/workflows", icon: Workflow, iconName: "GitBranch" })}
+          />
+          <SidebarItem
+            icon={Sparkles}
+            label="Chat"
+            active={isActive("/chat")}
+            onClick={() => openPageTab({ id: "chat", title: "Chat", route: "/chat", icon: Sparkles, iconName: "MessageSquare" })}
           />
 
           <Separator className="my-4 bg-border/10 invisible" />
 
           {/* Companies Section */}
           <div className="space-y-1">
-            <button
-              onClick={() => setCompaniesExpanded(!companiesExpanded)}
-              className="flex items-center justify-between w-full px-3 py-1.5 text-[10px] font-black text-muted-foreground/30 uppercase tracking-[0.2em] hover:text-foreground transition-colors group"
-            >
+            <div className="flex items-center justify-between w-full px-3 py-1.5 text-[10px] font-black text-muted-foreground/30 uppercase tracking-[0.2em] hover:text-foreground transition-colors group">
               <span>Companies</span>
               <div className="flex items-center gap-2">
                 <button
-                    onClick={(e) => { e.stopPropagation(); setMagicCompanyOpen(true); }}
-                    className="h-4 w-4 rounded-md flex items-center justify-center bg-white/5 border border-transparent hover:border-white/10 hover:bg-white/10 transition-all opacity-0 group-hover:opacity-100"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMagicCompanyOpen(true);
+                  }}
+                  className="h-4 w-4 rounded-md flex items-center justify-center bg-secondary/40 border border-transparent hover:border-border/50 hover:bg-secondary/60 transition-all opacity-0 group-hover:opacity-100"
+                  title="Create company"
                 >
-                    <Plus className="h-2.5 w-2.5" />
+                  <Plus className="h-2.5 w-2.5" />
                 </button>
-                <ChevronRight className={`h-3 w-3 transition-transform ${companiesExpanded ? "rotate-90" : ""}`} />
+                <button
+                  type="button"
+                  onClick={() => setCompaniesExpanded(!companiesExpanded)}
+                  className="flex items-center justify-center"
+                  title={companiesExpanded ? "Collapse companies" : "Expand companies"}
+                >
+                  <ChevronRight className={`h-3 w-3 transition-transform ${companiesExpanded ? "rotate-90" : ""}`} />
+                </button>
               </div>
-            </button>
+            </div>
             <AnimatePresence>
               {companiesExpanded && (
                 <motion.div
@@ -102,11 +124,21 @@ export function Sidebar() {
                   {companies.map((c) => (
                     <button
                       key={c.id}
-                      onClick={() => { setCurrentCompanyId(c.id); navigate(`/company/${c.id}`); }}
+                      onClick={() => {
+                        setCurrentCompanyId(c.id);
+                        openRouteTab({
+                          id: `company-${c.id}`,
+                          title: c.name,
+                          url: `/company/${c.id}`,
+                          icon: Building2,
+                          iconName: "Building2",
+                        });
+                        navigate(`/company/${c.id}`);
+                      }}
                       className={`flex items-center gap-3 w-full px-4 py-2 rounded-xl text-xs font-bold transition-all group ${
                         currentCompany?.id === c.id
                           ? "bg-primary/10 text-primary"
-                          : "text-muted-foreground/60 hover:text-foreground hover:bg-white/5"
+                          : "text-muted-foreground/60 hover:text-foreground hover:bg-secondary/50"
                       }`}
                     >
                       <span className="text-sm">{c.emoji}</span>
@@ -116,7 +148,7 @@ export function Sidebar() {
                   {companies.length === 0 && (
                     <button
                       onClick={() => setMagicCompanyOpen(true)}
-                      className="flex items-center gap-3 w-full px-4 py-2 rounded-xl text-xs text-muted-foreground/40 hover:text-foreground hover:bg-white/5 transition-all"
+                      className="flex items-center gap-3 w-full px-4 py-2 rounded-xl text-xs text-muted-foreground/40 hover:text-foreground hover:bg-secondary/50 transition-all"
                     >
                       <Building2 className="h-3.5 w-3.5" />
                       <span>Start a company</span>
@@ -127,56 +159,45 @@ export function Sidebar() {
             </AnimatePresence>
           </div>
 
-          {/* Projects Section */}
+          <Separator className="my-6 bg-border/20" />
+
+          {/* Utilities */}
           <div className="space-y-1">
-            <button
-              onClick={() => setProjectsExpanded(!projectsExpanded)}
-              className="flex items-center justify-between w-full px-3 py-1.5 text-[10px] font-black text-muted-foreground/30 uppercase tracking-[0.2em] hover:text-foreground transition-colors group"
-            >
-              <span>Your Projects</span>
-              <div className="flex items-center gap-2">
-                <button
-                    onClick={(e) => { e.stopPropagation(); }}
-                    className="h-4 w-4 rounded-md flex items-center justify-center bg-white/5 border border-transparent hover:border-white/10 hover:bg-white/10 transition-all opacity-0 group-hover:opacity-100"
-                >
-                    <Plus className="h-2.5 w-2.5" />
-                </button>
-                <ChevronDown className={`h-3 w-3 transition-transform ${projectsExpanded ? "" : "-rotate-90"}`} />
-              </div>
-            </button>
+            <div className="flex items-center justify-between w-full px-3 py-1.5 text-[10px] font-black text-muted-foreground/30 uppercase tracking-[0.2em] hover:text-foreground transition-colors group">
+              <span>Utilities</span>
+              <button
+                type="button"
+                onClick={() => setUtilitiesExpanded(!utilitiesExpanded)}
+                className="flex items-center justify-center"
+                title={utilitiesExpanded ? "Collapse utilities" : "Expand utilities"}
+              >
+                <ChevronRight className={`h-3 w-3 transition-transform ${utilitiesExpanded ? "rotate-90" : ""}`} />
+              </button>
+            </div>
             <AnimatePresence>
-              {projectsExpanded && (
+              {utilitiesExpanded && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: "auto", opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden space-y-0.5 mt-1"
                 >
-                  {MOCK_PROJECTS.map((p) => (
-                    <button key={p.id} className="flex items-center gap-3 w-full px-4 py-2 rounded-xl text-xs font-bold text-muted-foreground/60 hover:text-foreground hover:bg-white/5 transition-all group/p">
-                      <div className={`h-2 w-2 rounded-full ${p.color} shadow-[0_0_8px_rgba(34,211,238,0.2)]`} />
-                      <span className="truncate">{p.name}</span>
-                    </button>
-                  ))}
+                  <SidebarItem
+                    icon={Inbox}
+                    label="Inbox"
+                    active={isActive("/inbox")}
+                    onClick={() => openPageTab({ id: "inbox", title: "Inbox", route: "/inbox", icon: Inbox, iconName: "Inbox" })}
+                    badge="3"
+                  />
+                  <SidebarItem icon={Grid3X3} label="Launcher" onClick={() => openPageTab({ id: "launcher", title: "Launcher", route: "/launcher", icon: Grid3X3, iconName: "Grid3X3" })} />
+                  <SidebarItem icon={Sparkles} label="Skills" onClick={() => openTab("agents", "/agents")} />
+                  <SidebarItem icon={Settings} label="Settings" onClick={() => openTab("settings", "/settings/general")} />
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
-
-          <Separator className="my-6 bg-border/20" />
-
-          {/* Management */}
-          <p className="text-[10px] font-black text-muted-foreground/30 uppercase tracking-[0.2em] px-3 pb-2 pt-1">Management</p>
-          <SidebarItem icon={Sparkles} label="Skills" onClick={() => openTab("agents", "/agents")} />
-          <SidebarItem icon={Settings} label="Settings" onClick={() => openTab("settings", "/settings/general")} />
         </div>
       </ScrollArea>
-
-      {/* Footer Nav */}
-      <div className="p-3 bg-white/5 border-t border-white/5 pb-8">
-          <SidebarItem icon={FileText} label="Documentation" onClick={() => { }} />
-          <SidebarItem icon={Settings} label="Global Settings" onClick={() => openTab("settings", "/settings/general")} />
-      </div>
 
       {/* Magic Company Dialog */}
       <MagicCompanyDialog
@@ -207,7 +228,7 @@ function SidebarItem({ icon: Icon, label, active, onClick, badge }: {
       className={`w-full flex items-center justify-between px-3 h-10 rounded-xl transition-all group ${
         active 
           ? "bg-primary/10 text-primary border border-primary/20 shadow-[0_0_15px_rgba(34,211,238,0.05)]" 
-          : "text-muted-foreground/60 hover:text-foreground hover:bg-white/5 font-bold"
+          : "text-muted-foreground/60 hover:text-foreground hover:bg-secondary/50 font-bold"
       }`}
     >
       <div className="flex items-center gap-3">
@@ -216,7 +237,7 @@ function SidebarItem({ icon: Icon, label, active, onClick, badge }: {
       </div>
       {badge && (
         <Badge className={`h-5 min-w-[20px] px-1.5 flex items-center justify-center text-[10px] font-black border-0 rounded-lg shadow-inner ${
-          active ? "bg-primary text-primary-foreground" : "bg-white/5 text-muted-foreground/40"
+          active ? "bg-primary text-primary-foreground" : "bg-secondary/50 text-muted-foreground/60"
         }`}>
           {badge}
         </Badge>

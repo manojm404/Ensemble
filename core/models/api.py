@@ -409,7 +409,7 @@ class HealthResponse(BaseModel):
     """Health check endpoint response."""
 
     status: str = Field(default="ok", description="Service health status")
-    version: str = Field(default="2.0.0", description="Ensemble version")
+    version: str = Field(default="2.0.0", description="Esemble version")
     supabase_connected: bool = Field(..., description="Whether Supabase connection is working")
     timestamp: datetime = Field(..., description="Current server time")
 

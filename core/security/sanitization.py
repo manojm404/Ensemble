@@ -1,5 +1,5 @@
 """
-core/security/sanitization.py - Input Sanitization for Ensemble
+core/security/sanitization.py - Input Sanitization for Esemble
 
 Protects against XSS and injection attacks by sanitizing user input
 before storage or rendering.

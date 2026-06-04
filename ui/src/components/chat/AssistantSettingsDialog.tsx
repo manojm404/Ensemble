@@ -35,7 +35,7 @@ interface AssistantConfig {
 }
 
 const defaultConfig: AssistantConfig = {
-  name: "Ensemble AI Assistant",
+  name: "Esemble AI Assistant",
   emoji: "🤖",
   model: "",
   temperature: 0.7,

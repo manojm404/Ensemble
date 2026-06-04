@@ -17,6 +17,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from core.parsers.agent_data import AgentData, AgentFormat, AgentCategory
+from core.marketplace_policy import filter_blocked_packs, is_blocked_pack
 
 logger = logging.getLogger(__name__)
 
@@ -408,7 +409,7 @@ class PackBuilder:
         try:
             with open(manifest_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data.get("packs", [])
+                return filter_blocked_packs(data.get("packs", []))
         except (json.JSONDecodeError, IOError) as e:
             logger.error(f"Failed to read packs manifest: {e}")
             return []
@@ -444,12 +445,19 @@ class PackBuilder:
         if not os.path.exists(manifest_path):
             return False
 
+        if is_blocked_pack(pack_id):
+            logger.info(f"Skipping blocked pack {pack_id}")
+            return True
+
         try:
             with open(manifest_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             original_count = len(data.get("packs", []))
-            data["packs"] = [p for p in data.get("packs", []) if p.get("id") != pack_id]
+            data["packs"] = [
+                p for p in data.get("packs", [])
+                if p.get("id") != pack_id and not is_blocked_pack(p.get("id"))
+            ]
             removed_count = original_count - len(data["packs"])
 
             if removed_count > 0:

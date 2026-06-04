@@ -85,7 +85,7 @@ CREATE TABLE public.user_api_keys (
     UNIQUE(user_id, provider),
     CONSTRAINT provider_valid CHECK (provider IN (
         'gemini', 'openai', 'anthropic', 'deepseek', 'groq',
-        'openrouter', 'ollama', 'lm-studio', 'localai', 'llama-cpp', 'vllm', 'cherryin', 'siliconflow', 'aihubmix'
+        'openrouter', 'openai_compatible', 'ollama', 'lm-studio', 'localai', 'llama-cpp', 'vllm', 'cherryin', 'siliconflow', 'aihubmix'
     ))
 );
 

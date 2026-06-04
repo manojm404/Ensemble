@@ -4,52 +4,52 @@
 
 @layer base {
   :root {
-    --background: 220 20% 95%;
-    --foreground: 220 20% 15%;
+    --background: 220 16% 89%;
+    --foreground: 220 30% 10%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 220 20% 15%;
+    --card: 220 14% 95%;
+    --card-foreground: 220 30% 10%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 220 15% 20%;
+    --popover: 220 14% 95%;
+    --popover-foreground: 220 30% 10%;
 
-    --primary: 195 70% 40%;
+    --primary: 195 75% 40%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 10% 90%;
-    --secondary-foreground: 220 10% 35%;
+    --secondary: 220 14% 83%;
+    --secondary-foreground: 220 30% 12%;
 
-    --muted: 220 10% 92%;
-    --muted-foreground: 215 10% 50%;
+    --muted: 220 14% 86%;
+    --muted-foreground: 220 18% 28%;
 
-    --accent: 195 70% 40%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 220 14% 83%;
+    --accent-foreground: 220 30% 12%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 10% 85%;
-    --input: 220 10% 80%;
-    --ring: 195 70% 40%;
+    --border: 220 18% 74%;
+    --input: 220 18% 72%;
+    --ring: 195 75% 40%;
 
     --radius: 0.75rem;
 
-    --sidebar-background: 220 20% 95%;
-    --sidebar-foreground: 215 10% 50%;
-    --sidebar-primary: 195 70% 40%;
+    --sidebar-background: 220 16% 89%;
+    --sidebar-foreground: 220 24% 16%;
+    --sidebar-primary: 195 75% 40%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 10% 92%;
-    --sidebar-accent-foreground: 220 15% 20%;
-    --sidebar-border: 220 10% 85%;
-    --sidebar-ring: 195 70% 40%;
+    --sidebar-accent: 220 15% 85%;
+    --sidebar-accent-foreground: 220 30% 12%;
+    --sidebar-border: 220 20% 75%;
+    --sidebar-ring: 195 75% 40%;
 
-    --surface-elevated: 220 14% 94%;
+    --surface-elevated: 220 14% 90%;
     --glow-primary: 195 90% 50%;
-    --badge-green: 155 70% 45%;
-    --badge-orange: 30 85% 55%;
-    --badge-purple: 270 60% 60%;
-    --badge-blue: 210 80% 55%;
-    --badge-red: 0 70% 55%;
+    --badge-green: 155 70% 35%;
+    --badge-orange: 30 85% 45%;
+    --badge-purple: 270 60% 50%;
+    --badge-blue: 210 80% 45%;
+    --badge-red: 0 70% 45%;
   }
 
   .dark {
@@ -96,18 +96,23 @@
   }
 
   html {
-    @apply dark;
+    @apply bg-background text-foreground;
   }
 
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "cv11", "ss01";
+    background-image:
+      radial-gradient(circle at top left, hsla(195, 75%, 40%, 0.06), transparent 30%),
+      radial-gradient(circle at 85% 15%, hsla(210, 80%, 55%, 0.04), transparent 24%),
+      linear-gradient(180deg, hsl(var(--background)), hsl(var(--background)));
+    background-attachment: fixed;
   }
 }
 
 @layer utilities {
   .glass {
-    @apply bg-card/80 backdrop-blur-xl border border-border/50;
+    @apply bg-card/75 backdrop-blur-xl border border-border/40;
   }
 
   .glow-primary {

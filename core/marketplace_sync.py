@@ -1,7 +1,7 @@
 """
 core/marketplace_sync.py
 Remote marketplace synchronization from GitHub repositories.
-Fetches agent packs from external sources and transforms them to Ensemble format.
+Fetches agent packs from external sources and transforms them to Esemble format.
 """
 import os
 import json
@@ -9,6 +9,8 @@ import requests
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
+
+from core.marketplace_policy import filter_blocked_packs
 
 
 class MarketplaceSource:
@@ -56,7 +58,7 @@ class MarketplaceSource:
                 print(f"⚠️ [MarketplaceSync] No manifest found in {self.repo}")
                 return []
             
-            # Step 2: Transform plugins to Ensemble pack format
+            # Step 2: Transform plugins to Esemble pack format
             packs = []
             plugins = manifest.get('plugins', [])
             
@@ -90,7 +92,7 @@ class MarketplaceSource:
             return None
     
     def _transform_plugin_to_pack(self, plugin: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Transform a plugin definition to Ensemble pack format."""
+        """Transform a plugin definition to Esemble pack format."""
         try:
             plugin_name = plugin.get('name', '')
             plugin_source = plugin.get('source', '')
@@ -168,7 +170,7 @@ class MarketplaceSource:
             if os.path.exists(manifest_path):
                 with open(manifest_path, 'r') as f:
                     data = json.load(f)
-                    return data.get('packs', [])
+                    return filter_blocked_packs(data.get('packs', []))
             return []
         except Exception as e:
             print(f"❌ [MarketplaceSync] Failed to fetch from local: {e}")

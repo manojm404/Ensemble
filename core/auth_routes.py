@@ -1,5 +1,5 @@
 """
-core/auth_routes.py - Authentication Endpoints for Ensemble
+core/auth_routes.py - Authentication Endpoints for Esemble
 
 Registers all auth-related routes on the FastAPI app.
 Import and call `register_auth_routes(app)` during app initialization.
@@ -38,6 +38,7 @@ class SignupRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
     full_name: Optional[str] = Field(None, max_length=255)
+    company_name: Optional[str] = Field(None, max_length=255)
 
 
 class LoginRequest(BaseModel):
@@ -131,7 +132,10 @@ async def signup(req: SignupRequest):
                 "email": req.email,
                 "password": req.password,
                 "options": {
-                    "data": {"full_name": req.full_name or ""},
+                    "data": {
+                        "full_name": req.full_name or "",
+                        "company_name": req.company_name or "",
+                    },
                 },
             }
         )

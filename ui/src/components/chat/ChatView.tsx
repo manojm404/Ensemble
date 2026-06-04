@@ -32,6 +32,7 @@ import { TopicSearchDialog } from "./TopicSearchDialog";
 import { AssistantSettingsDialog, defaultConfig, type AssistantConfig } from "./AssistantSettingsDialog";
 import { defaultAgent, availableAgents as initialAgents, type AgentInfo } from "@/lib/agents";
 import { fetchApi, WS_BASE_URL, deleteTopic, generateChatResponse, getModels, getAgents, type ModelInfo } from "@/lib/api";
+import { scopedStorageKey } from "@/lib/storage-scope";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sparkles, Settings2, ChevronDown, FolderTree } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -77,7 +78,7 @@ export function ChatView() {
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string>("gemini-2.5-flash");
   const [isGenerating, setIsGenerating] = useState(false);
-  const [activeProvider, setActiveProvider] = useState<{ provider: string; model: string } | null>(null);
+  const [activeProvider, setActiveProvider] = useState<{ provider: string; model: string; base_url?: string | null } | null>(null);
   const [userHasMessaged, setUserHasMessaged] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -92,7 +93,7 @@ export function ChatView() {
             title: t.title || 'New Topic',
             lastMessage: '...',
             timestamp: new Date(t.updated_at),
-            agentName: t.assistant_id || 'Ensemble',
+            agentName: t.assistant_id || 'Esemble',
             agentEmoji: '🤖'
           }));
           setConversations(loadedConvs);
@@ -108,7 +109,7 @@ export function ChatView() {
       .then(config => {
         if (config && config.provider && config.model) {
           setSelectedModelId(config.model);
-          setActiveProvider({ provider: config.provider, model: config.model });
+          setActiveProvider({ provider: config.provider, model: config.model, base_url: config.base_url || null });
         }
       })
       .catch((err) => console.warn("Failed to fetch provider:", err));
@@ -129,7 +130,8 @@ export function ChatView() {
     const hasToken = localStorage.getItem('ensemble_auth_token');
     if (hasToken) {
       try {
-        const wsUrl = `${WS_BASE_URL.replace('http', 'ws')}/ws/default`;
+        const companyScope = localStorage.getItem(scopedStorageKey('ensemble_current_company')) || 'user:anonymous';
+        const wsUrl = `${WS_BASE_URL.replace('http', 'ws')}/ws/${encodeURIComponent(companyScope)}`;
         const ws = new WebSocket(wsUrl);
         ws.onopen = () => {};
         ws.onmessage = (event) => {
@@ -297,7 +299,8 @@ export function ChatView() {
     /* REAL LLM CALL — Calling backend chat generation */
     setIsGenerating(true);
     try {
-      const selectedModel = availableModels.find(m => m.id === selectedModelId) || { id: selectedModelId, provider: 'gemini' };
+      const activeModelProvider = activeProvider?.provider || availableModels.find(m => m.id === selectedModelId)?.provider || "gemini";
+      const activeModelBaseUrl = activeProvider?.base_url || undefined;
       const chatContext = messages.map(m => ({
         role: m.role,
         content: m.content + (m.attachments?.map(a => `\n[Attached File: ${a.name} at ${a.url}]`).join('') || '')
@@ -309,9 +312,10 @@ export function ChatView() {
 
       const response = await generateChatResponse({
         messages: chatContext,
-        model: selectedModel.id,
-        provider: (selectedModel as any).provider,
-        api_key: assistantConfig.prompt, // Use this as additional context if provided
+        model: selectedModelId,
+        provider: activeModelProvider,
+        base_url: activeModelBaseUrl,
+        system_prompt: assistantConfig.prompt || undefined,
         assistant_id: currentAgent.id // Pass the selected agent/skill ID to the backend
       });
 
@@ -344,7 +348,7 @@ export function ChatView() {
     }
   };
 
-  /* Use customized name/emoji for Ensemble, raw agent data for specialized agents */
+  /* Use customized name/emoji for Esemble, raw agent data for specialized agents */
   const displayName = currentAgent.id === "ensemble" ? assistantConfig.name : currentAgent.name;
   const displayEmoji = currentAgent.id === "ensemble" ? assistantConfig.emoji : currentAgent.emoji;
 
@@ -367,8 +371,8 @@ export function ChatView() {
       <div className="flex-1 flex flex-col min-w-0">
         {/*
           Agent name bar — centered.
-          - Click opens settings (for Ensemble) or does nothing (for specialized agents)
-          - Right side: "Back to Ensemble" button + model badge + settings gear
+          - Click opens settings (for Esemble) or does nothing (for specialized agents)
+          - Right side: "Back to Esemble" button + model badge + settings gear
           DO NOT CHANGE: The relative/absolute positioning pattern here
         */}
         <div className="flex items-center justify-center px-4 py-3 border-b border-border/30 bg-card/20 backdrop-blur-sm relative">
@@ -396,16 +400,16 @@ export function ChatView() {
               </div>
             )}
 
-            {/* "Back to Ensemble" — only shown when using a specialized agent */}
+            {/* "Back to Esemble" — only shown when using a specialized agent */}
             {currentAgent.id !== "ensemble" && (
               <button
-                onClick={() => { setCurrentAgent(defaultAgent); toast.success("Switched back to Ensemble AI Assistant"); }}
+                onClick={() => { setCurrentAgent(defaultAgent); toast.success("Switched back to Esemble AI Assistant"); }}
                 className="text-[10px] text-muted-foreground bg-muted/20 px-2.5 py-1 rounded-full hover:bg-muted/40 transition-colors font-medium"
               >
-                ← Ensemble
+                ← Esemble
               </button>
             )}
-            {/* Settings gear — only for default Ensemble agent */}
+            {/* Settings gear — only for default Esemble agent */}
             {currentAgent.id === "ensemble" && (
               <>
                 <Button
@@ -570,7 +574,7 @@ export function ChatView() {
         }}
       />
 
-      {/* Ensemble AI Assistant settings — 6-tab config dialog */}
+      {/* Esemble AI Assistant settings — 6-tab config dialog */}
       <AssistantSettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}

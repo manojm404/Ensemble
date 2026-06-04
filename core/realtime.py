@@ -1,5 +1,5 @@
 """
-core/realtime.py - Supabase Realtime Subscriptions for Ensemble
+core/realtime.py - Supabase Realtime Subscriptions for Esemble
 
 Subscribes to Supabase Realtime events and broadcasts them
 to connected WebSocket clients. This provides live dashboard updates
@@ -22,6 +22,54 @@ import os
 from typing import Callable, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
+
+
+class NotConnectedError(Exception):
+    """Compatibility shim for the Supabase realtime package import path."""
+
+
+class AuthorizationError(Exception):
+    """Compatibility shim for the Supabase realtime package import path."""
+
+
+class RealtimeChannelOptions:
+    """Lightweight placeholder for Supabase realtime imports."""
+
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+
+class SyncRealtimeChannel:
+    """Lightweight placeholder for Supabase realtime imports."""
+
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+
+class SyncRealtimeClient:
+    """Lightweight placeholder for Supabase realtime imports."""
+
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+
+class AsyncRealtimeChannel:
+    """Lightweight placeholder for Supabase realtime imports."""
+
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+
+class AsyncRealtimeClient:
+    """Lightweight placeholder for Supabase realtime imports."""
+
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
 
 
 class RealtimeSubscriptions:

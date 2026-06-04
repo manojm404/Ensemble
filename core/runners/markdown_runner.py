@@ -72,7 +72,14 @@ class MarkdownRunner(BaseRunner):
             kwargs = self._build_kwargs(agent_data)
 
             # Call LLM
-            response = await self.llm_provider.chat(messages, agent_name=agent_data.name, **kwargs)
+            if agent_data.model or agent_data.temperature is not None:
+                model_override = {
+                    "model": agent_data.model,
+                    "temperature": agent_data.temperature
+                }
+                response = await self.llm_provider.chat_with_model(messages, model_override, agent_name=agent_data.name, **kwargs)
+            else:
+                response = await self.llm_provider.chat(messages, agent_name=agent_data.name, **kwargs)
 
             execution_time = time.time() - start_time
 

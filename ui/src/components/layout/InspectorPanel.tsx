@@ -56,12 +56,12 @@ export function InspectorProvider({ children }: { children: ReactNode }) {
               animate={{ width: isExpanded ? 520 : 380, opacity: 1, x: 0 }}
               exit={{ width: 0, opacity: 0, x: 20 }}
               transition={{ type: "spring", damping: 30, stiffness: 350 }}
-              className="h-full border-l border-primary/20 bg-card/60 backdrop-blur-2xl overflow-hidden shrink-0 shadow-[-10px_0_30px_rgba(0,0,0,0.3)] relative"
+              className="h-full border-l border-border/50 bg-card/80 backdrop-blur-2xl overflow-hidden shrink-0 shadow-[-10px_0_30px_rgba(15,23,42,0.18)] relative"
             >
               {/* Subtle border glow */}
               <div className="absolute inset-y-0 left-0 w-[1px] bg-gradient-to-b from-transparent via-primary/40 to-transparent" />
               
-              <div className="flex items-center justify-between px-5 py-4 border-b border-white/5 bg-white/5">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border/50 bg-card/50">
                 <div className="flex flex-col min-w-0">
                   <h3 className="text-xs font-black uppercase tracking-[0.2em] text-primary mb-0.5">Inspector</h3>
                   <h2 className="text-sm font-bold text-foreground truncate">

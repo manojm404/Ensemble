@@ -1,0 +1,46 @@
+name: "Automated Requirement Analysis"
+description: "Analyzes raw input to generate structured product requirements."
+version: "1.0.0"
+
+governance:
+  max_depth: 3
+  default_step_timeout: 300s
+  require_approval_on:
+    - "solution_proposal" # Example, if a future agent proposes solutions
+
+roles:
+  initial_input_processor:
+    instruction: "Process raw user input, attachments, and URLs. Consolidate into a single text document (raw_requirements.md)."
+    tools: ["read_artifact", "search_web", "read_url", "write_artifact"]
+  
+  product-manager-requirement-analyst:
+    instruction: "Analyze raw_requirements.md to extract structured functional requirements, non-functional requirements, user stories, and identified ambiguities. Output requirements_analysis.json and requirements.md."
+    tools: ["read_artifact", "analyse_text_for_requirements", "write_artifact"]
+
+workflow:
+  initial_state: "InputProcessing"
+  states:
+    InputProcessing:
+      role: initial_input_processor
+      instruction: "Read the initial user prompt, any attached files (from CAS, e.g., 'user_initial_input', 'uploaded_file_X'), and gather context from provided URLs. Consolidate all relevant information into 'raw_requirements.md'."
+      output_artifacts:
+        - name: "raw_requirements.md"
+      transitions:
+        - if_exists: "raw_requirements.md"
+          next_state: "Analysis"
+
+    Analysis:
+      role: product-manager-requirement-analyst
+      instruction: "Based on 'raw_requirements.md', generate structured requirements including user stories, functional and non-functional requirements, and a list of identified ambiguities. Output the full analysis as 'requirements_analysis.json' and a human-readable markdown summary as 'requirements.md'."
+      input_artifacts:
+        include: ["raw_requirements.md"]
+      output_artifacts:
+        - name: "requirements_analysis.json"
+        - name: "requirements.md"
+      transitions:
+        - if_exists: "requirements_analysis.json"
+          next_state: "Completed"
+        
+    Completed:
+      type: "end"
+      message: "Requirement analysis complete. Check the output for structured requirements."

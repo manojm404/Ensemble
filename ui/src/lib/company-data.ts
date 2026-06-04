@@ -6,6 +6,11 @@
  * User is registered as "Board Member" of the company.
  */
 
+import {
+  fetchApi,
+} from "./api";
+import { scopedStorageKey } from "./storage-scope";
+
 // ─── Types ───
 
 export interface Company {
@@ -78,16 +83,71 @@ interface CompanyData {
   activity: ActivityEvent[];
 }
 
+export interface CompanySummaryLike {
+  id: string;
+  name: string;
+  mission?: string;
+  emoji?: string;
+  status?: "Active" | "Setup";
+  agents?: number;
+  teams?: number;
+  projects?: number;
+  agent_count?: number;
+  team_count?: number;
+  issue_count?: number;
+}
+
+export interface CompanyOperationsSummary {
+  company: CompanySummaryLike;
+  counts: {
+    teams: number;
+    agents: number;
+    issues: {
+      total: number;
+      queued: number;
+      running: number;
+      completed: number;
+      failed: number;
+      blocked: number;
+    };
+    workflows: {
+      total: number;
+      running: number;
+      completed: number;
+      failed: number;
+      paused: number;
+    };
+    open_issues: number;
+    approvals_waiting: number;
+    blocked_items: number;
+    failed_runs: number;
+    agent_health: {
+      idle: number;
+      running: number;
+      paused: number;
+    };
+    evaluation_pass_rate: number;
+    health_score: number;
+  };
+  recent: {
+    issues: any[];
+    activity: any[];
+    runs: any[];
+    artifacts: any[];
+  };
+  generated_at: string;
+}
+
 // ─── Global Store ───
 const companyStore: Map<string, CompanyData> = new Map();
 
-const STORAGE_KEY = "ensemble_companies";
+const STORAGE_KEY = () => scopedStorageKey("ensemble_companies");
 
 function saveToStorage() {
   try {
     const data: Record<string, CompanyData> = {};
     companyStore.forEach((val, key) => { data[key] = val; });
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(STORAGE_KEY(), JSON.stringify(data));
   } catch (e) {
     console.warn("Failed to save companies to localStorage", e);
   }
@@ -95,7 +155,7 @@ function saveToStorage() {
 
 function loadFromStorage() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY());
     if (raw) {
       const data: Record<string, CompanyData> = JSON.parse(raw);
       Object.entries(data).forEach(([key, val]) => {
@@ -110,6 +170,174 @@ function loadFromStorage() {
 }
 
 loadFromStorage();
+
+function toCompanySummary(summary: CompanySummaryLike): Company {
+  return {
+    id: summary.id,
+    name: summary.name,
+    mission: summary.mission || "",
+    emoji: summary.emoji || "🏢",
+    status: summary.status || "Active",
+    memberCount: 1,
+    agentCount: summary.agents ?? summary.agent_count ?? 0,
+    teamCount: summary.teams ?? summary.team_count ?? 0,
+  };
+}
+
+function buildEmptyWorkspace(company: Company): CompanyData {
+  return {
+    company,
+    teams: [],
+    agents: [],
+    issues: [],
+    activity: [],
+  };
+}
+
+export function upsertCompanySummary(summary: CompanySummaryLike): Company {
+  const existing = companyStore.get(summary.id);
+  const company = toCompanySummary(summary);
+
+  if (existing) {
+    existing.company = {
+      ...existing.company,
+      ...company,
+    };
+    saveToStorage();
+    return existing.company;
+  }
+
+  const created = buildEmptyWorkspace(company);
+  companyStore.set(company.id, created);
+  saveToStorage();
+  return company;
+}
+
+function mapBackendStatus(status?: string): CompanyAgent["status"] {
+  if (status === "running") return "running";
+  if (status === "paused") return "paused";
+  return "idle";
+}
+
+function mapActivityType(actionType?: string): ActivityEvent["type"] {
+  const prefix = (actionType || "system").split(".")[0];
+  if (prefix === "agent" || prefix === "issue" || prefix === "alert" || prefix === "deploy" || prefix === "member") {
+    return prefix;
+  }
+  return "system";
+}
+
+export async function hydrateCompanyFromBackend(companyId: string): Promise<boolean> {
+  try {
+    const [companyDetail, teams, agents, issues, activity] = await Promise.all([
+      fetchApi(`/api/companies/${companyId}`, {}, true),
+      fetchApi(`/api/companies/${companyId}/teams`, {}, true),
+      fetchApi(`/api/companies/${companyId}/agents`, {}, true),
+      fetchApi(`/api/companies/${companyId}/issues`, {}, true),
+      fetchApi(`/api/companies/${companyId}/activity`, {}, true),
+    ]);
+
+    const localTeams: Team[] = (teams || []).map((team: any) => ({
+      id: team.id,
+      companyId: team.company_id,
+      name: team.name,
+      description: team.description || "",
+      emoji: team.emoji || "👥",
+      agentCount: 0,
+      completedIssueCount: 0,
+    }));
+
+    const teamById = new Map(localTeams.map(team => [team.id, team] as const));
+
+    const localAgents: CompanyAgent[] = (agents || []).map((agent: any) => {
+      const team = teamById.get(agent.team_id || "");
+      return {
+        id: agent.id,
+        companyId: agent.company_id,
+        teamId: agent.team_id || undefined,
+        teamName: team?.name || "General",
+        name: agent.display_name || agent.name || "Agent",
+        role: agent.role || "Specialist",
+        model: agent.model_name || agent.model_provider || "gemini-2.5-flash",
+        status: mapBackendStatus(agent.status),
+        emoji: agent.emoji || "🤖",
+        skills: agent.skills || [],
+        issuesCompleted: 0,
+        isCEO: Boolean(agent.is_lead),
+      };
+    });
+
+    const agentById = new Map(localAgents.map(agent => [agent.id, agent] as const));
+
+    const localIssues: CompanyIssue[] = (issues || []).map((issue: any) => {
+      const agent = agentById.get(issue.assigned_agent_id || "");
+      const team = teamById.get(issue.team_id || agent?.teamId || "");
+      return {
+        id: issue.id,
+        companyId: issue.company_id,
+        teamId: issue.team_id || team?.id || "",
+        teamName: team?.name || "General",
+        title: issue.title,
+        description: issue.description || "",
+        status: issue.status || "queued",
+        priority: issue.priority || "medium",
+        agentId: issue.assigned_agent_id || "",
+        agentName: agent?.name || "Unassigned",
+        agentEmoji: agent?.emoji || "🤖",
+        emoji: issue.priority === "critical" ? "🔴" : issue.priority === "high" ? "🟠" : issue.priority === "medium" ? "🟡" : "🟢",
+        created: issue.created_at || issue.created || "just now",
+        output: issue.output,
+      };
+    });
+
+    const localActivity: ActivityEvent[] = (activity || []).map((event: any) => ({
+      id: event.id,
+      companyId: companyId,
+      type: mapActivityType(event.action_type),
+      action: event.message || "",
+      time: event.created_at || new Date().toISOString(),
+    }));
+
+    localTeams.forEach(team => {
+      team.agentCount = localAgents.filter(agent => agent.teamId === team.id).length;
+      team.completedIssueCount = localIssues.filter(issue => issue.teamId === team.id && issue.status === "completed").length;
+    });
+
+    const company = toCompanySummary({
+      id: companyDetail.id || companyId,
+      name: companyDetail.name || "Company",
+      mission: companyDetail.mission || "",
+      emoji: companyDetail.emoji || "🏢",
+      status: companyDetail.status || "Active",
+      agents: localAgents.length,
+      teams: localTeams.length,
+      projects: localIssues.length,
+    });
+
+    companyStore.set(company.id, {
+      company,
+      teams: localTeams,
+      agents: localAgents,
+      issues: localIssues,
+      activity: localActivity,
+    });
+    saveToStorage();
+    return true;
+  } catch (error) {
+    console.warn(`Failed to hydrate company ${companyId} from backend`, error);
+    return false;
+  }
+}
+
+export async function getCompanyOperations(companyId: string): Promise<CompanyOperationsSummary | null> {
+  if (!companyId) return null;
+  try {
+    return await fetchApi(`/api/companies/${companyId}/operations`, {}, true);
+  } catch (error) {
+    console.warn(`Failed to fetch company operations for ${companyId}`, error);
+    return null;
+  }
+}
 
 // ─── Auto-Provision New Company with CEO ───
 function provisionNewCompany(company: Company): CompanyData {

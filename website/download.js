@@ -1,7 +1,7 @@
 document.querySelectorAll('.download-trigger').forEach(button => {
     button.addEventListener('click', (e) => {
         const os = e.currentTarget.dataset.os;
-        const filename = os === 'mac' ? 'Ensemble-1.0.0.dmg' : 'Ensemble-1.0.0.exe';
+        const filename = os === 'mac' ? 'Esemble-1.0.0.dmg' : 'Esemble-1.0.0.exe';
         
         // Visual feedback
         const originalText = button.textContent;
@@ -20,7 +20,7 @@ document.querySelectorAll('.download-trigger').forEach(button => {
                 button.textContent = `Download Started!`;
                 button.style.background = 'linear-gradient(135deg, #10b981, #3b82f6)';
                 
-                alert(`🚀 Ensemble V1.0.0 Release:\n\nIn a production environment, this would initiate the download of ${filename}.\n\nYour desktop app is ready for deployment.`);
+                alert(`🚀 Esemble V1.0.0 Release:\n\nIn a production environment, this would initiate the download of ${filename}.\n\nYour desktop app is ready for deployment.`);
                 
                 setTimeout(() => {
                     button.textContent = originalText;

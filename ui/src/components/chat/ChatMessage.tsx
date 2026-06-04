@@ -44,7 +44,7 @@ export function ChatMessage({ message, agentEmoji }: Props) {
                     <img
                       src={`${API_BASE_URL}${att.url}`}
                       alt={att.name}
-                      className="max-w-[240px] max-h-[240px] rounded-lg border border-white/10 hover:brightness-110 transition-all cursor-zoom-in"
+                      className="max-w-[240px] max-h-[240px] rounded-lg border border-border/50 hover:brightness-110 transition-all cursor-zoom-in"
                     />
                   ) : (
                     <div className="flex items-center gap-2 px-3 py-2 bg-secondary/50 rounded-lg border border-border/50 text-[12px]">

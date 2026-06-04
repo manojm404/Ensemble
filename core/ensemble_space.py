@@ -83,6 +83,8 @@ class EnsembleSpace(Space):
 
     def read(self, symbolic_name: str, user_id: str = None) -> Optional[bytes]:
         """Retrieve latest artifact content by symbolic name. Phase 3: user-scoped."""
+        if not user_id:
+            return None
         user_dir = self._get_user_dir(user_id)
 
         with sqlite3.connect(self.manifest_db) as conn:
@@ -90,7 +92,7 @@ class EnsembleSpace(Space):
             params = [symbolic_name]
 
             if user_id:
-                query += " AND (user_id = ? OR user_id IS NULL)"
+                query += " AND user_id = ?"
                 params.append(user_id)
 
             query += " ORDER BY created_at DESC LIMIT 1"
@@ -107,6 +109,8 @@ class EnsembleSpace(Space):
 
     def read_all_versions(self, symbolic_name: str, user_id: str = None) -> List[bytes]:
         """Retrieve all historical versions of an artifact by symbolic name."""
+        if not user_id:
+            return []
         user_dir = self._get_user_dir(user_id)
         versions = []
 
@@ -115,7 +119,7 @@ class EnsembleSpace(Space):
             params = [symbolic_name]
 
             if user_id:
-                query += " AND (user_id = ? OR user_id IS NULL)"
+                query += " AND user_id = ?"
                 params.append(user_id)
 
             query += " ORDER BY created_at ASC" # Oldest first
@@ -139,7 +143,7 @@ class EnsembleSpace(Space):
             conditions.append("state_name = ?")
             params.append(state_name)
         if user_id:
-            conditions.append("(user_id = ? OR user_id IS NULL)")
+            conditions.append("user_id = ?")
             params.append(user_id)
 
         if conditions:
@@ -151,12 +155,14 @@ class EnsembleSpace(Space):
 
     def exists(self, symbolic_name: str, user_id: str = None) -> bool:
         """Check if an artifact exists. Phase 3: user-scoped."""
+        if not user_id:
+            return False
         with sqlite3.connect(self.manifest_db) as conn:
             query = "SELECT 1 FROM artifacts WHERE symbolic_name = ?"
             params = [symbolic_name]
 
             if user_id:
-                query += " AND (user_id = ? OR user_id IS NULL)"
+                query += " AND user_id = ?"
                 params.append(user_id)
 
             query += " LIMIT 1"

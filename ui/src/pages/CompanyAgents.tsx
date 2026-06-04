@@ -1,28 +1,44 @@
-import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Bot, Search, X, Pause, Play, Settings2 } from "lucide-react";
+import { Bot, Search, X, Pause, Play, Settings2, ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useCompanyContext } from "@/lib/company-context";
-import { getCompanyById, getAgentsByCompany, getTeamsByCompany } from "@/lib/company-data";
+import { getCompanyById } from "@/lib/company-data";
+import { listCompanyAgents, listCompanyTeams, type CompanyAgentRecord, type CompanyTeam } from "@/lib/api";
+import { useScrollMemory } from "@/lib/use-scroll-memory";
 
 export default function CompanyAgents() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { currentCompany, setCurrentCompanyId } = useCompanyContext();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [agents, setAgents] = useState<CompanyAgentRecord[]>([]);
+  const [teams, setTeams] = useState<CompanyTeam[]>([]);
 
-  const company = getCompanyById(id || currentCompany?.id || "") || currentCompany;
+  const companyId = id || currentCompany?.id || "";
+  const company = getCompanyById(companyId) || currentCompany;
+  const scrollRef = useScrollMemory(`esemble_scroll_company_${companyId || "unknown"}_agents`);
+
+  useEffect(() => {
+    if (!companyId) return;
+    setCurrentCompanyId(companyId);
+    Promise.all([listCompanyAgents(companyId), listCompanyTeams(companyId)])
+      .then(([agentRows, teamRows]) => {
+        setAgents(agentRows);
+        setTeams(teamRows);
+      })
+      .catch(console.error);
+  }, [companyId]);
+
   if (!company) return <div className="flex items-center justify-center h-full text-muted-foreground">No company selected</div>;
 
-  const agents = getAgentsByCompany(company.id);
-  const teams = getTeamsByCompany(company.id);
-
   const filtered = agents.filter(a => {
-    const matchesSearch = a.name.toLowerCase().includes(search.toLowerCase()) || a.role.toLowerCase().includes(search.toLowerCase());
+    const matchesSearch = a.display_name.toLowerCase().includes(search.toLowerCase()) || a.role.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === "all" || a.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -38,6 +54,10 @@ export default function CompanyAgents() {
       {/* Header */}
       <div className="flex items-center justify-between px-8 py-6 border-b border-border/40 bg-card/30 backdrop-blur-sm">
         <div>
+          <Button variant="ghost" size="sm" className="mb-2 -ml-2 gap-2 rounded-full border border-border/40 bg-background/70" onClick={() => navigate(`/company/${companyId}`)}>
+            <ChevronLeft className="h-4 w-4" />
+            Back to workspace
+          </Button>
           <h1 className="text-xl font-bold text-foreground">{company.emoji} {company.name}</h1>
           <p className="text-xs text-muted-foreground mt-0.5">{agents.length} agents across {teams.length} teams</p>
         </div>
@@ -56,7 +76,7 @@ export default function CompanyAgents() {
       </div>
 
       {/* Agents Grid */}
-      <div className="flex-1 p-8">
+      <div ref={scrollRef} className="flex-1 overflow-auto p-8">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((agent, i) => (
             <motion.div key={agent.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
@@ -65,14 +85,14 @@ export default function CompanyAgents() {
                   <div className="flex items-start gap-3 mb-3">
                     <div className="h-10 w-10 rounded-xl bg-secondary/50 flex items-center justify-center text-xl border border-border/20">{agent.emoji}</div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold text-foreground truncate">{agent.name}</p>
+                      <p className="text-sm font-bold text-foreground truncate">{agent.display_name}</p>
                       <p className="text-[11px] text-muted-foreground line-clamp-1">{agent.role}</p>
-                      <p className="text-[10px] text-muted-foreground/50 mt-0.5">{agent.teamName}</p>
+                      <p className="text-[10px] text-muted-foreground/50 mt-0.5">{teams.find(t => t.id === agent.team_id)?.name || "Unassigned"}</p>
                     </div>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="text-[9px] font-bold uppercase px-1.5 py-0">{agent.model?.split("-").slice(0, 2).join(" ")}</Badge>
+                      <Badge variant="outline" className="text-[9px] font-bold uppercase px-1.5 py-0">{(agent.model_name || "default").split("-").slice(0, 2).join(" ")}</Badge>
                       <StatusDot status={agent.status} />
                     </div>
                     <div className="flex items-center gap-1">
@@ -82,11 +102,7 @@ export default function CompanyAgents() {
                       </Button>
                     </div>
                   </div>
-                  {agent.skills.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-3">
-                      {agent.skills.slice(0, 4).map((s, j) => <Badge key={j} variant="secondary" className="text-[9px] px-1.5 py-0">{s}</Badge>)}
-                    </div>
-                  )}
+                  {agent.skill_id && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 mt-3">{agent.skill_id}</Badge>}
                 </CardContent>
               </Card>
             </motion.div>

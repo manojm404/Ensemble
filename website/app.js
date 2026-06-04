@@ -1,5 +1,5 @@
 /**
- * Ensemble Website - Modern Interactive Script
+ * Esemble Website - Modern Interactive Script
  * Premium animations, scroll effects, and user interactions
  */
 
@@ -93,7 +93,7 @@ faqTriggers.forEach(trigger => {
 document.querySelectorAll('.download-trigger').forEach(button => {
   button.addEventListener('click', (e) => {
     const os = e.currentTarget.dataset.os;
-    const filename = os === 'mac' ? 'Ensemble-1.0.0.dmg' : 'Ensemble-1.0.0.exe';
+    const filename = os === 'mac' ? 'Esemble-1.0.0.dmg' : 'Esemble-1.0.0.exe';
     
     // Visual feedback
     const originalText = button.textContent;
@@ -354,7 +354,7 @@ const isTablet = window.innerWidth >= 768 && window.innerWidth < 1024;
 const isDesktop = window.innerWidth >= 1024;
 
 // Log for debugging
-console.log(`Ensemble Website Loaded | Device: ${isDesktop ? 'Desktop' : isTablet ? 'Tablet' : 'Mobile'}`);
+console.log(`Esemble Website Loaded | Device: ${isDesktop ? 'Desktop' : isTablet ? 'Tablet' : 'Mobile'}`);
 
 // ==========================================
 // PERFORMANCE: DEBOUNCE FOR RESIZE
@@ -403,5 +403,5 @@ document.querySelectorAll('.download-trigger').forEach(button => {
 // ==========================================
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('🎼 Ensemble Website - Ready for Orchestration');
+  console.log('🎼 Esemble Website - Ready for Orchestration');
 });

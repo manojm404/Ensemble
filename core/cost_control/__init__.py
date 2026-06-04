@@ -1,6 +1,6 @@
-"""Ensemble Cost Control Components.
+"""Esemble Cost Control Components.
 
-This package provides deterministic cost control primitives for the Ensemble platform:
+This package provides deterministic cost control primitives for the Esemble platform:
 - Input token limiting and truncation
 - Execution timeout enforcement
 - Budget enforcement with escrow
@@ -28,4 +28,3 @@ input_limiter = InputLimiter()
 timeout_manager = TimeoutManager()
 budget_enforcer = BudgetEnforcer()
 concurrency_manager = ConcurrencyManager()
-

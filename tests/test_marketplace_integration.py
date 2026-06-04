@@ -15,6 +15,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.skill_registry import skill_registry, SkillSource
+from core.marketplace_policy import filter_blocked_packs, is_blocked_pack
 from core.marketplace_sync import MarketplaceSource, MarketplaceSync
 from core.github_pack_builder import GitHubPackBuilder
 from core.pack_eval import PackEvaluator, QualityBadge, AntiPattern
@@ -107,6 +108,41 @@ class TestMarketplaceSync:
         sync = MarketplaceSync()
         status = sync.get_source_status()
         assert isinstance(status, list)
+
+    def test_blocked_pack_is_filtered_from_local_manifest(self):
+        """Verify local marketplace reads cannot resurrect blocked packs."""
+        manifest = {
+            "packs": [
+                {"id": "game-dev-pack", "name": "Game Dev Pack"},
+                {"id": "china-market-pack", "name": "China Market Mastery"},
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = os.path.join(tmpdir, "packs.json")
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f)
+
+            source = MarketplaceSource({
+                "id": "local-test-source",
+                "name": "Local Test Source",
+                "type": "local",
+                "manifest_path": manifest_path,
+            })
+
+            packs = source._fetch_from_local()
+            assert [p["id"] for p in packs] == ["game-dev-pack"]
+
+    def test_marketplace_policy_blocks_china_pack(self):
+        """Verify the blocklist helper keeps the banned pack out of manifests."""
+        assert is_blocked_pack("china-market-pack") is True
+        assert is_blocked_pack("paid-media-pack") is False
+
+        packs = filter_blocked_packs([
+            {"id": "china-market-pack"},
+            {"id": "testing-qa-pack"},
+        ])
+        assert [p["id"] for p in packs] == ["testing-qa-pack"]
 
 
 class TestPackEval:

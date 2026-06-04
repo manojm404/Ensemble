@@ -2,8 +2,8 @@
  * API Client functions.
  */
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8088';
-export const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://127.0.0.1:8088';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || "";
+export const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://127.0.0.1:8000';
 
 /**
  * Check if the current access token is expired or about to expire (within 5 min).
@@ -27,6 +27,13 @@ async function ensureValidToken(): Promise<boolean> {
     return true; // Token still valid
   }
 
+  // If we do not have an expiry timestamp yet, treat the current token as
+  // valid and let the server enforce auth. This avoids wiping a fresh login
+  // when the auth response omits refresh metadata.
+  if (!expiresAt) {
+    return true;
+  }
+
   // Token is expired or expiring — try to refresh
   if (!refreshToken) {
     clearAuthTokens();
@@ -34,7 +41,7 @@ async function ensureValidToken(): Promise<boolean> {
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+    const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refreshToken }),
@@ -85,7 +92,10 @@ export async function fetchApi(endpoint: string, options: RequestInit = {}, sile
       if (!silent) {
         if (window.location.pathname !== '/auth') {
           console.warn(`API request to ${endpoint} returned 401 — redirecting to login`);
-          localStorage.setItem('ensemble_auth_redirect', window.location.pathname);
+          localStorage.setItem('ensemble_auth_redirect', JSON.stringify({
+            path: window.location.pathname,
+            ts: Date.now(),
+          }));
           clearAuthTokens();
           window.location.href = '/auth';
         }
@@ -93,7 +103,11 @@ export async function fetchApi(endpoint: string, options: RequestInit = {}, sile
       throw new Error('Authentication required. Please log in.');
     }
     const errorData = await response.json().catch(() => null);
-    throw new Error(errorData?.detail || `API request failed: ${response.statusText}`);
+    const detail = errorData?.detail;
+    const message = typeof detail === 'string'
+      ? detail
+      : detail?.message || detail?.error || errorData?.message || `API request failed: ${response.statusText}`;
+    throw new Error(message);
   }
   return response.json();
 }
@@ -208,7 +222,18 @@ export async function getWorkspaceTree() {
 
 export async function getPendingApprovals() {
   try {
-    return await fetchApi('/api/governance/pending');
+    const data = await fetchApi('/governance/pending');
+    if (!Array.isArray(data)) return [];
+    return data.map((item: any) => ({
+      id: item.approval_id || item.id,
+      action: item.action,
+      agent: item.agent_id,
+      workflow_id: item.details?.workflow_id || item.workflow_id,
+      details: item.details || item.details_json || {},
+      reason: item.reason,
+      timestamp: item.timestamp,
+      status: item.status || "PENDING",
+    }));
   } catch (e) {
     console.warn("Approvals API not ready yet", e);
     return [];
@@ -216,9 +241,9 @@ export async function getPendingApprovals() {
 }
 
 export async function submitApproval(id: string, decision: 'APPROVE' | 'REJECT', feedback?: string) {
-  return await fetchApi('/api/governance/decision', {
+  return await fetchApi(`/governance/decision/${id}`, {
     method: 'POST',
-    body: JSON.stringify({ pending_id: id, decision, feedback })
+    body: JSON.stringify({ approved: decision === 'APPROVE', feedback })
   });
 }
 
@@ -252,12 +277,261 @@ export async function saveRegularPhrases(phrases: any) {
   catch (e) { return { status: 'error' }; }
 }
 
+export interface ProviderConfig {
+  provider: string;
+  model: string;
+  base_url?: string | null;
+}
 
-export async function generateWorkflowAPI(prompt: string) {
-  return await fetchApi('/api/workflows/generate', {
-    method: 'POST',
-    body: JSON.stringify({ prompt })
+export interface UserSettings {
+  provider?: string;
+  model?: string;
+  base_url?: string | null;
+  approval_cost_threshold?: number;
+  approval_timeout_seconds?: number;
+  theme?: string;
+}
+
+export interface ApiKeyRecord {
+  id: string;
+  provider: string;
+  key_suffix: string;
+  is_active: boolean;
+  last_used_at?: string | null;
+  created_at?: string | null;
+}
+
+export async function getProviderSettings(): Promise<ProviderConfig> {
+  return await fetchApi('/api/settings/provider');
+}
+
+export async function getUserSettings(): Promise<UserSettings> {
+  const response = await fetchApi('/api/settings');
+  return response.settings || {};
+}
+
+export async function saveUserSettings(params: UserSettings): Promise<{ success: boolean; settings: UserSettings }> {
+  return await fetchApi('/api/settings', {
+    method: 'PUT',
+    body: JSON.stringify(params),
   });
+}
+
+export async function saveProviderSettings(params: ProviderConfig): Promise<{ success: boolean; config: ProviderConfig; warnings?: string[] }> {
+  return await fetchApi('/api/settings/provider', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function listApiKeys(): Promise<ApiKeyRecord[]> {
+  const response = await fetchApi('/api/settings/api-keys');
+  return response.keys || [];
+}
+
+export async function saveApiKey(provider: string, api_key: string): Promise<{ status: string; key: ApiKeyRecord }> {
+  return await fetchApi('/api/settings/api-keys', {
+    method: 'POST',
+    body: JSON.stringify({ provider, api_key }),
+  });
+}
+
+export async function deleteApiKey(keyId: string): Promise<{ status: string; message: string }> {
+  return await fetchApi(`/api/settings/api-keys/${keyId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function testApiKey(provider: string, api_key?: string, model?: string, base_url?: string): Promise<{ status: string; success: boolean; message: string }> {
+  return await fetchApi('/api/settings/api-keys/test', {
+    method: 'POST',
+    body: JSON.stringify(api_key || model || base_url ? { provider, api_key, model, base_url } : { provider }),
+  });
+}
+
+
+export async function generateWorkflowAPI(
+  prompt: string,
+  timeoutMs = 120000,
+  options?: { agentCount?: number; mode?: string; outputType?: string; maxCycles?: number; seed?: string; manualControl?: boolean }
+) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const result = await fetchApi('/api/workflows/magicflow', {
+      method: 'POST',
+      signal: controller.signal,
+      body: JSON.stringify({
+        prompt,
+        ...(typeof options?.agentCount === "number" ? { agent_count: options.agentCount } : {}),
+        ...(options?.mode ? { mode: options.mode } : {}),
+        ...(options?.outputType ? { output_type: options.outputType } : {}),
+        ...(typeof options?.maxCycles === "number" ? { max_cycles: options.maxCycles } : {}),
+        ...(options?.seed ? { seed: options.seed } : {}),
+        ...(typeof options?.manualControl === "boolean" ? { manual_control: options.manualControl } : {}),
+      })
+    });
+    return result?.workflow || result;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+export async function runWorkflowAPI(params: {
+  id?: string;
+  nodes: Array<Record<string, any>>;
+  edges: Array<Record<string, any>>;
+  metadata?: Record<string, any>;
+  initialInput?: string;
+}): Promise<{ status: string; run_id: string; workflow_mode?: string }> {
+  return await fetchApi('/api/workflows/run', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function runSimulationAPI(params: {
+  id?: string;
+  nodes?: Array<Record<string, any>>;
+  edges?: Array<Record<string, any>>;
+  metadata?: Record<string, any>;
+  initialInput?: string;
+  prompt?: string;
+}): Promise<{ status: string; run_id: string; workflow_id?: string; workflow_mode?: string }> {
+  return await fetchApi('/api/simulation/run', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function getWorkflowRunStatus(runId: string): Promise<{
+  run_id: string;
+  workflow_id: string;
+  workflow_name?: string;
+  status: string;
+  current_node?: string | null;
+  current_node_label?: string | null;
+  current_node_role?: string | null;
+  last_agent_id?: string | null;
+  started_at?: string | null;
+  current_iteration?: number | null;
+  max_iterations?: number | null;
+  total_steps: number;
+  completed_count: number;
+  failure_kind?: string | null;
+  failure_label?: string | null;
+  node_statuses: Array<{ node_id: string; label?: string; role?: string; subtitle?: string; selection_reason?: string; status: string; error?: string | null; failure_kind?: string | null; failure_label?: string | null; updated_at: string }>;
+  events?: Array<Record<string, any>>;
+  messages?: Array<Record<string, any>>;
+  message_threads?: Array<Record<string, any>>;
+}> {
+  return await fetchApi(`/api/runs/${runId}/status`);
+}
+
+export async function getWorkflowRunTimeline(runId: string): Promise<Array<Record<string, any>>> {
+  try {
+    return await fetchApi(`/api/runs/${runId}/timeline`);
+  } catch (e) {
+    console.warn("Run timeline API not ready", e);
+    return [];
+  }
+}
+
+export async function getWorkflowRunEvents(runId: string): Promise<{ run?: any; timeline: Array<Record<string, any>>; events: Array<Record<string, any>>; messages?: Array<Record<string, any>>; message_threads?: Array<Record<string, any>> }> {
+  try {
+    return await fetchApi(`/api/runs/${runId}/events`);
+  } catch (e) {
+    console.warn("Run events API not ready", e);
+    return { timeline: [], events: [] };
+  }
+}
+
+export async function getWorkflowRunArtifacts(workflowId: string): Promise<Array<Record<string, any>>> {
+  try {
+    return await fetchApi(`/api/workflows/${workflowId}/artifacts`);
+  } catch (e) {
+    console.warn("Workflow artifacts API not ready", e);
+    return [];
+  }
+}
+
+export async function getWorkspaceFile(path: string): Promise<{ path: string; content: string }> {
+  return await fetchApi(`/api/workspace/file?path=${encodeURIComponent(path)}`);
+}
+
+export async function getWorkflowRunOutput(workflowId: string, runId?: string): Promise<any> {
+  try {
+    const query = runId ? `?run_id=${encodeURIComponent(runId)}` : "";
+    return await fetchApi(`/api/workflows/${workflowId}/output${query}`);
+  } catch (e) {
+    console.warn("Workflow output API not ready", e);
+    return { workflow_id: workflowId, outputs: [], latest: null };
+  }
+}
+
+export async function getSimulationRunStatus(runId: string): Promise<any> {
+  return await fetchApi(`/api/simulation/run/${runId}/status`);
+}
+
+export async function pauseSimulationRun(runId: string): Promise<any> {
+  return await fetchApi(`/api/simulation/run/${runId}/pause`, { method: 'POST' });
+}
+
+export async function resumeSimulationRun(runId: string): Promise<any> {
+  return await fetchApi(`/api/simulation/run/${runId}/resume`, { method: 'POST' });
+}
+
+export async function stepSimulationRun(runId: string): Promise<any> {
+  return await fetchApi(`/api/simulation/run/${runId}/step`, { method: 'POST' });
+}
+
+export async function getSimulationRunResult(runId: string): Promise<any> {
+  return await fetchApi(`/api/simulation/run/${runId}/result`);
+}
+
+export async function getSimulationRunAudit(runId: string): Promise<any> {
+  return await fetchApi(`/api/simulation/run/${runId}/audit`);
+}
+
+export async function getWorkflowResult(workflowId: string, runId?: string): Promise<any> {
+  try {
+    const query = runId ? `?run_id=${encodeURIComponent(runId)}` : "";
+    return await fetchApi(`/api/workflows/${workflowId}/result${query}`);
+  } catch (e) {
+    console.warn("Workflow result API not ready", e);
+    return { workflow_id: workflowId, outputs: [], latest: null };
+  }
+}
+
+export async function getWorkflowEvaluation(workflowId: string): Promise<any> {
+  try {
+    return await fetchApi(`/api/workflows/${workflowId}/evaluation`);
+  } catch (e) {
+    console.warn("Workflow evaluation API not ready", e);
+    return { workflow_id: workflowId, status: "fail", score: 0, max_score: 6, summary: "No evaluation available", checks: [] };
+  }
+}
+
+export async function exportWorkflowAuditPackage(workflowId: string): Promise<void> {
+  const token = localStorage.getItem('ensemble_auth_token');
+  const response = await fetch(`${API_BASE_URL}/api/workflows/${workflowId}/export`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!response.ok) throw new Error("Audit export failed.");
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${workflowId}_audit_package.zip`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 export async function deleteTopic(id: string) {
@@ -278,12 +552,54 @@ export async function getModels(): Promise<ModelInfo[]> {
   catch (e) { return []; }
 }
 
+// --- Automated Requirement Analysis Endpoints ---
+
+export interface RequirementAnalysisRequest {
+  prompt: string;
+  files?: string[];
+  urls?: string[];
+  analysis_depth?: string;
+  user_id: string; // Will be obtained from auth context on frontend
+}
+
+export interface RequirementAnalysisResponse {
+  status: string;
+  run_id: string;
+  message?: string;
+}
+
+export interface RequirementAnalysisResultData {
+  status: string;
+  run_id: string;
+  json_results?: any; // Structured JSON output from Pydantic model
+  markdown_summary?: string;
+  message?: string;
+}
+
+export async function startRequirementAnalysis(params: RequirementAnalysisRequest): Promise<RequirementAnalysisResponse> {
+  return await fetchApi('/api/requirements/analyze', {
+    method: 'POST',
+    body: JSON.stringify(params)
+  });
+}
+
+export async function getRequirementAnalysisResults(runId: string, userId: string): Promise<RequirementAnalysisResultData> {
+  // Pass user_id in headers for backend scoping/auth
+  return await fetchApi(`/api/requirements/${runId}/results`, {
+    headers: {
+      'Content-Type': 'application/json',
+      'X-User-ID': userId // Required by backend
+    }
+  });
+}
+
 export async function generateChatResponse(params: {
   messages: { role: string; content: string }[];
   model?: string;
   provider?: string;
   base_url?: string;
   api_key?: string;
+  system_prompt?: string;
   agent_id?: string;
   assistant_id?: string;
 }): Promise<{ text: string; usage?: any }> {
@@ -580,6 +896,10 @@ export async function getPipelineStatus(): Promise<PipelineStatus[]> {
   }
 }
 
+export async function getProfile(): Promise<any> {
+  return await fetchApi('/api/auth/me');
+}
+
 // 🆕 Namespace & Pack Agent Endpoints
 export interface NamespaceStats {
   [namespace: string]: number;
@@ -644,6 +964,103 @@ export async function getImportFormats(): Promise<{ formats: any[] }> {
 }
 
 // ─── Company Endpoints ───
+
+export interface CompanySummary {
+  id: string;
+  name: string;
+  mission: string;
+  emoji: string;
+  status: "Active" | "Setup";
+  agents?: number;
+  teams?: number;
+  projects?: number;
+  agent_count?: number;
+  team_count?: number;
+  issue_count?: number;
+}
+
+export async function listCompanies(): Promise<CompanySummary[]> {
+  return await fetchApi('/api/companies');
+}
+
+export async function createCompanyWorkspace(name: string, mission: string): Promise<CompanySummary> {
+  return await fetchApi('/api/companies/auto-build', {
+    method: 'POST',
+    body: JSON.stringify({ name, mission }),
+  });
+}
+
+export async function deleteCompanyWorkspace(companyId: string): Promise<void> {
+  return await fetchApi(`/api/companies/${companyId}`, {
+    method: 'DELETE',
+  });
+}
+
+export interface CompanyTeam {
+  id: string;
+  company_id: string;
+  name: string;
+  description: string;
+  emoji: string;
+}
+
+export interface CompanyAgentRecord {
+  id: string;
+  company_id: string;
+  team_id?: string;
+  skill_id?: string;
+  display_name: string;
+  role: string;
+  status: "idle" | "running" | "waiting_for_approval" | "blocked" | "paused";
+  emoji: string;
+  model_name?: string;
+  model_provider?: string;
+}
+
+export interface CompanyIssueRecord {
+  id: string;
+  company_id: string;
+  team_id?: string;
+  assigned_agent_id?: string;
+  workflow_id?: string;
+  run_id?: string;
+  title: string;
+  description: string;
+  priority: "low" | "medium" | "high" | "critical";
+  status: string;
+  created_at: string;
+}
+
+export interface CompanyActivityRecord {
+  id: string;
+  company_id: string;
+  action_type: string;
+  message: string;
+  created_at: string;
+}
+
+export async function listCompanyTeams(companyId: string): Promise<CompanyTeam[]> {
+  return await fetchApi(`/api/companies/${companyId}/teams`);
+}
+
+export async function listCompanyAgents(companyId: string): Promise<CompanyAgentRecord[]> {
+  return await fetchApi(`/api/companies/${companyId}/agents`);
+}
+
+export async function listCompanyIssues(companyId: string): Promise<CompanyIssueRecord[]> {
+  return await fetchApi(`/api/companies/${companyId}/issues`);
+}
+
+export async function createCompanyIssue(companyId: string, issue: any): Promise<CompanyIssueRecord> {
+  return await fetchApi(`/api/companies/${companyId}/issues`, {
+    method: 'POST',
+    body: JSON.stringify(issue),
+  });
+}
+
+export async function listCompanyActivity(companyId: string): Promise<CompanyActivityRecord[]> {
+  return await fetchApi(`/api/companies/${companyId}/activity`);
+}
 
 export async function generateCompany(mission: string): Promise<any> {
   return await fetchApi('/api/companies/generate', {

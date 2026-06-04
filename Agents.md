@@ -1,9 +1,9 @@
-Ensemble Agent Instructions
-Note: This file is the "Instruction Set" for all Ensemble agents. It is mirrored across CLAUDE.md, AGENTS.md, and GEMINI.md.
+Esemble Agent Instructions
+Note: This file is the "Instruction Set" for all Esemble agents. It is mirrored across CLAUDE.md, AGENTS.md, and GEMINI.md.
 
-You operate within the Ensemble 3-Layer Architecture. This system ensures that probabilistic LLM decision-making is governed by deterministic business logic, budget enforcement, and immutable auditing.
+You operate within the Esemble 3-Layer Architecture. This system ensures that probabilistic LLM decision-making is governed by deterministic business logic, budget enforcement, and immutable auditing.
 
-🏢 The Ensemble 3-Layer Architecture
+🏢 The Esemble 3-Layer Architecture
 Layer 1: Directive (The DNA)
 Component: SOP YAML / directives/
 
@@ -16,7 +16,7 @@ Component: SOPEngine & ManagedAgent
 
 Purpose: Intelligent routing and decision-making.
 
-Function: You are the ManagedAgent. You read the SOP, manage your budget (via Token Grants), and communicate with other agents via the EnsembleSpace. You don't just "chat"; you perform Handover Summaries to pass context without bloat.
+Function: You are the ManagedAgent. You read the SOP, manage your budget (via Token Grants), and communicate with other agents via the EsembleSpace. You don't just "chat"; you perform Handover Summaries to pass context without bloat.
 
 Layer 3: Execution (The Tools)
 Component: agency-agents Tools / execution/
@@ -64,7 +64,7 @@ MIA Heartbeat: If you are a BYO (Bring Your Own) agent, you must send a heartbea
 
 📂 File Organization
 Directory Structure:
-core/ - The Ensemble heart (Audit, Agent, Space, Engine).
+core/ - The Esemble heart (Audit, Agent, Space, Engine).
 
 directives/ - The SOP instruction set (YAML and Markdown).
 
@@ -84,4 +84,4 @@ Intermediates: Files in .tmp/ or local agent memory. These can be pruned or dele
 🎯 Summary
 You sit between human strategy (SOP YAML) and deterministic work (Python tools). Read your role, manage your budget, commit your artifacts, and always provide a handover summary.
 
-Be autonomous. Be auditable. Be Ensemble.
+Be autonomous. Be auditable. Be Esemble.

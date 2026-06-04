@@ -1,24 +1,64 @@
 import { useParams, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Building2, Users, Bot, FolderTree, Plus, ChevronRight, TrendingUp, CheckCircle2, AlertCircle } from "lucide-react";
+import { Building2, Users, Bot, FolderTree, Plus, ChevronRight, TrendingUp, CheckCircle2, AlertCircle, DollarSign } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useCompanyContext } from "@/lib/company-context";
-import { getCompanyById, getTeamsByCompany, getAgentsByCompany, getIssuesByCompany, getActivityByCompany, getCEO } from "@/lib/company-data";
+import { getCompanyById, getTeamsByCompany, getAgentsByCompany, getIssuesByCompany, getActivityByCompany, getCEO, fetchApi } from "@/lib/company-data";
+
+function CostEfficiencyCard() {
+  const [stats, setStats] = useState({ savings: 0, actual_cost: 0, hypothetical_single_model_cost: 0 });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchApi('/api/dashboard/cost-efficiency')
+      .then((data: any) => {
+        setStats(data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  if (loading) return <StatCard icon={DollarSign} label="Cost Savings" value="..." color="text-green-500" />;
+
+  return (
+    <Card className="border-border/30 bg-card/50">
+      <CardContent className="p-4">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-lg bg-secondary/50 flex items-center justify-center text-green-500">
+            <DollarSign className="h-4 w-4" />
+          </div>
+          <div>
+            <p className="text-xl font-bold text-foreground">${stats.savings.toFixed(2)}</p>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold">Cost Savings</p>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">Actual: ${stats.actual_cost.toFixed(2)} vs Hypothetical: ${stats.hypothetical_single_model_cost.toFixed(2)}</p>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function CompanyDashboard() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { currentCompany, setCurrentCompanyId } = useCompanyContext();
+  const [activity, setActivity] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (id) {
+      fetchApi(`/api/dashboard/activity?company_id=${id}`).then(setActivity);
+    }
+  }, [id]);
 
   const company = getCompanyById(id || currentCompany?.id || "") || currentCompany;
   const teams = getTeamsByCompany(company?.id || "");
   const agents = getAgentsByCompany(company?.id || "");
   const issues = getIssuesByCompany(company?.id || "");
-  const activity = getActivityByCompany(company?.id || "");
   const ceo = getCEO(company?.id || "");
 
   if (!company) {
@@ -44,6 +84,15 @@ export default function CompanyDashboard() {
             {company.emoji}
           </div>
           <div className="min-w-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mb-2 -ml-2 gap-2 rounded-full border border-border/40 bg-background/70"
+              onClick={() => navigate("/companies")}
+            >
+              <ChevronRight className="h-4 w-4 rotate-180" />
+              Back to companies
+            </Button>
             <h1 className="text-xl font-bold text-foreground truncate tracking-tight">{company.name}</h1>
             {company.mission && (
               <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5 font-medium">{company.mission}</p>
@@ -65,7 +114,7 @@ export default function CompanyDashboard() {
         <StatCard icon={Bot} label="Agents" value={agents.length.toString()} color="text-blue-500" />
         <StatCard icon={FolderTree} label="Teams" value={teams.length.toString()} color="text-purple-500" />
         <StatCard icon={CheckCircle2} label="Resolved" value={completedIssues.toString()} color="text-emerald-500" />
-        <StatCard icon={TrendingUp} label="In Progress" value={inProgressIssues.toString()} color="text-amber-500" />
+        <CostEfficiencyCard />
       </div>
 
       <Separator className="mx-8" />
@@ -150,10 +199,10 @@ export default function CompanyDashboard() {
             <div className="space-y-3 pr-4">
               {activity.slice(0, 15).map((event) => (
                 <motion.div key={event.id} initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} className="flex items-start gap-3">
-                  <ActivityDot type={event.type} />
+                  <ActivityDot type={event.action_type} />
                   <div className="min-w-0">
-                    <p className="text-[11px] text-foreground">{event.action}</p>
-                    <p className="text-[10px] text-muted-foreground/60">{event.time}</p>
+                    <p className="text-[11px] text-foreground">{event.message}</p>
+                    <p className="text-[10px] text-muted-foreground/60">{new Date(event.timestamp).toLocaleTimeString()}</p>
                   </div>
                 </motion.div>
               ))}
@@ -233,6 +282,10 @@ function ActivityDot({ type }: { type: string }) {
     deploy: "bg-purple-400",
     member: "bg-amber-400",
     system: "bg-gray-400",
+    MODEL_ROUTING: "bg-cyan-400",
+    GIT_SAFETY: "bg-orange-400",
+    VERIFICATION: "bg-indigo-400",
+    CONTEXT_RESET: "bg-teal-400",
   };
   return <div className={`h-2 w-2 rounded-full mt-1.5 shrink-0 ${colors[type] || colors.system}`} />;
 }

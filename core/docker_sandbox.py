@@ -297,6 +297,7 @@ class SecureDockerContainer:
         security_opt_no_new_privileges: bool = True,
         read_only: bool = True,
         drop_all_caps: bool = True,
+        workspace_dir: Optional[str] = None,
     ):
         self.image = image
         self.memory_mb = memory_mb
@@ -309,6 +310,7 @@ class SecureDockerContainer:
         self.security_opt_no_new_privileges = security_opt_no_new_privileges
         self.read_only = read_only
         self.drop_all_caps = drop_all_caps
+        self.workspace_dir = workspace_dir
 
         self.container_id: Optional[str] = None
         self.container_name: str = f"ensemble_sandbox_{uuid.uuid4().hex[:12]}"
@@ -509,7 +511,7 @@ class SecureDockerContainer:
 
     def build_run_command(
         self,
-        script_path: str,
+        script_path: Optional[str] = None,
         working_dir: str = "/sandbox",
         host_script_path: Optional[str] = None,
         command: Optional[str] = None,
@@ -518,7 +520,7 @@ class SecureDockerContainer:
 
         Parameters
         ----------
-        script_path : str
+        script_path : str, optional
             Path to the script inside the container.
         working_dir : str
             Working directory inside the container.
@@ -575,6 +577,11 @@ class SecureDockerContainer:
         cmd.extend(["--tmpfs", "/tmp:exec,size=100M"])
         cmd.extend(["--tmpfs", "/dev/shm:size=50M"])
 
+        # --- Volume mount: workspace ---
+        if self.workspace_dir:
+            cmd.extend(["-v", f"{os.path.abspath(self.workspace_dir)}:/workspace:rw"])
+            working_dir = "/workspace" # Override working_dir
+
         # --- Working directory ---
         cmd.extend(["-w", working_dir])
 
@@ -589,7 +596,7 @@ class SecureDockerContainer:
             cmd.extend(["-e", f"{key}={value}"])
 
         # --- Volume mount: host script into container ---
-        if host_script_path:
+        if host_script_path and script_path:
             container_script = f"{working_dir}/{script_path}"
             cmd.extend([
                 "-v",
@@ -605,7 +612,7 @@ class SecureDockerContainer:
         # --- Command ---
         if command:
             cmd.extend(["sh", "-c", command])
-        else:
+        elif script_path:
             container_script_path = f"{working_dir}/{script_path}"
             cmd.extend(["python", container_script_path])
 

@@ -1,17 +1,7 @@
-import { useState, useEffect, useRef } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 
-import { Search,
-  ChevronLeft,
-  Grid3X3,
-  Plus,
-  X,
-  Settings,
-  Home,
-  User,
-  LogOut,
-  Sun,
-  Moon} from "lucide-react";
+import { Search, Grid3X3, X, Home, User, LogOut, Sun, Moon, Settings } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useAIApps } from "@/lib/ai-apps";
 import { AddCustomAppDialog } from "@/components/home/AddCustomAppDialog";
@@ -29,13 +19,10 @@ import {
 export function TopBar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { tabs, openApp, openExternalApp, closeTab } = useTabContext();
+  const { tabs, closeTab } = useTabContext();
   const [aiAppsOpen, setAiAppsOpen] = useState(false);
-  
 
-  const activeTabId = tabs.find((t) =>
-    t.url === "/" ? location.pathname === "/" : location.pathname.startsWith(t.url.replace("/general", ""))
-  )?.id;
+  const activeTabId = tabs.find((t) => isTabActive(t.url, location.pathname))?.id;
 
   const handleCloseTab = (e: React.MouseEvent, tabId: string) => {
     e.stopPropagation();
@@ -52,18 +39,17 @@ export function TopBar() {
   };
 
   return (
-    <header className="flex items-end shrink-0 z-40 bg-secondary/80 pt-1.5 px-2 gap-0.5 border-b border-border/20 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-
-
-      {/* AI Apps button */}
+    <header className="relative flex items-end shrink-0 z-40 bg-background/75 backdrop-blur-xl pt-2 px-2 gap-1 border-b border-border/30 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
+      {/* App launcher */}
       <div className="relative">
         <button
           onClick={() => setAiAppsOpen((p) => !p)}
-          className={`h-11 w-11 flex items-center justify-center rounded-t-lg transition-colors duration-150 shrink-0 ${
+          className={`h-11 w-11 flex items-center justify-center rounded-t-xl transition-colors duration-150 shrink-0 ${
             aiAppsOpen
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground hover:bg-background/40"
+              ? "bg-card text-foreground shadow-sm border border-border/40 border-b-transparent"
+              : "text-muted-foreground hover:text-foreground hover:bg-card/70"
           }`}
+          title="Open app launcher"
         >
           <Grid3X3 className="h-6 w-6" />
         </button>
@@ -78,10 +64,10 @@ export function TopBar() {
             <button
               key={tab.id}
               onClick={() => navigate(tab.url)}
-              className={`group relative flex items-center gap-2 px-4 h-11 text-sm font-medium rounded-t-lg transition-colors duration-150 min-w-[100px] max-w-[200px] overflow-hidden ${
+              className={`group relative flex items-center gap-2 px-4 h-11 text-sm font-medium rounded-t-xl transition-all duration-150 min-w-[112px] max-w-[220px] overflow-hidden ${
                 active
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground hover:bg-background/40"
+                  ? "bg-card text-foreground shadow-sm border border-border/40 border-b-transparent"
+                  : "text-muted-foreground hover:text-foreground hover:bg-card/70"
               }`}
             >
               {tab.logoUrl ? (
@@ -102,36 +88,12 @@ export function TopBar() {
           );
         })}
 
-      {/* + button — opens new launcher tab (only if none exists) */}
-      <button
-        onClick={() => {
-          const hasLauncher = tabs.some((t) => t.url === "/launcher");
-          if (hasLauncher) {
-            navigate("/launcher");
-            return;
-          }
-          // The allApps import is missing from this file scope, so relying on fallback
-          navigate("/launcher");
-        }}
-        className="h-11 w-11 flex items-center justify-center rounded-t-lg text-muted-foreground hover:text-foreground hover:bg-background/40 transition-colors duration-150 shrink-0"
-      >
-        <Plus className="h-6 w-6" />
-      </button>
-
       <div className="flex-1" />
       <div className="flex items-center gap-2 pb-1.5">
         <ThemeToggle />
-        <button
-          onClick={() => {
-              navigate("/settings/general");
-          }}
-          className="h-9 w-9 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/50 transition-colors duration-150"
-        >
-          <Settings className="h-5 w-5" />
-        </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="h-9 w-9 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background/50 transition-colors duration-150">
+            <button className="h-9 w-9 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-card/70 transition-colors duration-150 border border-transparent hover:border-border/40">
               <div className="h-7 w-7 rounded-full bg-primary/20 flex items-center justify-center">
                 <User className="h-4 w-4 text-primary" />
               </div>
@@ -139,8 +101,8 @@ export function TopBar() {
           </DropdownMenuTrigger>
           <DropdownMenuContent side="bottom" align="end" className="w-56">
             <div className="px-2 py-1.5">
-              <p className="text-sm font-medium text-foreground">Ensemble User</p>
-              <p className="text-xs text-muted-foreground">user@ensemble.ai</p>
+              <p className="text-sm font-medium text-foreground">Esemble User</p>
+              <p className="text-xs text-muted-foreground">user@esemble.ai</p>
             </div>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => navigate("/settings/about")} className="cursor-pointer">
@@ -148,7 +110,7 @@ export function TopBar() {
               Account settings
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => navigate("/auth")} className="cursor-pointer text-destructive focus:text-destructive">
+            <DropdownMenuItem onClick={() => navigate("/auth?logout=1")} className="cursor-pointer text-destructive focus:text-destructive">
               <LogOut className="mr-2 h-4 w-4" />
               Log out
             </DropdownMenuItem>
@@ -157,6 +119,15 @@ export function TopBar() {
       </div>
     </header>
   );
+}
+
+function isTabActive(tabUrl: string, pathname: string) {
+  if (tabUrl === "/") return pathname === "/" || pathname === "/dashboard";
+  if (tabUrl === "/settings/general") return pathname.startsWith("/settings");
+  if (tabUrl.startsWith("/company/")) return pathname.startsWith(tabUrl);
+  if (tabUrl.startsWith("/workflows/")) return pathname.startsWith(tabUrl);
+  if (tabUrl.startsWith("/app/")) return pathname.startsWith(tabUrl);
+  return pathname === tabUrl || pathname.startsWith(`${tabUrl}/`);
 }
 
 /* AI Apps Popover (grid icon) */

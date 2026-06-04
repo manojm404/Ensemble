@@ -1,6 +1,6 @@
 """
 core/engine.py
-SOP Engine: FSM executor for Ensemble workflows.
+SOP Engine: FSM executor for Esemble workflows.
 """
 import os
 import yaml
@@ -20,15 +20,32 @@ class SOPEngine:
         self.gov = gov
         self.user_id = user_id  # Phase 3: Multi-tenant user scoping
         self.current_state = None
-        self.company_id = "company_alpha"
+        self.company_id = "user:anonymous"
         self.last_response = ""
+
+        # Ensure sop_runs table exists for simple init and tests (idempotent)
+        try:
+            if hasattr(self.gov, 'db_path') and self.gov.db_path:
+                with sqlite3.connect(self.gov.db_path) as conn:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS sop_runs (
+                            run_id TEXT PRIMARY KEY,
+                            status TEXT,
+                            current_state TEXT,
+                            last_agent_id TEXT,
+                            started_at TEXT
+                        )
+                    """)
+        except Exception:
+            # Non-fatal: governance may be mocked in tests
+            pass
 
     def load_sop(self, yaml_path: str) -> Dict[str, Any]:
         """Load SOP YAML from file."""
         with open(yaml_path, "r") as f:
             return yaml.safe_load(f)
 
-    async def run_workflow(self, sop_path: str, company_id: str = "company_alpha", run_id: str = None, initial_input: str = None, assistant_id: str = None, topic_id: str = None):
+    async def run_workflow(self, sop_path: str, company_id: str = "user:anonymous", run_id: str = None, initial_input: str = None, assistant_id: str = None, topic_id: str = None):
         """Execute the workflow defined in the SOP YAML."""
         sop = self.load_sop(sop_path)
         self.company_id = company_id
@@ -100,7 +117,7 @@ class SOPEngine:
             
             # 3. Run Agent (Now Async)
             print(f"🧠 Engine: Running LLM for role {role_name}...", flush=True)
-            response = await agent.run(prompt)
+            response = await agent.run_async(prompt)
             print(f"✅ Engine: LLM Result (Length: {len(response)} chars)", flush=True)
             self.last_response = response
             
@@ -132,27 +149,39 @@ class SOPEngine:
 
         # Update run status and log completion (without broadcasting to avoid duplicate RESULT)
         self._update_run_status(run_id, "COMPLETED")
+        # Use last_response (most recent agent output) as the workflow result
         self.audit.log(
             self.company_id,
             "system",
             "ACTION",
-            {"type": "workflow_complete", "result": result_text, "run_id": run_id},
+            {"type": "workflow_complete", "result": self.last_response, "run_id": run_id},
             broadcast=False
         )
         
         # PERSISTENT NOTIFICATION for Inbox
         self.audit.notify(
-            user_id=self.user_id or "dev_user",
+            user_id=self.user_id,
             company_id=self.company_id,
             title="✅ Workflow Completed",
             preview=f"SOP execution finished successfully.",
-            content=f"Workflow run {run_id} has completed. Result: {result_text[:200]}...",
+            content=f"Workflow run {run_id} has completed. Result: {str(self.last_response)[:200]}...",
             category="success"
         )
 
     def _update_run_status(self, run_id: str, status: str, state: str = None, agent_id: str = None):
         """Update SOP run status in the DB."""
         with sqlite3.connect(self.gov.db_path) as conn:
+            # Ensure table exists in this connection (handles ':memory:' case in tests)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sop_runs (
+                    run_id TEXT PRIMARY KEY,
+                    status TEXT,
+                    current_state TEXT,
+                    last_agent_id TEXT,
+                    started_at TEXT
+                )
+            """)
+
             if state and agent_id:
                 conn.execute("UPDATE sop_runs SET status = ?, current_state = ?, last_agent_id = ? WHERE run_id = ?",
                              (status, state, agent_id, run_id))
@@ -166,8 +195,10 @@ class SOPEngine:
         
         # Automatically include user initial input if this is the start
         if self.space.exists("user_initial_input"):
-            input_val = self.space.read("user_initial_input").decode("utf-8", errors="ignore")
-            context_parts.append(f"### User Message (Initial Input):\n{input_val}")
+            raw = self.space.read("user_initial_input")
+            if raw:
+                input_val = raw.decode("utf-8", errors="ignore")
+                context_parts.append(f"### User Message (Initial Input):\n{input_val}")
 
         for name in include:
             content = self.space.read(name)

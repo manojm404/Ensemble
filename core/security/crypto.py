@@ -1,5 +1,5 @@
 """
-core/security/crypto.py - Encryption Utilities for Ensemble
+core/security/crypto.py - Encryption Utilities for Esemble
 
 Provides AES-256 encryption (via Fernet) for sensitive data storage:
 - LLM API keys

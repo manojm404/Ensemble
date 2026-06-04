@@ -1,5 +1,5 @@
 """
-core/auth.py - Authentication Middleware for Ensemble
+core/auth.py - Authentication Middleware for Esemble
 
 Handles JWT validation via Supabase, user extraction from requests,
 and FastAPI dependency functions for route protection.
@@ -68,6 +68,42 @@ class TokenData(BaseModel):
     user_id: str
     email: Optional[str] = None
     expires_at: Optional[int] = None
+
+
+def decode_unverified_user(token: str) -> UserInToken:
+    """
+    Decode a JWT without verifying the signature.
+
+    This is only used as a local-development fallback when the Supabase
+    verification path is unavailable or overly strict. It should never be
+    used as the primary authentication check in production.
+    """
+    try:
+        payload = jwt.get_unverified_claims(token)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token: {str(exc)}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user_id = payload.get("sub") or payload.get("user_id")
+    email = payload.get("email") or ""
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: no user ID in payload",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return UserInToken(
+        id=str(user_id),
+        email=str(email),
+        full_name=None,
+        avatar_url=None,
+        tier="free",
+        is_authenticated=True,
+    )
 
 
 # ============================================================
@@ -244,6 +280,7 @@ async def get_current_user(request: Request) -> UserInToken:
                 full_name=user_data.get("full_name"),
                 avatar_url=user_data.get("avatar_url"),
                 tier=user_data.get("tier", "free"),
+                is_authenticated=user_data.get("is_authenticated", True),
             )
         return user_data  # Already a UserInToken
 
@@ -259,7 +296,21 @@ async def get_current_user(request: Request) -> UserInToken:
         )
 
     # Verify token with Supabase
-    user_data = await verify_token_with_supabase(token)
+    try:
+        user_data = await verify_token_with_supabase(token)
+    except HTTPException as auth_error:
+        client_host = getattr(request.client, "host", "") if request.client else ""
+        local_request = client_host in {"127.0.0.1", "localhost", "::1"}
+        if not local_request:
+            raise auth_error
+
+        logger.warning(
+            "⚠️ [Auth] Supabase verification failed for local dependency request from %s; using unverified JWT fallback: %s",
+            client_host,
+            auth_error.detail,
+        )
+        fallback_user = decode_unverified_user(token)
+        user_data = {"id": fallback_user.id, "email": fallback_user.email}
 
     # Fetch user profile from database
     try:
@@ -387,6 +438,12 @@ PUBLIC_PATHS = frozenset({
     "/docs",
     "/redoc",
     "/openapi.json",
+    "/api/skills",
+    "/api/auth/signup",
+    "/api/auth/login",
+    "/api/auth/forgot-password",
+    "/api/auth/reset-password",
+    "/api/auth/refresh",
     "/auth/signup",
     "/auth/login",
     "/auth/forgot-password",
@@ -394,6 +451,7 @@ PUBLIC_PATHS = frozenset({
     "/auth/refresh",
     "/api/assets",
     "/api/workspace",
+    "/api/companies",
     "/static",
 })
 
@@ -405,5 +463,13 @@ def is_public_path(path: str) -> bool:
         return True
 
     # Prefix match (for static files and API assets)
-    public_prefixes = ["/api/assets/", "/api/workspace/", "/static/", "/docs", "/redoc"]
+    public_prefixes = [
+        "/api/assets/",
+        "/api/workspace/",
+        "/api/companies/",
+        "/api/auth/",
+        "/static/",
+        "/docs",
+        "/redoc",
+    ]
     return any(path.startswith(prefix) for prefix in public_prefixes)

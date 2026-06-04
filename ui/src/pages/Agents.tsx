@@ -12,13 +12,14 @@ import { getAgents, syncRegistry, toggleAgentStatus, AgentSkill } from "@/lib/ap
 import { hireAgent } from "@/lib/company-data";
 import { Switch } from "@/components/ui/switch";
 import { NamespaceBadge } from "@/components/ui/namespace-badge";
+import { useScrollMemory } from "@/lib/use-scroll-memory";
 
 const categoryColors: Record<string, string> = {
   Engineering: "bg-blue-500/20 text-blue-400 border-blue-500/30",
   Support: "bg-green-500/20 text-green-400 border-green-500/30",
   Marketing: "bg-purple-500/20 text-purple-400 border-purple-500/30",
   Executive: "bg-amber-500/20 text-amber-400 border-amber-500/30",
-  General: "bg-slate-500/20 text-slate-400 border-slate-500/30",
+  General: "bg-muted/70 text-foreground/75 border-border/60",
 };
 
 // Flat department list — no sub-sections
@@ -61,6 +62,22 @@ const Agents = () => {
   const [syncing, setSyncing] = useState(false);
   const [hiringId, setHiringId] = useState<string | null>(null);
   const { open: openInspector } = useInspector();
+  const scrollRef = useScrollMemory("esemble_scroll_agents");
+
+  useEffect(() => {
+    const savedSearch = localStorage.getItem("esemble_agents_search");
+    const savedFilter = localStorage.getItem("esemble_agents_filter");
+    if (savedSearch) setSearch(savedSearch);
+    if (savedFilter) setActiveFilter(savedFilter);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("esemble_agents_search", search);
+  }, [search]);
+
+  useEffect(() => {
+    localStorage.setItem("esemble_agents_filter", activeFilter);
+  }, [activeFilter]);
 
   const { importedPacks, deptCounts } = useMemo(() => {
     const packs: Record<string, { count: number; agents: AgentSkill[] }> = {};
@@ -167,18 +184,18 @@ const Agents = () => {
   const totalImported = Object.values(importedPacks).reduce((sum, p) => sum + p.count, 0);
 
   return (
-    <div className="flex h-full bg-background/50">
+    <div ref={scrollRef as any} className="flex h-full bg-background text-foreground">
       {/* Sidebar */}
-      <div className="w-64 border-r border-border/50 shrink-0 bg-card/30 backdrop-blur-sm flex flex-col">
+      <div className="w-64 border-r border-border/50 shrink-0 bg-card/70 backdrop-blur-xl flex flex-col">
         <div className="p-4 border-b border-border/50 flex items-center justify-between">
           <div>
             <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em] flex items-center gap-1.5">
               <Building2 className="h-3 w-3" />
               Agent Fleet
             </h3>
-            <p className="text-[9px] text-muted-foreground/60 mt-0.5">{totalAgents} total · {totalImported} imported</p>
+            <p className="text-[9px] text-muted-foreground/75 mt-0.5">{totalAgents} total · {totalImported} imported</p>
           </div>
-          <RefreshCw className={`h-3 w-3 cursor-pointer text-muted-foreground hover:text-primary transition-all ${syncing ? 'animate-spin' : ''}`} onClick={handleSync} />
+          <RefreshCw className={`h-3 w-3 cursor-pointer text-muted-foreground hover:text-foreground transition-all ${syncing ? 'animate-spin' : ''}`} onClick={handleSync} />
         </div>
 
         <ScrollArea className="flex-1">
@@ -193,13 +210,13 @@ const Agents = () => {
               }`}
             >
               <span className="font-semibold">🌐 All Agents</span>
-              <span className="text-[10px] opacity-60 font-mono">{totalAgents}</span>
+              <span className="text-[10px] text-foreground/60 font-mono">{totalAgents}</span>
             </button>
 
             {/* Imported Repos */}
             {Object.keys(importedPacks).length > 0 && (
               <>
-                <div className="my-2 border-t border-border/30" />
+                <div className="my-2 border-t border-border/50" />
                 <div className="px-3 py-1">
                   <span className="text-[9px] font-bold text-muted-foreground/50 uppercase tracking-wider flex items-center gap-1">
                     <Package className="h-2.5 w-2.5" /> Imported Repos
@@ -216,17 +233,17 @@ const Agents = () => {
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <Package className="h-3.5 w-3.5 opacity-60" />
+                      <Package className="h-3.5 w-3.5 text-foreground/60" />
                       <span className="truncate text-[11px] font-medium">{packId}</span>
                     </div>
-                    <span className="text-[10px] opacity-50 font-mono">{pack.count}</span>
+                    <span className="text-[10px] text-foreground/55 font-mono">{pack.count}</span>
                   </button>
                 ))}
               </>
             )}
 
             {/* Departments — flat list, no expand/collapse */}
-            <div className="my-2 border-t border-border/30" />
+            <div className="my-2 border-t border-border/50" />
             <div className="px-3 py-1">
               <span className="text-[9px] font-bold text-muted-foreground/50 uppercase tracking-wider">Departments</span>
             </div>
@@ -248,7 +265,7 @@ const Agents = () => {
                     <span className="text-sm">{dept.icon}</span>
                     <span className="font-semibold">{dept.label}</span>
                   </div>
-                  <span className="text-[10px] opacity-50 font-mono">{count}</span>
+                  <span className="text-[10px] text-foreground/55 font-mono">{count}</span>
                 </button>
               );
             })}
@@ -259,7 +276,7 @@ const Agents = () => {
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         <div className="flex items-center gap-4 p-4 border-b border-border/50 bg-background/20 backdrop-blur-md">
-          <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="h-9 w-9 rounded-lg hover:bg-white/5">
+          <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="h-9 w-9 rounded-lg hover:bg-secondary/50">
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="relative flex-1 max-w-md">
@@ -274,8 +291,8 @@ const Agents = () => {
 
         <ScrollArea className="flex-1">
           {loading ? (
-             <div className="flex flex-col h-full items-center justify-center p-8 space-y-4">
-                 <RefreshCw className="h-8 w-8 animate-spin text-primary/40" />
+                 <div className="flex flex-col h-full items-center justify-center p-8 space-y-4">
+                 <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
                  <p className="text-sm font-medium text-muted-foreground">Hydrating Registry...</p>
              </div>
           ) : (
@@ -293,9 +310,9 @@ const Agents = () => {
                  </StaggerItem>
                ))}
                {filtered.length === 0 && (
-                 <div className="col-span-full h-64 flex flex-col items-center justify-center text-center space-y-2 bg-secondary/10 rounded-2xl border border-dashed border-border/50">
+                 <div className="col-span-full h-64 flex flex-col items-center justify-center text-center space-y-2 bg-card/40 rounded-2xl border border-dashed border-border/50">
                     <Bot className="h-12 w-12 text-muted-foreground/20" />
-                    <p className="text-sm font-bold text-muted-foreground/50">No Specialists Found</p>
+                    <p className="text-sm font-bold text-muted-foreground/70">No Specialists Found</p>
                  </div>
                )}
              </StaggerContainer>
@@ -317,7 +334,7 @@ function AgentCard({ agent, orgMode, hiring, onHire, onInspect, onToggle }: {
 }) {
   return (
     <MotionCard
-      className={`p-5 group relative overflow-hidden border-border/40 transition-all hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5 ${!agent.enabled ? 'opacity-60 grayscale' : ''} ${orgMode ? 'cursor-pointer' : ''}`}
+      className={`p-5 group relative overflow-hidden border border-border/50 bg-card/80 transition-all hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5 ${!agent.enabled ? 'opacity-80 grayscale-[0.25]' : ''} ${orgMode ? 'cursor-pointer' : ''}`}
       onClick={orgMode ? onHire : onInspect}
     >
       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -347,12 +364,12 @@ function AgentCard({ agent, orgMode, hiring, onHire, onInspect, onToggle }: {
         </div>
         <div className="min-w-0">
           <h3 className="text-sm font-bold text-foreground group-hover:text-primary transition-colors truncate">{agent.name}</h3>
-          <p className={`text-[10px] text-muted-foreground mt-1 line-clamp-2 leading-relaxed opacity-70 group-hover:opacity-100 transition-opacity ${!agent.enabled ? 'italic' : ''}`}>
+          <p className={`text-[10px] text-foreground/65 mt-1 line-clamp-2 leading-relaxed group-hover:text-foreground/80 transition-colors ${!agent.enabled ? 'italic' : ''}`}>
             {agent.enabled ? agent.description : "This specialist is in hibernation."}
           </p>
           <div className="flex items-center justify-between mt-4">
             <Badge variant="outline" className={`text-[9px] px-2 py-0 font-bold border-border/20 ${categoryColors[agent.category] || ""}`}>{agent.category}</Badge>
-            <span className="text-[9px] font-mono text-muted-foreground tracking-tighter opacity-40 lowercase">{agent.id.split('_').pop()}</span>
+            <span className="text-[9px] font-mono text-foreground/55 tracking-tighter lowercase">{agent.id.split('_').pop()}</span>
           </div>
         </div>
       </div>
@@ -377,7 +394,7 @@ function AgentInspectorContent({ agent }: { agent: AgentSkill }) {
               packId={agent.pack_id}
               size="md"
             />
-            <Badge variant="secondary" className="text-[9px] opacity-70">ID: {agent.id}</Badge>
+                      <Badge variant="secondary" className="text-[9px] text-foreground/70">ID: {agent.id}</Badge>
           </div>
         </div>
       </div>

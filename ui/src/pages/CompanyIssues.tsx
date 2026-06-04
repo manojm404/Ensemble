@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Plus, Search, X, Play, Eye, Loader2, Trash2 } from "lucide-react";
+import { Plus, Search, X, Play, Eye, Loader2, Trash2, ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,13 +11,24 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCompanyContext } from "@/lib/company-context";
-import { getCompanyById, getIssuesByCompany, createIssue, setIssueOutput, updateIssueStatus, getAgentsByCompany, getTeamsByCompany } from "@/lib/company-data";
+import { getCompanyById } from "@/lib/company-data";
 import { OutputViewer } from "@/components/workflow/OutputViewer";
-import { API_BASE_URL, fetchApi } from "@/lib/api";
+import {
+  createCompanyIssue,
+  fetchApi,
+  listCompanyAgents,
+  listCompanyIssues,
+  listCompanyTeams,
+  type CompanyAgentRecord,
+  type CompanyIssueRecord,
+  type CompanyTeam,
+} from "@/lib/api";
 import { toast } from "sonner";
+import { useScrollMemory } from "@/lib/use-scroll-memory";
 
 export default function CompanyIssues() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { currentCompany, setCurrentCompanyId } = useCompanyContext();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -29,13 +40,31 @@ export default function CompanyIssues() {
   const [selectedAgent, setSelectedAgent] = useState("");
   const [selectedTeam, setSelectedTeam] = useState("");
   const [priority, setPriority] = useState<"low" | "medium" | "high" | "critical">("medium");
+  const [issues, setIssues] = useState<CompanyIssueRecord[]>([]);
+  const [agents, setAgents] = useState<CompanyAgentRecord[]>([]);
+  const [teams, setTeams] = useState<CompanyTeam[]>([]);
 
-  const company = getCompanyById(id || currentCompany?.id || "") || currentCompany;
+  const companyId = id || currentCompany?.id || "";
+  const company = getCompanyById(companyId) || currentCompany;
+  const scrollRef = useScrollMemory(`esemble_scroll_company_${companyId || "unknown"}_issues`);
+
+  useEffect(() => {
+    if (!companyId) return;
+    setCurrentCompanyId(companyId);
+    Promise.all([
+      listCompanyIssues(companyId),
+      listCompanyAgents(companyId),
+      listCompanyTeams(companyId),
+    ])
+      .then(([issueRows, agentRows, teamRows]) => {
+        setIssues(issueRows);
+        setAgents(agentRows);
+        setTeams(teamRows);
+      })
+      .catch(console.error);
+  }, [companyId]);
+
   if (!company) return <div className="flex items-center justify-center h-full text-muted-foreground">No company selected</div>;
-
-  const issues = getIssuesByCompany(company.id);
-  const agents = getAgentsByCompany(company.id);
-  const teams = getTeamsByCompany(company.id);
 
   const filtered = issues.filter(i => {
     const matchesSearch = i.title.toLowerCase().includes(search.toLowerCase());
@@ -43,26 +72,29 @@ export default function CompanyIssues() {
     return matchesSearch && matchesStatus;
   });
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!title.trim()) return;
-    createIssue(company.id, {
-      title, description: desc, priority, teamId: selectedTeam || teams[0]?.id || "",
+    const created = await createCompanyIssue(companyId, {
+      title,
+      description: desc,
+      priority,
+      teamId: selectedTeam || teams[0]?.id || "",
       agentId: selectedAgent || agents[0]?.id || "",
     });
+    setIssues([created, ...issues]);
     setCreateOpen(false);
     setTitle(""); setDesc(""); setSelectedAgent(""); setSelectedTeam(""); setPriority("medium");
   };
 
   const handleRun = async (issueId: string, agentId: string, issueTitle: string, issueDesc?: string) => {
     setRunning(issueId);
-    updateIssueStatus(company.id, issueId, "in_progress");
     try {
       const agent = agents.find(a => a.id === agentId);
       const data = await fetchApi('/api/chat/generate', {
         method: "POST",
         body: JSON.stringify({
           messages: [
-            { role: "system", content: `You are ${agent?.name || 'an agent'} acting as a ${agent?.role || 'helpful assistant'}. Complete the task thoroughly and provide your answer directly.` },
+            { role: "system", content: `You are ${agent?.display_name || 'an agent'} acting as a ${agent?.role || 'helpful assistant'}. Complete the task thoroughly and provide your answer directly.` },
             { role: "user", content: `${issueTitle}${issueDesc ? `\n\nDetails: ${issueDesc}` : ''}\n\nPlease complete this task and provide the output as a direct text response.` }
           ],
         }),
@@ -74,18 +106,12 @@ export default function CompanyIssues() {
       if (!output || typeof output !== "string" || output.trim().length === 0) {
         // Response was empty or not usable — mark as failed
         const rawOutput = output || JSON.stringify(data);
-        setIssueOutput(company.id, issueId, `⚠️ Agent returned an empty or unparseable response.\n\nRaw response:\n\`\`\`json\n${rawOutput.slice(0, 500)}\n\`\`\``);
-        updateIssueStatus(company.id, issueId, "failed");
         toast.error("Agent returned an empty response");
       } else {
-        setIssueOutput(company.id, issueId, output);
-        updateIssueStatus(company.id, issueId, "completed");
         toast.success(`Issue "${issueTitle}" resolved`);
       }
     } catch (err: any) {
       const errorMsg = err?.message || "Unknown error";
-      setIssueOutput(company.id, issueId, `❌ Issue execution failed\n\nError: ${errorMsg}\n\nThe agent could not be reached. Please try again.`);
-      updateIssueStatus(company.id, issueId, "failed");
       toast.error(`Failed to run issue: ${errorMsg}`);
     }
     setRunning(null);
@@ -93,9 +119,9 @@ export default function CompanyIssues() {
 
   const statusCounts = {
     all: issues.length,
-    in_progress: issues.filter(i => i.status === "in_progress").length,
+    in_progress: issues.filter(i => i.status === "running" || i.status === "in_progress").length,
     queued: issues.filter(i => i.status === "queued").length,
-    completed: issues.filter(i => i.status === "completed").length,
+    completed: issues.filter(i => i.status === "completed" || i.status === "completed_passed").length,
     failed: issues.filter(i => i.status === "failed").length,
   };
 
@@ -104,6 +130,10 @@ export default function CompanyIssues() {
       {/* Header */}
       <div className="flex items-center justify-between px-8 py-6 border-b border-border/40 bg-card/30 backdrop-blur-sm">
         <div>
+          <Button variant="ghost" size="sm" className="mb-2 -ml-2 gap-2 rounded-full border border-border/40 bg-background/70" onClick={() => navigate(`/company/${companyId}`)}>
+            <ChevronLeft className="h-4 w-4" />
+            Back to workspace
+          </Button>
           <h1 className="text-xl font-bold text-foreground">{company.emoji} {company.name}</h1>
           <p className="text-xs text-muted-foreground mt-0.5">{issues.length} total issues</p>
         </div>
@@ -123,29 +153,31 @@ export default function CompanyIssues() {
       </div>
 
       {/* Issues List */}
-      <div className="flex-1 p-8">
+      <div ref={scrollRef} className="flex-1 overflow-auto p-8">
         <div className="space-y-2">
           {filtered.map((issue, i) => (
             <motion.div key={issue.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}>
               <Card className="border-border/20 hover:border-border/40 transition-colors">
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
-                    <span className="text-xl mt-0.5">{issue.agentEmoji}</span>
+                    <span className="text-xl mt-0.5">{agents.find(a => a.id === issue.assigned_agent_id)?.emoji || "🤖"}</span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <p className="text-sm font-semibold text-foreground">{issue.title}</p>
                         <StatusBadge status={issue.status} />
                         <PriorityBadge priority={issue.priority} />
                       </div>
-                      <p className="text-[11px] text-muted-foreground">{issue.teamName} · {issue.agentName} · {issue.created}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {teams.find(t => t.id === issue.team_id)?.name || "Unassigned"} · {agents.find(a => a.id === issue.assigned_agent_id)?.display_name || "Unassigned"} · {new Date(issue.created_at).toLocaleString()}
+                      </p>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
-                      {issue.status !== "completed" && issue.status !== "in_progress" && (
-                        <Button size="sm" className="h-7 text-[10px] gap-1 px-2.5" disabled={running === issue.id} onClick={() => handleRun(issue.id, issue.agentId, issue.title, issue.description)}>
+                      {issue.status !== "completed" && issue.status !== "completed_passed" && issue.status !== "in_progress" && (
+                        <Button size="sm" className="h-7 text-[10px] gap-1 px-2.5" disabled={running === issue.id} onClick={() => handleRun(issue.id, issue.assigned_agent_id || "", issue.title, issue.description)}>
                           {running === issue.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />} Run
                         </Button>
                       )}
-                      {issue.output && (
+                      {false && (
                         <Button variant="ghost" size="sm" className="h-7 text-[10px] gap-1 px-2.5" onClick={() => setViewOutput(issue.id)}><Eye className="h-3 w-3" /> View</Button>
                       )}
                     </div>
@@ -204,7 +236,7 @@ export default function CompanyIssues() {
       <Dialog open={!!viewOutput} onOpenChange={() => setViewOutput(null)}>
         <DialogContent className="max-w-4xl max-h-[80vh]">
           <DialogHeader><DialogTitle>Issue Output</DialogTitle></DialogHeader>
-          {viewOutput && <OutputViewer output={issues.find(i => i.id === viewOutput)?.output || ""} />}
+          {viewOutput && <OutputViewer output={""} />}
         </DialogContent>
       </Dialog>
     </div>

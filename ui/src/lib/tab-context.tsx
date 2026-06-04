@@ -23,12 +23,16 @@ import {
   ShoppingBag,
   LayoutGrid,
   Sparkles,
+  FolderTree,
+  Building2,
+  LayoutDashboard,
   type LucideIcon,
 } from "lucide-react";
+import { scopedStorageKey } from "./storage-scope";
 
 // Icon mapping for persistence
 const iconMap: Record<string, LucideIcon> = {
-  MessageSquare, Bot, GitBranch, Blocks, Shield, Settings, ShoppingBag, LayoutGrid, Sparkles
+  MessageSquare, Bot, GitBranch, Blocks, Shield, Settings, ShoppingBag, LayoutGrid, Sparkles, FolderTree, Building2, LayoutDashboard
 };
 
 export interface AppItem {
@@ -64,6 +68,7 @@ interface TabContextType {
   tabs: TabItem[];
   openApp: (app: AppItem) => void;
   openExternalApp: (app: { id: string; title: string; url: string; logoUrl: string }) => void;
+  openRouteTab: (tab: { id: string; title: string; url: string; icon: LucideIcon; iconName?: string; logoUrl?: string; closable?: boolean }) => void;
   closeTab: (tabId: string) => void;
   updateCurrentTabUrl: (url: string, title?: string, tabId?: string) => void;
 }
@@ -76,11 +81,11 @@ export function useTabContext() {
   return ctx;
 }
 
-const STORAGE_KEY = "ensemble_tabs_v3";
+const STORAGE_KEY = () => scopedStorageKey("ensemble_tabs_v3");
 
 export function TabProvider({ children }: { children: ReactNode }) {
   const [tabs, setTabs] = useState<TabItem[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(STORAGE_KEY());
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -115,6 +120,18 @@ export function TabProvider({ children }: { children: ReactNode }) {
     ];
   });
 
+  const upsertTab = useCallback((tab: TabItem) => {
+    setTabs((prev) => {
+      const existingIndex = prev.findIndex((item) => item.id === tab.id);
+      if (existingIndex >= 0) {
+        const next = [...prev];
+        next[existingIndex] = { ...next[existingIndex], ...tab };
+        return next;
+      }
+      return [...prev, tab];
+    });
+  }, []);
+
   // Persist on change
   useEffect(() => {
     const toSave = tabs.map(t => ({
@@ -125,38 +142,44 @@ export function TabProvider({ children }: { children: ReactNode }) {
       closable: t.closable,
       logoUrl: t.logoUrl
     }));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+    localStorage.setItem(STORAGE_KEY(), JSON.stringify(toSave));
   }, [tabs]);
 
   const openApp = useCallback((app: AppItem) => {
-    setTabs((prev) => {
-      if (prev.some((t) => t.id === app.id)) return prev;
-      return [...prev, {
-        id: app.id,
-        title: app.title,
-        url: app.url,
-        icon: app.icon,
-        iconName: app.iconName,
-        closable: app.id !== "personal" && app.id !== "home"  // Personal and Home are never closable
-      }];
+    upsertTab({
+      id: app.id,
+      title: app.title,
+      url: app.url,
+      icon: app.icon,
+      iconName: app.iconName,
+      closable: app.id !== "personal" && app.id !== "home",
     });
-  }, []);
+  }, [upsertTab]);
+
+  const openRouteTab = useCallback((tab: { id: string; title: string; url: string; icon: LucideIcon; iconName?: string; logoUrl?: string; closable?: boolean }) => {
+    upsertTab({
+      id: tab.id,
+      title: tab.title,
+      url: tab.url,
+      icon: tab.icon,
+      iconName: tab.iconName,
+      logoUrl: tab.logoUrl,
+      closable: tab.closable ?? true,
+    });
+  }, [upsertTab]);
 
   const openExternalApp = useCallback((app: { id: string; title: string; url: string; logoUrl: string }) => {
     const tabId = `ext-${app.id}`;
-    setTabs((prev) => {
-      if (prev.some((t) => t.id === tabId)) return prev;
-      return [...prev, { 
-        id: tabId, 
-        title: app.title, 
-        url: `/app/${app.id}`, 
-        icon: Bot, 
-        iconName: "Bot",
-        closable: true, 
-        logoUrl: app.logoUrl 
-      }];
+    upsertTab({
+      id: tabId,
+      title: app.title,
+      url: `/app/${app.id}`,
+      icon: Bot,
+      iconName: "Bot",
+      closable: true,
+      logoUrl: app.logoUrl,
     });
-  }, []);
+  }, [upsertTab]);
 
   const closeTab = useCallback((tabId: string) => {
     setTabs((prev) => prev.filter((t) => t.id !== tabId || !t.closable));
@@ -178,7 +201,7 @@ export function TabProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <TabContext.Provider value={{ tabs, openApp, openExternalApp, closeTab, updateCurrentTabUrl }}>
+    <TabContext.Provider value={{ tabs, openApp, openExternalApp, openRouteTab, closeTab, updateCurrentTabUrl }}>
       {children}
     </TabContext.Provider>
   );

@@ -6,7 +6,7 @@ Handles the complete import pipeline:
 1. Clone GitHub repo to temp directory
 2. Run format detection on cloned repo
 3. Parse each file using appropriate parser
-4. Convert to Ensemble internal format (AgentData)
+4. Convert to Esemble internal format (AgentData)
 5. Group into packs by category
 6. Create ZIP files for each pack
 7. Update marketplace manifest
@@ -42,6 +42,7 @@ from core.parsers.yaml_parser import YAMLParser
 from core.parsers.json_parser import JSONParser
 from core.parsers.text_parser import TextParser
 from core.pack_builder import PackBuilder
+from core.marketplace_policy import filter_blocked_packs, is_blocked_pack
 
 logger = logging.getLogger(__name__)
 
@@ -514,7 +515,7 @@ class UniversalImporter:
         """
         headers = {
             "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "Ensemble-Universal-Importer",
+            "User-Agent": "Esemble-Universal-Importer",
         }
         if self.github_token:
             headers["Authorization"] = f"token {self.github_token}"
@@ -640,7 +641,7 @@ class UniversalImporter:
             try:
                 with open(manifest_path, "r", encoding="utf-8") as f:
                     manifest = json.load(f)
-                    existing_packs = manifest.get("packs", [])
+                    existing_packs = filter_blocked_packs(manifest.get("packs", []))
             except (json.JSONDecodeError, IOError) as e:
                 logger.warning(f"Failed to load existing manifest: {e}")
                 existing_packs = []
@@ -651,6 +652,9 @@ class UniversalImporter:
         # Add/update new packs
         for pack in packs:
             pack_id = pack.get("id", "")
+            if is_blocked_pack(pack_id):
+                logger.info(f"Skipping blocked marketplace pack {pack_id}")
+                continue
             if pack_id and pack_id in pack_lookup:
                 # Update existing
                 existing = pack_lookup[pack_id]

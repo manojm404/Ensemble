@@ -1,4 +1,4 @@
-# --- ENSEMBLE GITIGNORE (V1.5 Milestone) ---
+# --- ESEMBLE GITIGNORE (V1.5 Milestone) ---
 
 # Sensitive Configuration
 .env
@@ -32,7 +32,7 @@ out/
 .yarn-error.log
 ui/.vite/
 
-# Ensemble Runtime Data (CAS & Governance)
+# Esemble Runtime Data (CAS & Governance)
 data/
 *.db
 *.sqlite3
@@ -47,7 +47,7 @@ temp/
 .DS_Store
 Thumbs.db
 
-# Ensemble Execution Artifacts
+# Esemble Execution Artifacts
 deliverables/
 Issues
 

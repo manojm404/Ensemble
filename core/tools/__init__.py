@@ -1,5 +1,7 @@
 import os
 import json
+import asyncio # Import asyncio for async tools
+from core.tools.requirement_tools import analyse_text_for_requirements # New Tool
 
 def read_artifact(path: str = None, file_id: str = None) -> str:
     """Reads the content of a file from uploads or workspace with auto-truncation."""
@@ -140,8 +142,8 @@ def list_artifacts(directory: str = "data/workspace") -> str:
     except Exception as e:
         return f"Error listing artifacts: {str(e)}"
 
-def execute_tool(name: str, args: dict) -> str:
-    """Route tool calls."""
+async def execute_tool(name: str, args: dict) -> str:
+    """Route tool calls, handling async tools."""
     tools = {
         "read_artifact": read_artifact,
         "search_web": search_web,
@@ -151,9 +153,14 @@ def execute_tool(name: str, args: dict) -> str:
         "get_technical_indicators": get_technical_indicators,
         "get_company_fundamentals": get_company_fundamentals,
         "get_market_news": get_market_news,
+        "analyse_text_for_requirements": analyse_text_for_requirements,
     }
     if name in tools:
-        return tools[name](**args)
+        tool_func = tools[name]
+        if asyncio.iscoroutinefunction(tool_func):
+            return await tool_func(**args)
+        else:
+            return tool_func(**args)
     return f"Error: Tool {name} not implemented."
 
 

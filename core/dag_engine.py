@@ -1,6 +1,6 @@
 """
 core/dag_engine.py
-DAG-based Workflow Engine for Ensemble V2.
+DAG-based Workflow Engine for Esemble V2.
 
 Executes workflows defined as directed acyclic graphs (DAGs) where:
 - Nodes = agents with roles, instructions, and capabilities
@@ -24,6 +24,22 @@ from core.managed_agent import ManagedAgent
 from core.ensemble_space import EnsembleSpace
 from core.audit import AuditLogger
 from core.llm_provider import LLMProvider
+from core.workflows.messages import AgentMessage, AgentMessageLedger, AgentMessageValidationError
+from core.langgraph_runtime import LangGraphWorkflowRunner, supports_langgraph_workflow
+
+
+def _model_provider(model: Optional[str]) -> Optional[str]:
+    """Infer provider family from a model id."""
+    if not model:
+        return None
+    lower = model.lower()
+    if lower.startswith("gemini"):
+        return "gemini"
+    if lower.startswith("gpt-") or lower.startswith("o") or lower.startswith("deepseek-v3"):
+        return "openai"
+    if lower.startswith("llama") or lower.startswith("openai/gpt-oss") or "groq" in lower or "distill-llama" in lower:
+        return "groq"
+    return None
 
 
 class WorkflowState(Enum):
@@ -49,8 +65,9 @@ class DAGWorkflowEngine:
         self.audit = audit
         self.llm = llm
         self.gov = gov
-        self.company_id = "company_alpha"
+        self.company_id = "user:anonymous"
         self._locks: Dict[str, bool] = {}  # workflow_id -> locked
+        self._run_node_meta: Dict[str, Dict[str, Dict[str, str]]] = {}
 
     def _acquire_lock(self, workflow_id: str) -> bool:
         """Acquire mutex lock to prevent overlapping runs."""
@@ -62,6 +79,12 @@ class DAGWorkflowEngine:
     def _release_lock(self, workflow_id: str):
         """Release mutex lock."""
         self._locks.pop(workflow_id, None)
+
+    def _should_use_langgraph_runtime(self, nodes: List[Dict], edges: List[Dict], resume_from_node: Optional[str] = None) -> bool:
+        """Use LangGraph for clean DAG workflows that do not require loop-back handling."""
+        if resume_from_node:
+            return False
+        return supports_langgraph_workflow(nodes, edges, resume_from_node=resume_from_node)
 
     def _load_skill_instruction(self, role_id: str) -> str:
         """Load skill instruction from skill registry using role_id."""
@@ -203,6 +226,61 @@ class DAGWorkflowEngine:
                 combined_js = '\n\n'.join(js_blocks)
                 files['script.js'] = combined_js.strip()
 
+        return files
+
+    @staticmethod
+    def _normalize_web_project_files(files: Dict[str, str]) -> Dict[str, str]:
+        """Turn generated web output into a clean previewable project tree."""
+        html = files.get("index.html")
+        if not html:
+            return files
+
+        # Fix a common LLM mistake: linking a JS library as a stylesheet.
+        html = re.sub(
+            r'<link\s+rel=["\']stylesheet["\']\s+href=["\']([^"\']+\.js[^"\']*)["\'][^>]*>',
+            r'<script src="\1"></script>',
+            html,
+            flags=re.IGNORECASE,
+        )
+
+        if "style.css" not in files:
+            style_blocks = re.findall(r"<style[^>]*>([\s\S]*?)</style>", html, flags=re.IGNORECASE)
+            if style_blocks:
+                files["style.css"] = "\n\n".join(block.strip() for block in style_blocks if block.strip())
+                html = re.sub(
+                    r"<style[^>]*>[\s\S]*?</style>",
+                    '<link rel="stylesheet" href="style.css">',
+                    html,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+                html = re.sub(r"<style[^>]*>[\s\S]*?</style>", "", html, flags=re.IGNORECASE)
+
+        if "script.js" not in files:
+            inline_scripts = []
+
+            def _script_replacer(match):
+                tag = match.group(0)
+                body = match.group(1).strip()
+                if re.search(r"\ssrc=", tag, flags=re.IGNORECASE):
+                    return tag
+                if body:
+                    inline_scripts.append(body)
+                    return '<script src="script.js"></script>'
+                return ""
+
+            html = re.sub(
+                r"<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)</script>",
+                _script_replacer,
+                html,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            html = re.sub(r"<script(?![^>]*\ssrc=)[^>]*>[\s\S]*?</script>", "", html, flags=re.IGNORECASE)
+            if inline_scripts:
+                files["script.js"] = "\n\n".join(inline_scripts)
+
+        files["index.html"] = html
         return files
 
     @staticmethod
@@ -373,7 +451,7 @@ class DAGWorkflowEngine:
         self,
         workflow_id: str,
         graph_json: Dict[str, Any],
-        company_id: str = "company_alpha",
+        company_id: str = "user:anonymous",
         run_id: str = None,
         initial_input: str = None,
         assistant_id: str = None,
@@ -414,8 +492,40 @@ class DAGWorkflowEngine:
                 self.audit.log(self.company_id, "human_user", "USER_INPUT", {"text": initial_input})
                 print(f"📥 [DAG Engine] Recorded user task: {initial_input[:50]}...", flush=True)
 
+            use_langgraph = self._should_use_langgraph_runtime(nodes, edges, resume_from_node=resume_from_node)
+
+            if use_langgraph:
+                runner = LangGraphWorkflowRunner(self)
+                result = await runner.run(
+                    workflow_id=workflow_id,
+                    run_id=run_id,
+                    nodes=nodes,
+                    edges=edges,
+                    company_id=company_id,
+                    initial_input=initial_input,
+                    assistant_id=assistant_id,
+                    topic_id=topic_id,
+                )
+                print(f"✅ [DAG Engine] LangGraph runtime completed workflow {workflow_id}", flush=True)
+                self.audit.notify(
+                    user_id=None,
+                    company_id=self.company_id,
+                    title="🏁 Workflow Completed",
+                    preview=f"LangGraph workflow {workflow_id} finished.",
+                    content=f"Your Sovereign workflow {workflow_id} (Run: {run_id}) has finished all required states.",
+                    category="success"
+                )
+                return result
+
             # Always initialize the run record
             self._init_run(workflow_id, run_id, nodes)
+            self._record_run_event(
+                run_id,
+                workflow_id,
+                "run_started",
+                status="running",
+                payload={"node_count": len(nodes), "edge_count": len(edges), "task": initial_input or "", "runtime_engine": "custom_dag"},
+            )
 
             # Build node lookup and edge adjacency
             node_map = {n["id"]: n for n in nodes}
@@ -502,33 +612,36 @@ class DAGWorkflowEngine:
                             # Prune non-selected branches
                             self._prune_branches(branch_info["prune_targets"], edges, pruned_nodes)
                         print(f"❌ [DAG Engine] Node {nid} failed. Halting workflow.", flush=True)
-                        self._update_run_status(run_id, WorkflowState.FAILED.value)
+                        failed_node_data = node_map.get(nid, {}).get("data", {})
+                        failed_label = failed_node_data.get("label") or failed_node_data.get("role") or nid
+                        self._update_run_status(run_id, WorkflowState.FAILED.value, nid, failed_label)
                         
                         # PERSISTENT NOTIFICATION for Failure
                         self.audit.notify(
-                            user_id="dev_user",
+                            user_id=None,
                             company_id=self.company_id,
                             title="❌ Workflow Failed",
-                            preview=f"Workflow {workflow_id} failed at node {nid}.",
-                            content=f"An error occurred during the execution of node {nid} in run {run_id}. The workflow has been halted.",
+                            preview=f"Workflow {workflow_id} failed at {failed_label}.",
+                            content=f"An error occurred during {failed_label} in run {run_id}. The workflow has been halted.",
                             category="error"
                         )
-                        return {"status": "failed", "run_id": run_id, "failed_node": nid}
+                        return {"status": "failed", "run_id": run_id, "failed_node": nid, "runtime_engine": "custom_dag"}
 
             # All required nodes completed
             self._update_run_status(run_id, WorkflowState.COMPLETED.value)
+            self._record_run_event(run_id, workflow_id, "run_completed", status=WorkflowState.COMPLETED.value)
             print(f"✅ [DAG Engine] Workflow {workflow_id} completed successfully", flush=True)
             
             # PERSISTENT NOTIFICATION for Completion
             self.audit.notify(
-                user_id="dev_user",
+                user_id=None,
                 company_id=self.company_id,
                 title="🏁 Workflow Completed",
                 preview=f"Custom DAG {workflow_id} finished.",
                 content=f"Your Sovereign workflow {workflow_id} (Run: {run_id}) has finished all required states.",
                 category="success"
             )
-            return {"status": "completed", "run_id": run_id}
+            return {"status": "completed", "run_id": run_id, "runtime_engine": "custom_dag"}
 
         finally:
             self._release_lock(workflow_id)
@@ -595,7 +708,7 @@ class DAGWorkflowEngine:
         # GLOBAL PANIC CHECK
         if self.gov.is_panic:
             print(f"🛑 [DAG Engine] Node {node_id} ABORTED due to PANIC signal.", flush=True)
-            self._update_node_status(run_id, node_id, "failed")
+            self._update_node_status(run_id, node_id, "failed", "Execution aborted by panic signal.")
             return False, None
 
         print(f"⚙️ [DAG Engine] Executing node '{node_id}' (type: {node_type}, role: {role})", flush=True)
@@ -623,7 +736,7 @@ class DAGWorkflowEngine:
                 return True, None
             else:
                 print(f"❌ [DAG Engine] Node {node_id} DENIED or PANIC. Halting.", flush=True)
-                self._update_node_status(run_id, node_id, "failed")
+                self._update_node_status(run_id, node_id, "failed", "Human approval was denied.")
                 return False, None
 
         # --- CASE 2: STANDARD STATE NODE ---
@@ -631,7 +744,7 @@ class DAGWorkflowEngine:
         budget = self.gov.get_company_budget_status(self.company_id)
         if budget["spent"] >= budget["limit"]:
             print(f"❌ [DAG Engine] Budget exhausted for node {node_id}", flush=True)
-            self._update_node_status(run_id, node_id, "failed")
+            self._update_node_status(run_id, node_id, "failed", "Company budget was exhausted before this step could run.")
             return False, None
 
         # 2. Assemble input context
@@ -639,10 +752,16 @@ class DAGWorkflowEngine:
 
         # 3. Create and run agent
         agent_id = f"{role.lower().replace(' ', '_')}_{node_id}_{int(time.time())}"
+        self._update_run_status(run_id, "running", node_id, agent_id)
 
         # Detect coding tasks (need longer timeout and special handling)
         coding_keywords = ['html', 'css', 'javascript', 'code', 'develop', 'frontend', 'coder', 'developer', 'implement', 'write code', 'create the', 'html formatter', 'format html', 'build the page', 'web developer', 'html dashboard', 'chart', 'dashboard']
+        web_quality_keywords = [
+            'website', 'web site', 'landing page', 'homepage', 'frontend', 'web developer',
+            'html', 'css', 'javascript', 'dashboard', 'ui', 'responsive', 'modern'
+        ]
         is_coding_task = any(kw in instruction.lower() for kw in coding_keywords)
+        is_web_deliverable = any(kw in f"{instruction} {initial_input or ''}".lower() for kw in web_quality_keywords)
 
         enhanced_instruction = instruction
 
@@ -673,6 +792,19 @@ class DAGWorkflowEngine:
                 "Do NOT describe code in prose. Output complete, working files. "
                 "Each file must be in its own fenced code block with the language specified."
             )
+            if is_web_deliverable:
+                enhanced_instruction += (
+                    "\n\nPREMIUM WEBSITE QUALITY BAR — NON-NEGOTIABLE:\n"
+                    "- Build a polished, product-grade web experience, not a tutorial/demo page.\n"
+                    "- Use a clean project structure: exactly `index.html`, `style.css`, and `script.js` unless more files are truly needed.\n"
+                    "- `index.html` should contain semantic sections and content only; put styling in `style.css` and behavior in `script.js`.\n"
+                    "- Include a distinctive hero, strong visual hierarchy, navigation, rich section layout, cards, CTA areas, realistic mock content, and a finished footer.\n"
+                    "- Use CSS variables, layered gradients, responsive grids, intentional typography, generous spacing, hover/focus states, and mobile breakpoints.\n"
+                    "- Do NOT use default-looking Arial/Times pages, tiny centered boxes, placeholder lorem ipsum, unstyled buttons, inline styles, or generic black cards.\n"
+                    "- If external libraries are used, load JavaScript with `<script src=...>`, never as a stylesheet.\n"
+                    "- The preview must look credible to a customer at 1440px desktop and on mobile without horizontal overflow.\n"
+                    "- Use the exact user task and upstream handoff data. Do not invent a different business, ticker, theme, or product."
+                )
         else:
             # Non-coding agents: enforce strict output format
             enhanced_instruction = instruction + role_isolation + strict_format + (
@@ -688,6 +820,51 @@ class DAGWorkflowEngine:
         tool_schemas = self._build_tool_schemas(agent_tools)
 
         print(f"🔧 [DAG Engine] Node {node_id} using tools: {agent_tools}", flush=True)
+        
+        # M2: Shared Repo Workspace
+        shared_repo_dir = os.path.join("data", "workspace", f"workflow_{workflow_id}", "repo")
+        os.makedirs(shared_repo_dir, exist_ok=True)
+
+        # M3: Per-Phase Model Routing
+        node_model = node_data.get("model")
+        model_selection_reason = "explicitly_set"
+        if not node_model:
+            # Smart routing based on role
+            role_lower = role.lower()
+            if any(k in role_lower for k in ["architect", "planner", "manager", "strategist"]):
+                # Reasoning phase
+                node_model = "claude-3-opus-20240229" if self.llm.provider == "anthropic" else "gpt-4o"
+                model_selection_reason = "auto_reasoning"
+            elif any(k in role_lower for k in ["engineer", "developer", "coder"]):
+                # Execution phase
+                node_model = "claude-3-5-sonnet-20240620" if self.llm.provider == "anthropic" else "gemini-2.5-flash"
+                model_selection_reason = "auto_execution"
+        
+        if node_model and _model_provider(node_model) and _model_provider(node_model) != self.llm.provider:
+            print(
+                f"⚠️ [DAG Engine] Node model '{node_model}' is not compatible with active provider '{self.llm.provider}'. "
+                f"Using active model '{self.llm.model}'.",
+                flush=True,
+            )
+            node_model = self.llm.model
+            model_selection_reason = "provider_compatible_fallback"
+        
+        self.audit.log(
+            self.company_id,
+            agent_id,
+            "MODEL_ROUTING",
+            {"node_id": node_id, "role": role, "model": node_model, "reason": model_selection_reason}
+        )
+        
+        model_override = None
+        if node_model or node_data.get("temperature") is not None:
+            model_override = {
+                "provider": self.llm.provider,
+                "model": node_model,
+                "temperature": node_data.get("temperature", 0.7),
+                "base_url": self.llm.base_url,
+                "api_key": self.llm.api_key,
+            }
 
         agent = ManagedAgent(
             agent_id=agent_id,
@@ -699,12 +876,20 @@ class DAGWorkflowEngine:
             tools=agent_tools,
             tool_schemas=tool_schemas,
             is_coding_task=is_coding_task,
+            workspace_dir=shared_repo_dir,
+            model_override=model_override
         )
         self.gov.register_agent(agent.agent_id, self.company_id, role)
 
         try:
             # Check panic again right before LLM call
             if self.gov.is_panic: return False, None
+            
+            # --- M2: Pre-task Git Snapshot ---
+            has_code_tools = any(t in agent_tools for t in ["write_file", "shell_cmd", "write_artifact"])
+            git_snapshot_sha = None
+            if has_code_tools or is_coding_task:
+                git_snapshot_sha = self._git_snapshot(shared_repo_dir, f"pre_task_{node_id}_{run_id}")
 
             # 📝 CRITICAL FIX: Ensure user's project goal is the PRIMARY instruction
             user_task = ""
@@ -713,53 +898,98 @@ class DAGWorkflowEngine:
             
             final_prompt = f"### YOUR ACCURATE TASK:\n{user_task}\n\n### ROLE INSTRUCTIONS:\n{enhanced_instruction}\n\n### FULL CONTEXT:\n{context}"
             
-            response = await agent.run(final_prompt)
+            response = await agent.run_async(final_prompt)
+
+            if response.strip().startswith(("Error:", "Error calling ")):
+                raise RuntimeError(response)
 
             if "Execution aborted" in response or "Budget exhausted" in response:
                 print(f"⏸️ [DAG Engine] Node {node_id} paused/aborted", flush=True)
-                self._update_node_status(run_id, node_id, "failed")
+                self._update_node_status(run_id, node_id, "failed", response[:240])
                 return False, None
 
             # 4. Commit output artifact to CAS
             artifact_hash = self.space.write(response.encode(), f"{node_id}_output", node_id, self.company_id)
             print(f"📦 [DAG Engine] Artifact committed: {artifact_hash[:16]}...", flush=True)
 
-            # 5. Generate handover summary (AGENTS.md compliance)
-            handover = self._generate_handover_summary(node_id, role, response)
-            self.space.write(handover.encode(), f"{node_id}_handover", node_id, self.company_id)
-
-            # 6. Create snapshot for Time Machine
-            self._create_snapshot(run_id, node_id, artifact_hash, "completed")
-
-            # 7. Broadcast RESULT event
-            self.audit.log(
-                self.company_id,
-                agent_id,
-                "RESULT",
-                {"result": response, "agent_id": agent_id, "node_id": node_id, "artifact_hash": artifact_hash},
-                broadcast=True,
-            )
-
-            # 8. Mirror to physical deliverables folder (if Architect/Planner)
-            self._mirror_to_deliverables(run_id, node_id, role, response)
-
-            # 9. Auto-detect and extract code blocks into proper files
+            # 5. Auto-detect and extract code blocks into proper files
             extracted_files = self._extract_code_blocks(response)
+            if extracted_files and is_web_deliverable:
+                extracted_files = self._normalize_web_project_files(extracted_files)
             if extracted_files:
                 print(f"📁 [DAG Engine] Extracted {len(extracted_files)} files from node {node_id}", flush=True)
                 for filename, content in extracted_files.items():
                     self.space.write(content.encode(), f"{node_id}_{filename}", node_id, self.company_id)
-                    print(f"  📄 Saved: {filename}", flush=True)
+                    print(f"  📄 Saved to CAS: {filename}", flush=True)
 
-            # Also save to physical workspace for preview
+            # Also save to physical workspace for preview (shared_repo)
             if extracted_files:
-                workspace_dir = os.path.join("data", "workspace", f"workflow_{workflow_id}", node_id)
-                os.makedirs(workspace_dir, exist_ok=True)
                 for filename, content in extracted_files.items():
-                    file_path = os.path.join(workspace_dir, filename)
+                    file_path = os.path.join(shared_repo_dir, filename)
                     with open(file_path, "w", encoding="utf-8") as f:
                         f.write(content)
-                    print(f"  💾 Physical file saved: {file_path}", flush=True)
+                    print(f"  💾 Physical file saved to shared repo: {file_path}", flush=True)
+                    
+            # --- M2: Post-task Git Verification ---
+            verification_status = "pending"
+            if (has_code_tools or is_coding_task) and git_snapshot_sha:
+                # Commit agent changes
+                self._git_commit(shared_repo_dir, f"Agent {node_id} changes")
+                
+                # Check for verification commands
+                verify_cmds = node_data.get("verification_commands", [])
+                if verify_cmds:
+                    verify_passed = await self._run_sandboxed_verification(shared_repo_dir, verify_cmds)
+                    if verify_passed:
+                        verification_status = "passed"
+                        print(f"✅ [DAG Engine] Verification PASSED for node {node_id}", flush=True)
+                    else:
+                        verification_status = "failed"
+                        print(f"❌ [DAG Engine] Verification FAILED for node {node_id}. Rolling back.", flush=True)
+                        self._git_rollback(shared_repo_dir, git_snapshot_sha)
+                        self._update_node_status(run_id, node_id, "failed", "Verification failed during step validation.")
+                        return False, None # Triggers resilience retry / halt
+
+            # 6. Generate handover summary (ADR-1 Compliance)
+            handover = self._generate_handover_summary(node_id, role, response, extracted_files)
+            
+            # M2: Inject verification status into handover if applicable
+            if verification_status != "pending":
+                import json
+                try:
+                    h_obj = json.loads(handover)
+                    h_obj["verification"] = verification_status
+                    if git_snapshot_sha:
+                        h_obj["git_ref"] = self._git_current_sha(shared_repo_dir)
+                    handover = json.dumps(h_obj, indent=2)
+                except:
+                    pass
+                    
+            self.space.write(handover.encode(), f"{node_id}_handover", node_id, self.company_id)
+            self._record_handoff_message(run_id, workflow_id, node_id, role, response, edges)
+
+            # 7. Create snapshot for Time Machine
+            self._create_snapshot(run_id, node_id, artifact_hash, "completed")
+
+            # 8. Broadcast RESULT event
+            self.audit.log(
+                self.company_id,
+                agent_id,
+                "RESULT",
+                {
+                    "result": response,
+                    "agent_id": agent_id,
+                    "node_id": node_id,
+                    "artifact_hash": artifact_hash,
+                    "workflow_id": workflow_id,
+                    "run_id": run_id,
+                    "role": role,
+                },
+                broadcast=True,
+            )
+
+            # 9. Mirror to physical deliverables folder (if Architect/Planner)
+            self._mirror_to_deliverables(run_id, node_id, role, response)
 
             # 10. Legacy HTML detection (for backward compatibility)
             if not extracted_files and ("<!DOCTYPE html>" in response or "<html>" in response.lower()):
@@ -780,8 +1010,7 @@ class DAGWorkflowEngine:
                 print(f"🌐 [DAG Engine] Web deliverable saved to {preview_path}", flush=True)
 
             # Update node status
-            self._update_node_status(run_id, node_id, "completed")
-            self._update_run_status(run_id, "running", node_id, agent_id)
+            self._update_node_status(run_id, node_id, "completed", response)
 
             # --- V3 SWITCH LOGIC ---
             if node_type == "switchNode":
@@ -813,7 +1042,7 @@ class DAGWorkflowEngine:
 
         except Exception as e:
             print(f"❌ [DAG Engine] Node {node_id} failed: {e}", flush=True)
-            self._update_node_status(run_id, node_id, "failed")
+            self._update_node_status(run_id, node_id, "failed", str(e))
             self.audit.log(self.company_id, node_id, "NODE_FAILURE", {"error": str(e)})
             return False, None
 
@@ -830,42 +1059,59 @@ class DAGWorkflowEngine:
         3. Handover summaries from previous nodes
         """
         context_parts = []
+        
+        # Determine if we should wipe implicit context (ADR-1)
+        node_data = node_map.get(node_id, {}).get("data", {})
+        # Default to True for Engineering roles, otherwise False. (Assuming roles containing 'engineer', 'developer', etc.)
+        role = node_data.get("role", "").lower()
+        is_engineering = any(k in role for k in ["engineer", "developer", "coder", "architect", "programmer"])
+        reset_context = node_data.get("reset_context", is_engineering)
+        timing_policy = node_data.get("timing_policy") or {}
+        dependency_mode = str(timing_policy.get("type") or "").lower() == "dependency"
 
         # 1. Include initial user task/goal (Universal context)
         if self.space.exists("user_initial_input"):
             input_val = self.space.read("user_initial_input").decode("utf-8", errors="ignore")
             context_parts.append(f"### PROJECT GOAL / TASK:\n{input_val}")
 
+        self.audit.log(
+            self.company_id,
+            node_id,
+            "CONTEXT_RESET",
+            {"node_id": node_id, "reset_active": reset_context, "reason": "routine"}
+        )
+
         # Get predecessor artifacts using the passed edges list
         predecessors = self._get_predecessors(node_id, edges)
+        include_raw_predecessors = bool(predecessors) and (dependency_mode or not reset_context)
         for pred_id in predecessors:
-            # Phase I: Loop-Aware Context Assembly
-            # Fetch ALL versions of the predecessor's output to ensure history is preserved in loops
-            all_versions = self.space.read_all_versions(f"{pred_id}_output")
-            
-            if all_versions:
-                if len(all_versions) > 1:
-                    print(f"📚 [DAG Engine] Gathering full history for looping predecessor {pred_id} ({len(all_versions)} rounds)", flush=True)
-                    history_blocks = []
-                    for i, content in enumerate(all_versions):
-                        round_text = content.decode("utf-8", errors="ignore")
-                        history_blocks.append(f"### MISSION ROUND {i+1} OUTPUT ({pred_id}):\n{round_text}")
-                    context_parts.append("\n\n---\n\n".join(history_blocks))
-                else:
-                    response = all_versions[0].decode("utf-8", errors="ignore")
-                    context_parts.append(f"### Outcome of {pred_id}:\n{response}")
-            
-            # Include handover summary
+            # Include handover summary (This is the primary context if reset_context is True)
             handover_name = f"{pred_id}_handover"
             if self.space.exists(handover_name):
-                # We usually only need the latest handover to understand the current state
                 handover = self.space.read(handover_name).decode("utf-8", errors="ignore")
                 context_parts.append(f"### Handover Summary ({pred_id}):\n{handover}")
 
+            # Include raw outputs for dependency-linked nodes so downstream agents
+            # can actually consume the upstream artifact, not just a summary.
+            if include_raw_predecessors:
+                # Phase I: Loop-Aware Context Assembly
+                all_versions = self.space.read_all_versions(f"{pred_id}_output")
+                if all_versions:
+                    if len(all_versions) > 1:
+                        print(f"📚 [DAG Engine] Gathering full history for looping predecessor {pred_id} ({len(all_versions)} rounds)", flush=True)
+                        history_blocks = []
+                        for i, content in enumerate(all_versions):
+                            round_text = content.decode("utf-8", errors="ignore")
+                            history_blocks.append(f"### MISSION ROUND {i+1} OUTPUT ({pred_id}):\n{round_text}")
+                        context_parts.append("\n\n---\n\n".join(history_blocks))
+                    else:
+                        response = all_versions[-1].decode("utf-8", errors="ignore")
+                        context_parts.append(f"### Outcome of {pred_id}:\n{response}")
+
         context_str = "\n\n".join(context_parts) if context_parts else "No previous context."
-        print(f"📝 [DAG Engine] Context for {node_id}: {len(context_str)} chars, predecessors: {predecessors}", flush=True)
+        print(f"📝 [DAG Engine] Context for {node_id}: {len(context_str)} chars, predecessors: {predecessors}, reset_context: {reset_context}", flush=True)
         
-        # DATA INJECTOR: Resolve {{agent_id.field.path}} placeholders
+        # DATA INJECTOR: Resolve {{agent_id.field.path}} placeholders (Bypasses reset_context to pull raw CAS data)
         context_str = self._resolve_data_bindings(context_str, run_id, predecessors)
         
         return context_str
@@ -963,7 +1209,7 @@ class DAGWorkflowEngine:
                         pred_id = pid
                         break
                 if pred_id is None:
-                    return f"[N/A: agent '{agent_key}' not found in {predecessors}]"
+                    return f"[N/A: agent '{agent_key}' not found]"
             
             # Fetch output from CAS
             artifact_name = f"{pred_id}_output"
@@ -1102,28 +1348,67 @@ class DAGWorkflowEngine:
 
         return [TOOL_SCHEMAS[t] for t in tool_names if t in TOOL_SCHEMAS]
 
-    def _generate_handover_summary(self, node_id: str, role: str, response: str) -> str:
+    def _generate_handover_summary(self, node_id: str, role: str, response: str, extracted_files: Dict[str, str] = None) -> str:
         """
-        Generate a handover summary (max 500 tokens) for the node's output.
-        Per AGENTS.md: distill key decisions, trade-offs, and open questions.
+        Generate a structured JSON handover summary (max 500 tokens) for the node's output.
+        Per ADR-1: This serves as the clean context for the next node.
         """
-        # Simple summarization: extract key points (truncate to ~500 chars)
-        summary_lines = [
-            f"Node: {node_id} | Role: {role}",
-            f"Key Output: {response[:300]}...",
-            f"Status: Completed",
-        ]
-        return "\n".join(summary_lines)
+        files = list(extracted_files.keys()) if extracted_files else []
+        summary_text = response[:500] + ("..." if len(response) > 500 else "")
+        
+        summary_obj = {
+            "node_id": node_id,
+            "role": role,
+            "outcome": "completed",
+            "summary": summary_text,
+            "files_changed": files,
+            "raw_artifact_cas_id": f"{node_id}_output",
+            "verification": "pending"
+        }
+        return json.dumps(summary_obj, indent=2)
 
     def _init_run(self, workflow_id: str, run_id: str, nodes: List[Dict]):
         """Initialize a new workflow run in the database."""
+        self._run_node_meta[run_id] = {}
+        for index, node in enumerate(nodes):
+            if node.get("id"):
+                self._run_node_meta[run_id][node["id"]] = {
+                    **self._node_metadata(node),
+                    "execution_order": str(index + 1),
+                }
         with sqlite3.connect(self.gov.db_path) as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO executions 
-                   (run_id, workflow_id, status, current_node, started_at)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (run_id, workflow_id, "running", nodes[0]["id"], time.strftime("%Y-%m-%dT%H:%M:%SZ")),
+                   (run_id, workflow_id, company_id, status, current_node, started_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (run_id, workflow_id, self.company_id, "running", nodes[0]["id"], time.strftime("%Y-%m-%dT%H:%M:%SZ")),
             )
+            for index, node in enumerate(nodes):
+                node_id = node.get("id")
+                if not node_id:
+                    continue
+                conn.execute(
+                    """INSERT OR REPLACE INTO node_executions
+                       (run_id, node_id, status, output, updated_at)
+                       VALUES (?, ?, ?, COALESCE((SELECT output FROM node_executions WHERE run_id = ? AND node_id = ?), NULL), ?)""",
+                    (run_id, node_id, "idle" if index else "queued", run_id, node_id, time.strftime("%Y-%m-%dT%H:%M:%SZ")),
+                )
+
+    @staticmethod
+    def _node_metadata(node: Dict[str, Any]) -> Dict[str, str]:
+        data = node.get("data") or {}
+        node_id = node.get("id", "")
+        return {
+            "label": str(data.get("label") or data.get("name") or data.get("role") or node_id),
+            "role": str(data.get("role") or data.get("label") or node_id),
+            "subtitle": str(data.get("subtitle") or ""),
+            "selection_reason": str(data.get("selection_reason") or ""),
+        }
+
+    def _node_meta(self, run_id: str, node_id: Optional[str]) -> Dict[str, str]:
+        if not node_id:
+            return {}
+        return self._run_node_meta.get(run_id, {}).get(node_id, {})
 
     def _update_run_status(self, run_id: str, status: str, current_node: str = None, agent_id: str = None):
         """Update the execution run status."""
@@ -1135,16 +1420,176 @@ class DAGWorkflowEngine:
                 )
             else:
                 conn.execute("UPDATE executions SET status = ? WHERE run_id = ?", (status, run_id))
+            if status in {WorkflowState.COMPLETED.value, WorkflowState.FAILED.value}:
+                conn.execute("UPDATE executions SET completed_at = ? WHERE run_id = ?", (time.strftime("%Y-%m-%dT%H:%M:%SZ"), run_id))
 
-    def _update_node_status(self, run_id: str, node_id: str, status: str):
+    def _update_node_status(self, run_id: str, node_id: str, status: str, output: Optional[str] = None):
         """Update individual node execution status."""
+        timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ")
         with sqlite3.connect(self.gov.db_path) as conn:
+            existing_output = None
+            if output is None:
+                cursor = conn.execute(
+                    "SELECT output FROM node_executions WHERE run_id = ? AND node_id = ?",
+                    (run_id, node_id),
+                )
+                row = cursor.fetchone()
+                existing_output = row[0] if row else None
             conn.execute(
                 """INSERT OR REPLACE INTO node_executions 
-                   (run_id, node_id, status, updated_at)
-                   VALUES (?, ?, ?, ?)""",
-                (run_id, node_id, status, time.strftime("%Y-%m-%dT%H:%M:%SZ")),
+                   (run_id, node_id, status, output, updated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (run_id, node_id, status, output if output is not None else existing_output, timestamp),
             )
+        self._record_run_event(
+            run_id,
+            None,
+            "node_status",
+            node_id=node_id,
+            status=status,
+            payload={"output_summary": (output or "")[:280] if output else ""},
+            created_at=timestamp,
+        )
+
+    def _record_run_event(
+        self,
+        run_id: str,
+        workflow_id: Optional[str],
+        event_type: str,
+        node_id: Optional[str] = None,
+        status: Optional[str] = None,
+        payload: Optional[Dict[str, Any]] = None,
+        created_at: Optional[str] = None,
+    ) -> Optional[int]:
+        """Persist an immutable event for live run replay."""
+        timestamp = created_at or time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        meta = self._node_meta(run_id, node_id)
+        try:
+            with sqlite3.connect(self.gov.db_path) as conn:
+                if not workflow_id:
+                    row = conn.execute("SELECT workflow_id FROM executions WHERE run_id = ?", (run_id,)).fetchone()
+                    workflow_id = row[0] if row else None
+                cursor = conn.execute(
+                    """INSERT INTO workflow_run_events
+                       (run_id, workflow_id, company_id, node_id, event_type, status, label, role, payload_json, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        run_id,
+                        workflow_id,
+                        self.company_id,
+                        node_id,
+                        event_type,
+                        status,
+                        meta.get("label"),
+                        meta.get("role"),
+                        json.dumps(payload or {}),
+                        timestamp,
+                    ),
+                )
+                return int(cursor.lastrowid)
+        except Exception as exc:
+            print(f"⚠️ [DAG Engine] Failed to record run event: {exc}", flush=True)
+            return None
+
+    def _record_agent_message(
+        self,
+        message: AgentMessage,
+        workflow_id: str,
+    ) -> None:
+        """Persist a validated immutable agent-to-agent message."""
+        try:
+            with sqlite3.connect(self.gov.db_path) as conn:
+                cursor = conn.execute(
+                    """SELECT message_id, run_id, cycle, sender_node_id, recipient_node_ids_json, visibility,
+                              message_type, subject, body, related_state_keys_json, source_event_ids_json,
+                              created_at, thread_id, in_reply_to
+                       FROM agent_messages
+                       WHERE run_id = ?
+                       ORDER BY cycle ASC, created_at ASC""",
+                    (message.run_id,),
+                )
+                existing = []
+                for row in cursor.fetchall():
+                    existing.append(AgentMessage(
+                        message_id=row[0],
+                        run_id=row[1],
+                        cycle=row[2] or 0,
+                        sender_node_id=row[3],
+                        recipient_node_ids=json.loads(row[4] or "[]"),
+                        visibility=row[5] or "public",
+                        message_type=row[6] or "note",
+                        subject=row[7] or "",
+                        body=row[8] or "",
+                        related_state_keys=json.loads(row[9] or "[]"),
+                        source_event_ids=json.loads(row[10] or "[]"),
+                        created_at=row[11] or time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        thread_id=row[12],
+                        in_reply_to=row[13],
+                    ))
+                AgentMessageLedger(existing).add_message(message)
+                conn.execute(
+                    """INSERT INTO agent_messages
+                       (message_id, run_id, workflow_id, company_id, cycle, sender_node_id, recipient_node_ids_json,
+                        visibility, message_type, subject, body, related_state_keys_json, source_event_ids_json,
+                        created_at, thread_id, in_reply_to)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        message.message_id,
+                        message.run_id,
+                        workflow_id,
+                        self.company_id,
+                        message.cycle,
+                        message.sender_node_id,
+                        json.dumps(list(message.recipient_node_ids)),
+                        message.visibility,
+                        message.message_type,
+                        message.subject,
+                        message.body,
+                        json.dumps(list(message.related_state_keys)),
+                        json.dumps(list(message.source_event_ids)),
+                        message.created_at,
+                        message.thread_id,
+                        message.in_reply_to,
+                    ),
+                )
+        except AgentMessageValidationError as exc:
+            print(f"⚠️ [DAG Engine] Rejected invalid agent message: {exc}", flush=True)
+        except sqlite3.IntegrityError:
+            # Messages are immutable; duplicate writes are ignored.
+            pass
+        except Exception as exc:
+            print(f"⚠️ [DAG Engine] Failed to record agent message: {exc}", flush=True)
+
+    def _downstream_recipients(self, node_id: str, edges: List[Dict]) -> List[str]:
+        recipients = [edge.get("target") for edge in edges if edge.get("source") == node_id and edge.get("target")]
+        return [str(item) for item in recipients] or ["workflow_result"]
+
+    def _record_handoff_message(
+        self,
+        run_id: str,
+        workflow_id: str,
+        node_id: str,
+        role: str,
+        response: str,
+        edges: List[Dict],
+    ) -> None:
+        recipients = self._downstream_recipients(node_id, edges)
+        meta = self._node_meta(run_id, node_id)
+        message = AgentMessage(
+            message_id=f"msg_{run_id}_{node_id}_handoff",
+            run_id=run_id,
+            cycle=int(meta.get("execution_order") or 0),
+            sender_node_id=node_id,
+            recipient_node_ids=recipients,
+            visibility="public",
+            message_type="handoff",
+            subject=f"{meta.get('label') or role} handoff",
+            body=(response or "")[:1200],
+            related_state_keys=[f"{node_id}_output", f"{node_id}_handover"],
+            created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            thread_id=f"thread_{run_id}_handoff",
+        )
+        self._record_agent_message(message, workflow_id)
 
     def _create_snapshot(self, run_id: str, node_id: str, artifact_hash: str, status: str, graph_state: Dict = None):
         """Create a compressed execution snapshot for Time Machine."""
@@ -1268,3 +1713,148 @@ class DAGWorkflowEngine:
 
         except Exception as e:
             print(f"⚠️ [DAG Engine] Failed to mirror deliverable: {e}", flush=True)
+
+    # =========================================================================
+    # Phase 2: Git-Aware Execution (Worktree Safety & Verification)
+    # =========================================================================
+    
+    def _git_snapshot(self, repo_dir: str, branch_name: str) -> Optional[str]:
+        """Creates a safety snapshot branch before the agent mutates files."""
+        import subprocess
+        try:
+            # Ensure it's a git repo
+            if not os.path.exists(os.path.join(repo_dir, ".git")):
+                subprocess.run(["git", "init"], cwd=repo_dir, check=True, capture_output=True)
+                subprocess.run(["git", "config", "user.name", "Esemble Engine"], cwd=repo_dir, check=True)
+                subprocess.run(["git", "config", "user.email", "engine@esemble.local"], cwd=repo_dir, check=True)
+                
+                # Initial empty commit needed to branch
+                with open(os.path.join(repo_dir, ".ensemble_init"), "w") as f:
+                    f.write("Repository initialized by Esemble Engine.")
+                subprocess.run(["git", "add", "."], cwd=repo_dir, check=True)
+                subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=repo_dir, check=True)
+
+            # Stash any uncommitted changes first just in case
+            subprocess.run(["git", "add", "."], cwd=repo_dir, check=True)
+            subprocess.run(["git", "commit", "-m", "Auto-commit before snapshot"], cwd=repo_dir, capture_output=True)
+
+            # Create snapshot branch
+            subprocess.run(["git", "checkout", "-b", branch_name], cwd=repo_dir, check=True, capture_output=True)
+            
+            # Get current SHA
+            result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_dir, check=True, capture_output=True, text=True)
+            sha = result.stdout.strip()
+            print(f"🌿 [DAG Engine] Git Snapshot created at {sha[:8]} on branch {branch_name}", flush=True)
+            self.audit.log(
+                self.company_id,
+                "git_safety_module",
+                "GIT_SAFETY",
+                {"action": "auto_commit", "branch": branch_name, "commit_sha": sha}
+            )
+            return sha
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️ [DAG Engine] Git snapshot failed: {e.stderr}", flush=True)
+            return None
+
+    def _git_commit(self, repo_dir: str, message: str) -> None:
+        """Commits all changes made by the agent."""
+        import subprocess
+        try:
+            subprocess.run(["git", "add", "."], cwd=repo_dir, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-m", message], cwd=repo_dir, capture_output=True)
+            print(f"💾 [DAG Engine] Agent changes committed to Git.", flush=True)
+        except subprocess.CalledProcessError:
+            # Normal if no changes were made
+            pass
+
+    def _git_rollback(self, repo_dir: str, sha: str) -> None:
+        """Hard resets the repository to the pre-task snapshot SHA."""
+        import subprocess
+        try:
+            subprocess.run(["git", "reset", "--hard", sha], cwd=repo_dir, check=True, capture_output=True)
+            subprocess.run(["git", "clean", "-fd"], cwd=repo_dir, check=True, capture_output=True)
+            print(f"⏪ [DAG Engine] Git Worktree rolled back to {sha[:8]}.", flush=True)
+            self.audit.log(
+                self.company_id,
+                "git_safety_module",
+                "GIT_SAFETY",
+                {"action": "rollback", "target_sha": sha}
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️ [DAG Engine] Git rollback failed: {e.stderr}", flush=True)
+
+    def _git_current_sha(self, repo_dir: str) -> str:
+        """Returns the current HEAD SHA."""
+        import subprocess
+        try:
+            result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_dir, check=True, capture_output=True, text=True)
+            return result.stdout.strip()
+        except subprocess.CalledProcessError:
+            return "unknown"
+
+    async def _run_sandboxed_verification(self, repo_dir: str, commands: List[str]) -> bool:
+        """
+        Executes verification commands inside a secure, ephemeral Docker sandbox (ADR-3).
+        Returns True if all commands pass (exit code 0).
+        """
+        from core.docker_sandbox import SecureDockerContainer
+        try:
+            print(f"🧪 [DAG Engine] Starting Verification Suite in Sandbox...", flush=True)
+
+            for cmd_str in commands:
+                print(f"   Running in sandbox: {cmd_str}", flush=True)
+
+                sandbox = SecureDockerContainer(
+                    image="mcr.microsoft.com/devcontainers/base:ubuntu",
+                    timeout_seconds=300, # 5 minutes, as verification can be slow
+                    workspace_dir=repo_dir,
+                )
+
+                # Manually construct the docker command to add workspace mount
+                final_cmd = sandbox.build_run_command(
+                    command=cmd_str
+                )
+                
+                process = await asyncio.create_subprocess_exec(
+                    *final_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+
+                try:
+                    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=sandbox.timeout_seconds)
+                    if process.returncode != 0:
+                        print(f"   ❌ Failed: Exit code {process.returncode}", flush=True)
+                        # Log stdout and stderr for debugging
+                        if stdout:
+                            print(f"   Stdout:\n{stdout.decode()}", flush=True)
+                        if stderr:
+                            print(f"   Stderr:\n{stderr.decode()}", flush=True)
+                        self.audit.log(
+                            self.company_id,
+                            "verification_sandbox",
+                            "VERIFICATION",
+                            {"command": cmd_str, "exit_code": process.returncode, "status": "failed"}
+                        )
+                        return False
+                except asyncio.TimeoutError:
+                    process.kill()
+                    print(f"   ⏱️ Timeout executing verification command.", flush=True)
+                    self.audit.log(
+                        self.company_id,
+                        "verification_sandbox",
+                        "VERIFICATION",
+                        {"command": cmd_str, "status": "timeout"}
+                    )
+                    return False
+
+            self.audit.log(
+                self.company_id,
+                "verification_sandbox",
+                "VERIFICATION",
+                {"commands": commands, "status": "passed"}
+            )
+            return True
+        except Exception as e:
+            print(f"⚠️ [DAG Engine] Verification execution error: {e}", flush=True)
+            return False

@@ -1,6 +1,6 @@
 """
 core/agent_base.py
-Base Agent class for Ensemble.
+Base Agent class for Esemble.
 Written from scratch.
 """
 from abc import ABC, abstractmethod

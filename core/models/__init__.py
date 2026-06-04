@@ -1,5 +1,5 @@
 """
-core/models/ - Pydantic Models for Ensemble API
+core/models/ - Pydantic Models for Esemble API
 
 Request and response schemas for all API endpoints.
 Using Pydantic models ensures consistent validation and OpenAPI docs.

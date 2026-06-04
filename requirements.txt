@@ -1,61 +1,14 @@
 fastapi
 uvicorn
 python-dotenv
+supabase
+pydantic
+asyncio
 httpx
-PyYAML
-requests
-urllib3==1.26.15
-pydantic[email]
-tiktoken
-sentence-transformers
-numpy
-websockets
-markdown
-jinja2
-python-multipart
-# metagpt (Required for specific actions in core/actions/)
-metagpt
-
-# Search
-duckduckgo_search
-
-# ============================================================
-# Financial Data Tools (TradingAgents Integration)
-# ============================================================
-
-# Stock market data (Yahoo Finance)
-yfinance
-
-# Technical indicators (MACD, RSI, Bollinger Bands)
-stockstats>=0.3.0
-
-# ============================================================
-# Phase 1: Supabase Integration & Authentication
-# ============================================================
-
-# Supabase Python client (database, auth, realtime)
-supabase>=2.0.0
-
-# JWT validation (for Supabase token verification)
-python-jose[cryptography]>=3.3.0
-
-# API key encryption (AES-256 via Fernet)
-cryptography>=41.0.0
-
-# Rate limiting middleware
-slowapi>=0.1.9
-
-# Input sanitization (XSS prevention)
-bleach>=6.1.0
-
-# ============================================================
-# Phase 9: Testing
-# ============================================================
-
-# Test framework
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-pytest-cov>=4.1.0
-
-# Load testing
-locust>=2.20.0
+langchain
+langgraph
+langchain-openai
+langchain-google-genai
+langchain-community
+# metagpt
+# duckduckgo_search

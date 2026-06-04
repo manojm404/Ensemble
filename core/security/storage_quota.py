@@ -1,6 +1,6 @@
 """
 core/security/storage_quota.py
-Per-user and per-agent storage quota enforcement for the Ensemble platform.
+Per-user and per-agent storage quota enforcement for the Esemble platform.
 
 Implements:
 - Per-user storage quotas by tier (free: 5 GB, pro: 50 GB, enterprise: 500 GB)

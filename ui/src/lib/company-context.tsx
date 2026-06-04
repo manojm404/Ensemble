@@ -7,15 +7,14 @@
  */
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
-import { fetchApi } from "./api";
 import {
-  createCompany as createCompanyData,
-  deleteCompany as deleteCompanyData,
-  getAllCompanies as getAllCompaniesData,
-  createCompanyFromMission,
-  buildCompanyFromMission,
-  type Company as CompanyDataEntry
-} from "./company-data";
+  createCompanyWorkspace,
+  deleteCompanyWorkspace,
+  listCompanies,
+  type CompanySummary,
+} from "./api";
+import { hydrateCompanyFromBackend, upsertCompanySummary } from "./company-data";
+import { scopedStorageKey } from "./storage-scope";
 
 export interface Company {
   id: string;
@@ -23,13 +22,16 @@ export interface Company {
   mission: string;
   emoji: string;
   status: "Active" | "Setup";
+  agents: number;
+  teams: number;
+  projects: number;
 }
 
 interface CompanyContextType {
   companies: Company[];
   currentCompany: Company | null;
   setCurrentCompanyId: (companyId: string | null) => void;
-  createCompany: (mission: string) => Promise<Company>;
+  createCompany: (name: string, motive: string) => Promise<Company>;
   deleteCompany: (companyId: string) => Promise<void>;
   isLoading: boolean;
 }
@@ -42,7 +44,20 @@ export function useCompanyContext() {
   return ctx;
 }
 
-const STORAGE_KEY = "ensemble_current_company";
+const STORAGE_KEY = () => scopedStorageKey("ensemble_current_company");
+
+function toContextCompany(company: CompanySummary): Company {
+  return {
+    id: company.id,
+    name: company.name,
+    mission: company.mission || "",
+    emoji: company.emoji || "🏢",
+    status: company.status || "Active",
+    agents: company.agents ?? company.agent_count ?? 0,
+    teams: company.teams ?? company.team_count ?? 0,
+    projects: company.projects ?? company.issue_count ?? 0,
+  };
+}
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -53,45 +68,10 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const loadCompanies = async () => {
       try {
-        const localCompanies = getAllCompaniesData();
-
-        try {
-          const backendCompanies = await fetchApi("/api/companies", {}, true);
-          if (backendCompanies && Array.isArray(backendCompanies) && backendCompanies.length > 0) {
-            const backendIds = new Set(backendCompanies.map((o: any) => o.id));
-            const mapped = [
-              ...localCompanies.filter(o => !backendIds.has(o.id)).map(o => ({
-                id: o.id,
-                name: o.name,
-                mission: o.mission || "",
-                emoji: o.emoji || "🏢",
-                status: o.status,
-              })),
-              ...backendCompanies.map((o: any) => ({
-                id: o.id,
-                name: o.name,
-                mission: o.mission || "",
-                emoji: o.emoji || "🏢",
-                status: o.status || "Setup",
-              }))
-            ];
-            setCompanies(mapped);
-            return;
-          }
-        } catch {
-          // Backend unavailable, use local data
-        }
-
-        if (localCompanies.length > 0) {
-          const mapped = localCompanies.map(o => ({
-            id: o.id,
-            name: o.name,
-            mission: o.mission || "",
-            emoji: o.emoji || "🏢",
-            status: o.status,
-          }));
-          setCompanies(mapped);
-        }
+        const apiCompanies = await listCompanies();
+        const contextCompanies = apiCompanies.map(toContextCompany);
+        setCompanies(contextCompanies);
+        apiCompanies.forEach((company) => upsertCompanySummary(company));
       } catch (err) {
         console.error("Failed to load companies:", err);
       } finally {
@@ -103,12 +83,21 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   // Set current company from saved preference
   useEffect(() => {
-    const savedCompanyId = localStorage.getItem(STORAGE_KEY);
+    const savedCompanyId = localStorage.getItem(STORAGE_KEY());
     if (savedCompanyId && companies.length > 0) {
       const found = companies.find(o => o.id === savedCompanyId);
-      if (found) setCurrentCompany(found);
+      if (found) {
+        setCurrentCompany(found);
+      } else if (companies.length > 0) {
+        setCurrentCompany(companies[0]);
+        localStorage.setItem(STORAGE_KEY(), companies[0].id);
+      }
     } else if (companies.length > 0) {
       setCurrentCompany(companies[0]);
+      localStorage.setItem(STORAGE_KEY(), companies[0].id);
+    } else {
+      setCurrentCompany(null);
+      localStorage.removeItem(STORAGE_KEY());
     }
   }, [companies]);
 
@@ -117,81 +106,40 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       const found = companies.find(o => o.id === companyId);
       if (found) {
         setCurrentCompany(found);
-        localStorage.setItem(STORAGE_KEY, companyId);
+        localStorage.setItem(STORAGE_KEY(), companyId);
       }
     } else {
       setCurrentCompany(null);
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(STORAGE_KEY());
     }
   };
 
-  const createCompany = async (mission: string): Promise<Company> => {
-    let structure: any;
-
-    // Try backend LLM-powered company generation first
-    try {
-      structure = await fetchApi("/api/companies/generate", {
-        method: "POST",
-        body: JSON.stringify({ mission }),
-      });
-    } catch {
-      // Fallback: client-side keyword matching
-      structure = buildCompanyFromMission(mission);
-    }
-
-    // Create the company in the data store (auto-provisions CEO + teams + agents)
-    const company = createCompanyFromMission(mission, structure);
-
-    // Try to sync with backend
-    try {
-      await fetchApi("/api/companies", {
-        method: "POST",
-        body: JSON.stringify({
-          id: company.id,
-          name: company.name,
-          mission: company.mission,
-          emoji: company.emoji,
-        }),
-      });
-    } catch {
-      // Backend unavailable, continue with local-only
-    }
-
-    const contextCompany: Company = {
-      id: company.id,
-      name: company.name,
-      mission: company.mission,
-      emoji: company.emoji,
-      status: company.status,
-    };
+  const createCompany = async (name: string, motive: string): Promise<Company> => {
+    const createdCompany = await createCompanyWorkspace(name, motive);
+    const contextCompany = toContextCompany(createdCompany);
+    upsertCompanySummary(createdCompany);
+    await hydrateCompanyFromBackend(createdCompany.id);
 
     const updatedCompanies = [...companies, contextCompany];
     setCompanies(updatedCompanies);
     setCurrentCompany(contextCompany);
-    localStorage.setItem(STORAGE_KEY, contextCompany.id);
+    localStorage.setItem(STORAGE_KEY(), contextCompany.id);
 
     return contextCompany;
   };
 
   const deleteCompany = async (companyId: string): Promise<void> => {
-    try {
-      await fetchApi(`/api/companies/${companyId}`, { method: "DELETE" });
-    } catch {
-      // Fallback: delete locally
-    }
-
-    deleteCompanyData(companyId);
-
+    await deleteCompanyWorkspace(companyId);
     const updatedCompanies = companies.filter(o => o.id !== companyId);
     setCompanies(updatedCompanies);
 
     if (currentCompany?.id === companyId) {
       if (updatedCompanies.length > 0) {
         setCurrentCompany(updatedCompanies[0]);
-        localStorage.setItem(STORAGE_KEY, updatedCompanies[0].id);
+        localStorage.setItem(STORAGE_KEY(), updatedCompanies[0].id);
       } else {
         setCurrentCompany(null);
-        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(STORAGE_KEY());
       }
     }
   };

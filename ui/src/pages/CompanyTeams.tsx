@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Plus, FolderTree, ChevronRight, Bot, Users, CheckCircle2, Search, X } from "lucide-react";
+import { Plus, FolderTree, ChevronRight, Bot, Users, CheckCircle2, Search, X, ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,9 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useCompanyContext } from "@/lib/company-context";
-import { getCompanyById, getTeamsByCompany, createTeam, getAgentsByCompany } from "@/lib/company-data";
+import { getCompanyById } from "@/lib/company-data";
+import { listCompanyAgents, listCompanyTeams, type CompanyAgentRecord, type CompanyTeam } from "@/lib/api";
+import { useScrollMemory } from "@/lib/use-scroll-memory";
 
 export default function CompanyTeams() {
   const { id } = useParams<{ id: string }>();
@@ -20,17 +22,30 @@ export default function CompanyTeams() {
   const [teamName, setTeamName] = useState("");
   const [teamDesc, setTeamDesc] = useState("");
   const [teamEmoji, setTeamEmoji] = useState("📁");
+  const [teams, setTeams] = useState<CompanyTeam[]>([]);
+  const [agents, setAgents] = useState<CompanyAgentRecord[]>([]);
 
-  const company = getCompanyById(id || currentCompany?.id || "") || currentCompany;
+  const companyId = id || currentCompany?.id || "";
+  const company = getCompanyById(companyId) || currentCompany;
+  const scrollRef = useScrollMemory(`esemble_scroll_company_${companyId || "unknown"}_teams`);
+
+  useEffect(() => {
+    if (!companyId) return;
+    setCurrentCompanyId(companyId);
+    Promise.all([listCompanyTeams(companyId), listCompanyAgents(companyId)])
+      .then(([teamRows, agentRows]) => {
+        setTeams(teamRows);
+        setAgents(agentRows);
+      })
+      .catch(console.error);
+  }, [companyId]);
+
   if (!company) return <div className="flex items-center justify-center h-full text-muted-foreground">No company selected</div>;
 
-  const teams = getTeamsByCompany(company.id);
-  const agents = getAgentsByCompany(company.id);
   const filtered = teams.filter(t => t.name.toLowerCase().includes(search.toLowerCase()));
 
   const handleCreate = () => {
     if (!teamName.trim()) return;
-    createTeam(company.id, { name: teamName, description: teamDesc, emoji: teamEmoji });
     setCreateOpen(false);
     setTeamName("");
     setTeamDesc("");
@@ -46,6 +61,10 @@ export default function CompanyTeams() {
         <div className="flex items-center gap-4">
           <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center text-xl border border-primary/20">{company.emoji}</div>
           <div>
+            <Button variant="ghost" size="sm" className="mb-2 -ml-2 gap-2 rounded-full border border-border/40 bg-background/70" onClick={() => navigate(`/company/${companyId}`)}>
+              <ChevronLeft className="h-4 w-4" />
+              Back to workspace
+            </Button>
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-bold text-foreground">{company.name}</h1>
               <ChevronRight className="h-4 w-4 text-muted-foreground/40" />
@@ -66,13 +85,13 @@ export default function CompanyTeams() {
       </div>
 
       {/* Teams Grid */}
-      <div className="flex-1 p-8">
+      <div ref={scrollRef} className="flex-1 overflow-auto p-8">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((team, i) => {
-            const teamAgents = agents.filter(a => a.teamId === team.id);
+            const teamAgents = agents.filter(a => a.team_id === team.id);
             return (
               <motion.div key={team.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}>
-                <Card className="cursor-pointer hover:border-primary/20 transition-all hover:shadow-md" onClick={() => navigate(`/company/${company.id}/teams/${team.id}`)}>
+                <Card className="cursor-pointer hover:border-primary/20 transition-all hover:shadow-md" onClick={() => navigate(`/company/${companyId}/teams/${team.id}`)}>
                   <CardContent className="p-5">
                     <div className="flex items-center gap-3 mb-3">
                       <div className="h-10 w-10 rounded-xl bg-secondary/50 flex items-center justify-center text-xl border border-border/20">{team.emoji}</div>
@@ -84,12 +103,12 @@ export default function CompanyTeams() {
                     </div>
                     <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
                       <span className="flex items-center gap-1"><Bot className="h-3 w-3" /> {teamAgents.length} agents</span>
-                      <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> {team.completedIssueCount} done</span>
+                      <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> 0 done</span>
                     </div>
                     {teamAgents.length > 0 && (
                       <div className="flex -space-x-2 mt-3">
                         {teamAgents.slice(0, 5).map(a => (
-                          <div key={a.id} className="h-6 w-6 rounded-full bg-secondary border-2 border-background flex items-center justify-center text-[10px]" title={a.name}>{a.emoji}</div>
+                          <div key={a.id} className="h-6 w-6 rounded-full bg-secondary border-2 border-background flex items-center justify-center text-[10px]" title={a.display_name}>{a.emoji}</div>
                         ))}
                         {teamAgents.length > 5 && (
                           <div className="h-6 w-6 rounded-full bg-muted border-2 border-background flex items-center justify-center text-[8px] text-muted-foreground">+{teamAgents.length - 5}</div>

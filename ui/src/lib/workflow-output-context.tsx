@@ -22,6 +22,8 @@ export interface WorkflowOutputData {
   task: string;
   /** Number of agents that executed */
   agentCount: number;
+  /** Planner metadata describing why the workflow was routed this way */
+  plan?: any;
   /** The output data (markdown, files, previewUrl) */
   output: WorkflowOutput;
   /** Timestamp when execution completed */
@@ -48,7 +50,7 @@ function loadFromStorage(): Map<string, WorkflowOutputData> {
     const parsed = JSON.parse(raw) as Record<string, any>;
     const map = new Map<string, WorkflowOutputData>();
     for (const [id, data] of Object.entries(parsed)) {
-      if (data?.output?.markdown) {
+      if (data?.output?.markdown || (Array.isArray(data?.output?.files) && data.output.files.length > 0)) {
         map.set(id, { ...data, completedAt: new Date(data.completedAt) });
       }
     }

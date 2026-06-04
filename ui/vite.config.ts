@@ -10,6 +10,12 @@ export default defineConfig(({ mode }) => ({
     host: "::",
     port: 5173,
     strictPort: true,
+    proxy: {
+      "/api": {
+        target: "http://127.0.0.1:8088",
+        changeOrigin: true,
+      },
+    },
     hmr: {
       overlay: false,
     },

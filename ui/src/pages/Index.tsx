@@ -6,7 +6,7 @@ import {
   GitBranch, Bot, Coins, DollarSign, Plus, MessageSquare, Users, Workflow,
   Play, CheckCircle2, AlertCircle, Clock, TrendingUp, ArrowUpRight, ArrowDownRight,
   ChevronRight, Target, RotateCcw, CheckSquare, Layers, Inbox, LayoutGrid,
-  Building2, Zap, Loader2, X, Calendar, Sparkles, Terminal, Activity, ShieldCheck
+  Building2, Zap, Loader2, X, Calendar, Sparkles, Terminal, Activity, ShieldCheck, Building
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,11 +24,14 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import InboxView from "./Inbox";
+import { useScrollMemory } from "@/lib/use-scroll-memory";
+import { scopedStorageKey } from "@/lib/storage-scope";
 
 const Index = () => {
   const navigate = useNavigate();
-  const { openApp } = useTabContext();
+  const { openApp, updateCurrentTabUrl } = useTabContext();
   const [activeSubTab, setActiveSubTab] = useState("dashboard");
+  const scrollRef = useScrollMemory("esemble_scroll_dashboard");
 
   // Real data states
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -64,6 +67,10 @@ const Index = () => {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    updateCurrentTabUrl("/dashboard", "Dashboard", "home");
+  }, [updateCurrentTabUrl]);
+
   const handleAppOpen = (appId: string) => {
     const app = allApps.find((a) => a.id === appId);
     if (app) { openApp(app); navigate(app.url); }
@@ -82,7 +89,7 @@ const Index = () => {
     // ... [Existing issue submission logic - preserved exactly]
     if (!issueForm.title.trim()) { toast.error("Issue title is required"); return; }
     try {
-      const STORAGE_KEY = "ensemble_companies";
+      const STORAGE_KEY = scopedStorageKey("ensemble_companies");
       const raw = localStorage.getItem(STORAGE_KEY);
       const data: Record<string, any> = raw ? JSON.parse(raw) : {};
       let companyId = issueForm.companyId || Object.keys(data)[0];
@@ -109,10 +116,10 @@ const Index = () => {
   const avgTokens = tokenUsage.length > 0 ? totalTokens / tokenUsage.length : 0;
 
   return (
-    <div className="h-full overflow-y-auto px-4 py-6 md:px-8 bg-background relative selection:bg-primary/30">
+    <div ref={scrollRef as any} className="h-full overflow-y-auto px-4 py-6 md:px-8 bg-background relative selection:bg-primary/30">
       {/* Subtle Background Glows */}
-      <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-primary/5 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] bg-accent/5 rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute top-[-10%] left-[10%] w-[560px] h-[560px] bg-primary/8 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[10%] w-[460px] h-[460px] bg-blue-500/5 rounded-full blur-[120px] pointer-events-none" />
 
       <div className="max-w-[1400px] mx-auto flex flex-col xl:flex-row gap-8 relative z-10">
 
@@ -120,13 +127,13 @@ const Index = () => {
         <aside className="w-full xl:w-64 shrink-0 flex flex-col gap-8">
           {/* Main CTA */}
           <div className="relative group">
-            <div className="absolute -inset-0.5 bg-gradient-to-r from-primary to-accent rounded-2xl blur opacity-30 group-hover:opacity-60 transition duration-500" />
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-primary via-sky-400 to-accent rounded-[1.35rem] blur opacity-25 group-hover:opacity-50 transition duration-500" />
             <button 
               onClick={handleNewIssue}
-              className="relative flex items-center justify-center gap-3 w-full h-12 bg-card border border-white/10 rounded-2xl shadow-xl hover:bg-white/5 transition-all"
+              className="relative flex items-center justify-center gap-3 w-full h-12 bg-card/85 backdrop-blur-xl border border-border/40 rounded-[1.35rem] shadow-[0_20px_50px_rgba(15,23,42,0.08)] hover:bg-card transition-all"
             >
               <Plus className="h-5 w-5 text-primary" />
-              <span className="text-sm font-bold tracking-widest uppercase bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">Deploy Task</span>
+              <span className="text-sm font-bold tracking-widest uppercase bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">Deploy Task</span>
             </button>
           </div>
 
@@ -149,6 +156,16 @@ const Index = () => {
 
             <div>
               <div className="flex items-center gap-2 px-3 mb-2 opacity-50">
+                <Building className="h-3 w-3" />
+                <h3 className="text-[10px] font-bold uppercase tracking-[0.2em]">Companies</h3>
+              </div>
+              <div className="space-y-1">
+                <NavButton icon={Building} label="Companies" onClick={() => navigate("/companies")} />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2 px-3 mb-2 opacity-50">
                 <Building2 className="h-3 w-3" />
                 <h3 className="text-[10px] font-bold uppercase tracking-[0.2em]">Infrastructure</h3>
               </div>
@@ -157,8 +174,7 @@ const Index = () => {
                 <NavButton icon={Bot} label="Agent Fleet" onClick={() => handleAppOpen("agents")} />
                 <NavButton icon={ShieldCheck} label="Access & Auth" onClick={() => handleAppOpen("permissions")} />
               </div>
-            </div>
-          </nav>
+              </div>          </nav>
         </aside>
 
         {/* --- MAIN CONTENT AREA --- */}
@@ -167,7 +183,7 @@ const Index = () => {
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
               
               {/* Header */}
-              <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-border/40 pb-6">
+              <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-border/40 pb-7">
                 <div className="space-y-2">
                   <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20">
                     <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
@@ -176,10 +192,21 @@ const Index = () => {
                   <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-foreground drop-shadow-sm">
                     Command <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">Center</span>
                   </h1>
+                  <p className="max-w-2xl text-sm md:text-base text-muted-foreground">
+                    One place to monitor pipelines, teams, and company operations with a cleaner, more executive-grade control surface.
+                  </p>
                 </div>
                 
-                <div className="flex items-center gap-3">
-                  <Button variant="outline" size="sm" className="h-9 px-4 rounded-xl border-border/50 bg-background/50 hover:bg-muted text-[10px] font-bold uppercase tracking-widest backdrop-blur-md transition-all" onClick={fetchData}>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button size="sm" className="h-9 px-4 rounded-full gap-2 shadow-sm" onClick={() => navigate("/workflows/new")}>
+                    <Sparkles className="h-3.5 w-3.5" />
+                    New Workflow
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-9 px-4 rounded-full border-border/40 bg-card/70 hover:bg-card text-[10px] font-bold uppercase tracking-widest backdrop-blur-md transition-all shadow-sm" onClick={() => navigate("/companies")}>
+                    <Building className="h-3.5 w-3.5 mr-2" />
+                    Companies
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-9 px-4 rounded-full border-border/40 bg-card/70 hover:bg-card text-[10px] font-bold uppercase tracking-widest backdrop-blur-md transition-all shadow-sm" onClick={fetchData}>
                     <RotateCcw className={`h-3.5 w-3.5 mr-2 ${loading ? 'animate-spin' : ''}`} />
                     Sync Data
                   </Button>
@@ -196,8 +223,8 @@ const Index = () => {
                 ].map((s, idx) => (
                   <motion.div 
                     key={idx} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.05 * idx }}
-                    className={`relative overflow-hidden p-5 rounded-2xl glass border ${s.border} bg-gradient-to-br ${s.color} hover:brightness-110 transition-all group`}
-                  >
+                  className={`relative overflow-hidden p-5 rounded-[1.35rem] glass border ${s.border} bg-gradient-to-br ${s.color} hover:brightness-110 transition-all group shadow-[0_16px_40px_rgba(15,23,42,0.06)]`}
+                >
                     <div className="flex items-center justify-between mb-4 relative z-10">
                       <s.icon className={`h-5 w-5 ${s.textColor} drop-shadow-[0_0_8px_currentColor]`} />
                       <TrendingUp className="h-3 w-3 text-muted-foreground/40 group-hover:text-foreground/60 transition-colors" />
@@ -207,7 +234,7 @@ const Index = () => {
                       <p className={`text-3xl font-black tracking-tighter ${s.textColor}`}>{s.value}</p>
                     </div>
                     {/* Decorative glow */}
-                    <div className="absolute -bottom-4 -right-4 w-24 h-24 bg-background/20 rounded-full blur-xl group-hover:bg-white/10 transition-colors" />
+                    <div className="absolute -bottom-4 -right-4 w-24 h-24 bg-background/20 rounded-full blur-xl group-hover:bg-primary/10 transition-colors" />
                   </motion.div>
                 ))}
               </div>
@@ -216,7 +243,7 @@ const Index = () => {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start pb-8">
                 
                 {/* WIDGET 1: Live Operations */}
-                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="rounded-[24px] border border-border/30 bg-card/20 backdrop-blur-2xl p-6 shadow-xl h-[420px] flex flex-col">
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="rounded-[28px] border border-border/40 bg-card/80 backdrop-blur-2xl p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] h-[420px] flex flex-col">
                   <div className="flex items-center justify-between mb-6 shrink-0">
                     <div className="flex items-center gap-3">
                       <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
@@ -230,10 +257,10 @@ const Index = () => {
                   <ScrollArea className="flex-1 -mx-2 px-2">
                     {loading ? (
                       <div className="space-y-4">
-                        {[...Array(3)].map((_, i) => <div key={i} className="h-24 bg-white/5 rounded-2xl animate-pulse" />)}
+                        {[...Array(3)].map((_, i) => <div key={i} className="h-24 bg-secondary/40 rounded-2xl animate-pulse" />)}
                       </div>
                     ) : pipelines.length === 0 ? (
-                      <div className="h-full flex flex-col items-center justify-center border-2 border-dashed border-border/10 rounded-3xl group hover:border-primary/20 transition-colors cursor-pointer" onClick={() => handleAppOpen("workflows")}>
+                        <div className="h-full flex flex-col items-center justify-center border-2 border-dashed border-border/20 rounded-[1.75rem] bg-background/30 group hover:border-primary/25 transition-colors cursor-pointer" onClick={() => handleAppOpen("workflows")}>
                         <Workflow className="h-10 w-10 text-muted-foreground/20 mb-3 group-hover:text-primary/40 transition-colors" />
                         <p className="text-xs font-bold text-muted-foreground/40 uppercase tracking-[0.2em]">Ready for Deployment</p>
                       </div>
@@ -279,11 +306,11 @@ const Index = () => {
                                 handleAppOpen("workflows"); // Ensures the workflows app is technically "active" in context
                                 navigate(`/workflow-output/${p.id}`);
                               }}
-                              className={`p-4 rounded-2xl border transition-all duration-300 cursor-pointer group ${borderClass}`}
-                            >
+                            className={`p-4 rounded-[1.2rem] border transition-all duration-300 cursor-pointer group bg-gradient-to-br from-background/90 to-card/90 shadow-sm ${borderClass}`}
+                          >
                               <div className="flex items-center justify-between mb-3">
                                 <div className="flex items-center gap-3 max-w-[75%]">
-                                  <div className={`h-8 w-8 rounded-lg flex items-center justify-center border group-hover:scale-110 transition-all duration-500 shrink-0 ${iconContainerClass}`}>
+                                  <div className={`h-9 w-9 rounded-xl flex items-center justify-center border group-hover:scale-110 transition-all duration-500 shrink-0 ${iconContainerClass}`}>
                                     <IconComponent className={iconClass} />
                                   </div>
                                   <div className="min-w-0">
@@ -300,7 +327,7 @@ const Index = () => {
                                   <span className={statusColorClass}>{Math.round(progressValue)}%</span>
                                 </div>
                                 {/* Progress Bar Override */}
-                                <div className="h-1 w-full bg-black/40 rounded-full overflow-hidden shadow-inner border border-white/5">
+                                <div className="h-1 w-full bg-muted/70 rounded-full overflow-hidden shadow-inner border border-border/30">
                                    <div className={`h-full ${progressClass} transition-all duration-1000 ease-out`} style={{ width: `${progressValue}%` }} />
                                 </div>
                                 
@@ -317,12 +344,12 @@ const Index = () => {
                 </motion.div>
 
                 {/* WIDGET 2: Event Feed */}
-                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="rounded-[24px] border border-border/30 bg-card/20 backdrop-blur-xl p-6 shadow-xl h-[420px] flex flex-col">
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="rounded-[28px] border border-border/40 bg-card/80 backdrop-blur-xl p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] h-[420px] flex flex-col">
                   <div className="flex items-center justify-between mb-6 shrink-0">
                      <h2 className="text-sm font-black tracking-tight uppercase flex items-center gap-2">
                        <Zap className="h-4 w-4 text-primary" /> Event Feed
                      </h2>
-                     <Badge variant="outline" className="text-[8px] font-bold uppercase tracking-widest border-white/10">Live</Badge>
+                     <Badge variant="outline" className="text-[8px] font-bold uppercase tracking-widest border-border/30">Live</Badge>
                   </div>
 
                   <ScrollArea className="flex-1 -mx-2 px-2">
@@ -339,7 +366,7 @@ const Index = () => {
                                  <p className="text-[11px] font-bold text-foreground/90 group-hover:text-primary transition-colors leading-tight">{item.message}</p>
                                  <div className="flex items-center gap-2 mt-1">
                                     <span className="text-[9px] text-muted-foreground font-medium">{new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                    <span className="h-1 w-1 rounded-full bg-white/10" />
+                                    <span className="h-1 w-1 rounded-full bg-border" />
                                     <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/40">{item.action_type}</span>
                                  </div>
                               </div>
@@ -354,7 +381,7 @@ const Index = () => {
                 </motion.div>
 
                 {/* WIDGET 3: Agent Fleet Ranking */}
-                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="rounded-[24px] border border-border/30 bg-card/10 backdrop-blur-xl p-6 shadow-xl h-[420px] flex flex-col">
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="rounded-[28px] border border-border/40 bg-card/80 backdrop-blur-xl p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] h-[420px] flex flex-col">
                   <div className="flex items-center justify-between mb-6 shrink-0">
                     <h2 className="text-sm font-black tracking-tight uppercase flex items-center gap-2">
                       <Users className="h-4 w-4 text-indigo-400" /> Top Performing Fleet
@@ -363,20 +390,25 @@ const Index = () => {
                   </div>
 
                   <ScrollArea className="flex-1 -mx-2 px-2">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-4">
-                      {(topAgents.length > 0 ? topAgents : [
-                        { name: "Frontend Developer", category: "Engineering", emoji: "💻", runs: 42, success_rate: 98 },
-                        { name: "Code Reviewer", category: "Quality", emoji: "🔍", runs: 38, success_rate: 99 },
-                        { name: "Data Analyst", category: "Research", emoji: "📊", runs: 15, success_rate: 95 },
-                        { name: "UX Writer", category: "Design", emoji: "✍️", runs: 8, success_rate: 100 },
-                        { name: "Product Manager", category: "Product", emoji: "📋", runs: 24, success_rate: 94 },
-                        { name: "Security Auditor", category: "Security", emoji: "🛡️", runs: 56, success_rate: 99 }
-                      ]).map((agent: any, i) => (
-                        <motion.div key={i} whileHover={{ y: -2 }} className="p-4 rounded-2xl bg-white/[0.03] border border-white/5 flex flex-col items-center text-center group transition-all hover:bg-white/[0.06] hover:border-indigo-500/30">
-                          <div className="h-12 w-12 rounded-xl bg-background border border-white/5 flex items-center justify-center text-xl shadow-xl group-hover:scale-110 transition-transform mb-3 relative">
+                    {topAgents.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center border border-dashed border-border/30 rounded-[1.75rem] bg-background/30 px-6 py-10">
+                        <Bot className="h-10 w-10 text-muted-foreground/20 mb-3" />
+                        <p className="text-sm font-bold text-foreground">No agent telemetry yet</p>
+                        <p className="mt-2 text-xs text-muted-foreground max-w-sm">
+                          Run workflows and company tasks to populate the fleet ranking with real execution data.
+                        </p>
+                        <Button variant="outline" size="sm" className="mt-4 h-8 text-[10px] font-bold uppercase tracking-widest" onClick={() => navigate("/workflows")}>
+                          View workflows
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-4">
+                        {topAgents.map((agent: any, i) => (
+                        <motion.div key={i} whileHover={{ y: -2 }} className="p-4 rounded-[1.2rem] bg-background/80 border border-border/40 flex flex-col items-center text-center group transition-all hover:bg-card hover:border-indigo-500/30 shadow-sm">
+                          <div className="h-12 w-12 rounded-xl bg-card border border-border/40 flex items-center justify-center text-xl shadow-xl group-hover:scale-110 transition-transform mb-3 relative">
                             {agent.emoji}
                             <div className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-emerald-500 border-2 border-background flex items-center justify-center">
-                              <CheckCircle2 className="h-2.5 w-2.5 text-white" />
+                              <CheckCircle2 className="h-2.5 w-2.5 text-primary-foreground" />
                             </div>
                           </div>
                           <p className="text-xs font-bold text-foreground/90 mb-1 truncate w-full px-2">{agent.name}</p>
@@ -386,18 +418,19 @@ const Index = () => {
                               <span className="text-muted-foreground">Reliability</span>
                               <span className="text-indigo-400">{agent.success_rate || 98}%</span>
                             </div>
-                            <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                            <div className="h-1 w-full bg-secondary/40 rounded-full overflow-hidden">
                               <div className="h-full bg-indigo-500/50" style={{ width: `${agent.success_rate || 98}%` }} />
                             </div>
                           </div>
                         </motion.div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    )}
                   </ScrollArea>
                 </motion.div>
 
                 {/* WIDGET 4: Resource Intensity */}
-                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="rounded-[24px] border border-border/30 bg-card/10 backdrop-blur-xl p-6 shadow-xl h-[420px] flex flex-col group overflow-hidden">
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="rounded-[28px] border border-border/40 bg-card/80 backdrop-blur-xl p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] h-[420px] flex flex-col group overflow-hidden">
                   <div className="flex items-center justify-between mb-8 shrink-0">
                     <div>
                       <h2 className="text-[10px] font-black tracking-widest uppercase text-muted-foreground">Resource Intensity</h2>
@@ -412,27 +445,39 @@ const Index = () => {
                   </div>
 
                   <div className="flex-1 flex flex-col justify-end min-h-0">
-                    <div className="h-full flex items-end gap-2 px-1 relative">
-                       {/* Background Grid Lines */}
-                       <div className="absolute inset-x-0 top-0 h-px bg-white/5" />
-                       <div className="absolute inset-x-0 top-1/2 h-px bg-white/5" />
-                       
-                       {(tokenUsage.length > 0 ? tokenUsage : Array(7).fill({ tokens: 10, day: 'M' })).map((item, i) => (
-                         <div key={i} className="flex-1 flex flex-col justify-end group/bar relative h-full">
-                            <motion.div 
-                              initial={{ height: 0 }}
-                              animate={{ height: `${Math.max((item.tokens / (maxTokens || 1)) * 100, 8)}%` }}
-                              className="w-full bg-gradient-to-t from-primary/10 to-primary/40 rounded-t-lg group-hover/bar:from-primary/30 group-hover/bar:to-primary group-hover/bar:shadow-[0_0_15px_rgba(var(--primary),0.5)] transition-all duration-500"
-                            />
-                            <div className="absolute -top-10 left-1/2 -translate-x-1/2 opacity-0 group-hover/bar:opacity-100 transition-all text-[10px] font-mono bg-card border border-border px-2 py-1 rounded shadow-2xl z-20 whitespace-nowrap">
-                              <span className="text-primary font-bold">{item.tokens}K</span> <span className="text-muted-foreground text-[8px]">tokens</span>
-                            </div>
-                         </div>
-                       ))}
-                    </div>
-                    <div className="flex justify-between px-2 mt-4 shrink-0">
-                       {(tokenUsage.length > 0 ? tokenUsage : Array(7).fill({ day: 'D' })).map((t, i) => <span key={i} className="text-[9px] font-mono font-black uppercase text-muted-foreground/40">{t.day[0]}</span>)}
-                    </div>
+                    {tokenUsage.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center border border-dashed border-border/30 rounded-[1.75rem] bg-background/30 px-6 py-10">
+                        <Terminal className="h-10 w-10 text-muted-foreground/20 mb-3" />
+                        <p className="text-sm font-bold text-foreground">No token history yet</p>
+                        <p className="mt-2 text-xs text-muted-foreground max-w-sm">
+                          Once workflows start running, this chart will show real consumption by day and help you track spend.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="h-full flex items-end gap-2 px-1 relative">
+                           {/* Background Grid Lines */}
+                           <div className="absolute inset-x-0 top-0 h-px bg-border/20" />
+                           <div className="absolute inset-x-0 top-1/2 h-px bg-border/20" />
+                           
+                           {tokenUsage.map((item, i) => (
+                             <div key={i} className="flex-1 flex flex-col justify-end group/bar relative h-full">
+                                <motion.div 
+                                  initial={{ height: 0 }}
+                                  animate={{ height: `${Math.max((item.tokens / (maxTokens || 1)) * 100, 8)}%` }}
+                                  className="w-full bg-gradient-to-t from-primary/10 to-primary/40 rounded-t-lg group-hover/bar:from-primary/30 group-hover/bar:to-primary group-hover/bar:shadow-[0_0_15px_rgba(var(--primary),0.5)] transition-all duration-500"
+                                />
+                                <div className="absolute -top-10 left-1/2 -translate-x-1/2 opacity-0 group-hover/bar:opacity-100 transition-all text-[10px] font-mono bg-card border border-border px-2 py-1 rounded shadow-2xl z-20 whitespace-nowrap">
+                                  <span className="text-primary font-bold">{item.tokens}K</span> <span className="text-muted-foreground text-[8px]">tokens</span>
+                                </div>
+                             </div>
+                           ))}
+                        </div>
+                        <div className="flex justify-between px-2 mt-4 shrink-0">
+                           {tokenUsage.map((t, i) => <span key={i} className="text-[9px] font-mono font-black uppercase text-muted-foreground/40">{t.day[0]}</span>)}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </motion.div>
 
@@ -444,7 +489,7 @@ const Index = () => {
 
           {/* Placeholders for other tabs */}
           {(activeSubTab === "issues" || activeSubTab === "routines") && (
-            <div className="flex flex-col items-center justify-center h-[50vh] text-center border border-dashed border-border/20 rounded-3xl m-8 glass">
+            <div className="flex flex-col items-center justify-center h-[50vh] text-center border border-dashed border-border/20 rounded-[2rem] m-8 glass">
               <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center border border-primary/20 mb-4">
                 <Workflow className="h-8 w-8 text-primary opacity-80" />
               </div>
@@ -470,7 +515,7 @@ function NavButton({ icon: Icon, label, active, badge, onClick }: { icon: any, l
       className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all group ${
         active
           ? "bg-primary/10 text-primary shadow-sm border border-primary/10"
-          : "text-muted-foreground/70 hover:text-foreground hover:bg-white/5 border border-transparent"
+          : "text-muted-foreground/70 hover:text-foreground hover:bg-accent/10 border border-transparent"
       }`}
     >
       <div className="flex items-center gap-3">

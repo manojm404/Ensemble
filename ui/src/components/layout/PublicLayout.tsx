@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { LogIn, Workflow, ArrowRight, Menu, X, ChevronDown } from 'lucide-react';
@@ -10,6 +10,7 @@ const PublicLayout = ({ children }: { children?: React.ReactNode }) => {
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const previousThemeRef = useRef<string | null>(null);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -17,6 +18,23 @@ const PublicLayout = ({ children }: { children?: React.ReactNode }) => {
     };
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    previousThemeRef.current = root.classList.contains('dark') ? 'dark' : 'light';
+    root.classList.remove('dark');
+    localStorage.setItem('ensemble-theme', 'light');
+
+    return () => {
+      if (previousThemeRef.current === 'dark') {
+        root.classList.add('dark');
+        localStorage.setItem('ensemble-theme', 'dark');
+      } else {
+        root.classList.remove('dark');
+        localStorage.setItem('ensemble-theme', 'light');
+      }
+    };
   }, []);
 
   const isAuthenticated = () => {
@@ -58,7 +76,7 @@ const PublicLayout = ({ children }: { children?: React.ReactNode }) => {
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center shadow-lg group-hover:shadow-primary/50 transition-all duration-300">
               <Workflow className="w-5 h-5 text-primary-foreground" />
             </div>
-            <span className="text-2xl font-black tracking-tight text-foreground group-hover:text-primary transition-colors">Ensemble</span>
+            <span className="text-2xl font-black tracking-tight text-foreground group-hover:text-primary transition-colors">Esemble</span>
           </div>
           
           {/* Desktop Nav */}
@@ -135,9 +153,9 @@ const PublicLayout = ({ children }: { children?: React.ReactNode }) => {
             >
               <div className="flex flex-col gap-6 text-xl font-bold">
                 {navLinks.map((link) => (
-                  <button key={link.name} onClick={() => handleNavClick(link.path)} className="text-left border-b border-white/5 pb-4">
-                    {link.name}
-                  </button>
+                <button key={link.name} onClick={() => handleNavClick(link.path)} className="text-left border-b border-border/50 pb-4">
+                  {link.name}
+                </button>
                 ))}
                 {!isAuthenticated() ? (
                   <div className="flex flex-col gap-4 mt-8">
@@ -158,19 +176,19 @@ const PublicLayout = ({ children }: { children?: React.ReactNode }) => {
       </main>
 
       {/* Investor-Ready Footer */}
-      <footer className="py-16 px-6 lg:px-8 border-t border-white/10 bg-[#0a0a0a] relative z-10">
+      <footer className="py-16 px-6 lg:px-8 border-t border-border/50 bg-background relative z-10">
         <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-12 mb-12">
           <div className="md:col-span-1">
             <div className="flex items-center gap-2 mb-6">
               <Workflow className="w-6 h-6 text-primary" />
-              <span className="text-2xl font-black tracking-tight text-white">Ensemble</span>
+              <span className="text-2xl font-black tracking-tight text-foreground">Esemble</span>
             </div>
             <p className="text-muted-foreground text-sm leading-relaxed">
               The operating system for the AI enterprise. Orchestrating intelligent agents to scale your workforce infinitely.
             </p>
           </div>
           <div>
-            <h4 className="text-white font-bold mb-4">Platform</h4>
+            <h4 className="text-foreground font-bold mb-4">Platform</h4>
             <ul className="space-y-3 text-sm text-muted-foreground">
               <li><a href="#" className="hover:text-primary transition-colors">Agent Registry</a></li>
               <li><a href="#" className="hover:text-primary transition-colors">Workflow Builder</a></li>
@@ -179,7 +197,7 @@ const PublicLayout = ({ children }: { children?: React.ReactNode }) => {
             </ul>
           </div>
           <div>
-            <h4 className="text-white font-bold mb-4">Company</h4>
+            <h4 className="text-foreground font-bold mb-4">Company</h4>
             <ul className="space-y-3 text-sm text-muted-foreground">
               <li><a href="#" className="hover:text-primary transition-colors">About Us</a></li>
               <li><a href="#" className="hover:text-primary transition-colors">Careers</a></li>
@@ -188,7 +206,7 @@ const PublicLayout = ({ children }: { children?: React.ReactNode }) => {
             </ul>
           </div>
           <div>
-            <h4 className="text-white font-bold mb-4">Legal</h4>
+            <h4 className="text-foreground font-bold mb-4">Legal</h4>
             <ul className="space-y-3 text-sm text-muted-foreground">
               <li><a href="#" className="hover:text-primary transition-colors">Privacy Policy</a></li>
               <li><a href="#" className="hover:text-primary transition-colors">Terms of Service</a></li>
@@ -196,9 +214,9 @@ const PublicLayout = ({ children }: { children?: React.ReactNode }) => {
             </ul>
           </div>
         </div>
-        <div className="max-w-7xl mx-auto pt-8 border-t border-white/10 flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="max-w-7xl mx-auto pt-8 border-t border-border/50 flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-sm text-muted-foreground">
-            © {new Date().getFullYear()} Ensemble AI Inc. All rights reserved.
+            © {new Date().getFullYear()} Esemble AI Inc. All rights reserved.
           </p>
           <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground/50">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> Systems Operational

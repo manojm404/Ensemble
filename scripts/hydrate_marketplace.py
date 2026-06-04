@@ -85,20 +85,6 @@ create_pack(
 )
 
 create_pack(
-    "china-market-pack",
-    "China Market Mastery",
-    "Navigate Douyin, WeChat, Xiaohongshu, and Baidu SEO with ease.",
-    "🏮",
-    "Ensemble (from agency-agents)",
-    [
-        "marketing/marketing-douyin-strategist.md",
-        "marketing/marketing-private-domain-operator.md",
-        "marketing/marketing-china-market-localization-strategist.md",
-        "marketing/marketing-baidu-seo-specialist.md"
-    ]
-)
-
-create_pack(
     "paid-media-pack",
     "Paid Media Specialists",
     "Advanced PPC, Search Analysis, and Ad Creative Strategists.",

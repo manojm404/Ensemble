@@ -6,9 +6,11 @@ import asyncio
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
+from core.langchain_adapter import LANGCHAIN_AVAILABLE, LangChainBridge, LangChainConfig
+
 # Default fallback prompt for agents without skill files
 DEFAULT_AGENT_PROMPT = """
-You are {name}, a helpful AI assistant for the Ensemble platform.
+You are {name}, a helpful AI assistant for the Esemble platform.
 
 Be warm, conversational, and genuinely helpful. Match the user's tone.
 When unsure about real-world facts, say so — then offer to search. NEVER fabricate information.
@@ -62,11 +64,36 @@ def load_skill_prompt(agent_id: str, agent_name: str) -> str:
             # Parse YAML frontmatter
             frontmatter_match = re.match(r'^---\s*\n(.*?)\n---\s*\n(.*)$', content, re.DOTALL)
             if frontmatter_match:
-                # Return the full content (frontmatter + body) - the LLM can understand both
-                return content
-            else:
-                # No frontmatter, just return the content
-                return content
+                frontmatter = frontmatter_match.group(1)
+                body = frontmatter_match.group(2).strip()
+
+                meta = {}
+                try:
+                    import yaml
+                    meta = yaml.safe_load(frontmatter) or {}
+                except Exception:
+                    meta = {}
+
+                description = meta.get("description", "").strip()
+                role_name = meta.get("name", agent_name)
+
+                # Keep the skill prompt focused and concise so the model does not
+                # echo the full handbook back to the user.
+                condensed_body = body[:4000]
+                return (
+                    f"You are {role_name}. {description}\n\n"
+                    "Use the guidance below to answer the user's latest message naturally.\n"
+                    "Do not repeat, quote, or summarize these instructions unless explicitly asked.\n"
+                    "Keep the response direct, useful, and human.\n\n"
+                    f"{condensed_body}"
+                ).strip()
+
+            condensed = content[:4000].strip()
+            return (
+                f"You are {agent_name}. Answer the user's latest message directly.\n"
+                "Do not repeat, quote, or summarize your instructions unless explicitly asked.\n\n"
+                f"{condensed}"
+            )
         except Exception as e:
             print(f"⚠️ [SkillLoader] Failed to load {skill_file}: {e}", flush=True)
     
@@ -108,18 +135,74 @@ class LLMProvider:
                 "capabilities": ["preview", "real-time", "audio", "tools"]
             },
             {
-                "id": "llama-3.2-3b",
-                "name": "Llama 3.2 (3B)",
+                "id": "llama3.2",
+                "name": "Ollama Llama 3.2",
                 "provider": "ollama",
                 "cost_per_1k_tokens": 0.0,
                 "capabilities": ["local", "fast"]
             },
             {
-                "id": "deepseek-v3",
-                "name": "DeepSeek V3",
+                "id": "llama3.1",
+                "name": "Ollama Llama 3.1",
+                "provider": "ollama",
+                "cost_per_1k_tokens": 0.0,
+                "capabilities": ["local"]
+            },
+            {
+                "id": "qwen2.5",
+                "name": "Ollama Qwen 2.5",
+                "provider": "ollama",
+                "cost_per_1k_tokens": 0.0,
+                "capabilities": ["local", "coding"]
+            },
+            {
+                "id": "gpt-4o-mini",
+                "name": "OpenAI GPT-4o Mini",
                 "provider": "openai",
+                "cost_per_1k_tokens": 0.00015,
+                "capabilities": ["production", "fast", "tools"]
+            },
+            {
+                "id": "gpt-4o",
+                "name": "OpenAI GPT-4o",
+                "provider": "openai",
+                "cost_per_1k_tokens": 0.0025,
+                "capabilities": ["production", "reasoning", "tools"]
+            },
+            {
+                "id": "llama-3.1-8b-instant",
+                "name": "Groq Llama 3.1 8B Instant",
+                "provider": "groq",
+                "cost_per_1k_tokens": 0.00005,
+                "capabilities": ["fast", "openai-compatible", "reasoning", "coding"]
+            },
+            {
+                "id": "llama-3.3-70b-versatile",
+                "name": "Groq Llama 3.3 70B Versatile",
+                "provider": "groq",
+                "cost_per_1k_tokens": 0.00059,
+                "capabilities": ["fast", "openai-compatible", "reasoning", "coding"]
+            },
+            {
+                "id": "openai/gpt-oss-120b",
+                "name": "Groq GPT OSS 120B",
+                "provider": "groq",
+                "cost_per_1k_tokens": 0.00015,
+                "capabilities": ["fast", "openai-compatible", "reasoning", "coding", "tools"]
+            },
+            {
+                "id": "openai/gpt-oss-20b",
+                "name": "Groq GPT OSS 20B",
+                "provider": "groq",
+                "cost_per_1k_tokens": 0.000075,
+                "capabilities": ["fast", "openai-compatible", "reasoning", "coding", "tools"]
+            },
+            {
+                "id": "deepseek-r1-distill-llama-70b",
+                "name": "Groq DeepSeek R1 Distill Llama 70B",
+                "provider": "groq",
                 "cost_per_1k_tokens": 0.0002,
-                "capabilities": ["reasoning", "coding"]
+                "capabilities": ["fast", "openai-compatible", "reasoning", "coding"]
             }
         ]
 
@@ -135,37 +218,104 @@ class LLMProvider:
             default_model = "llama3.2"
         elif self.provider == "openai":
             default_model = "gpt-4o-mini"  # fallback, but can be overridden
+        elif self.provider == "groq":
+            default_model = "llama-3.1-8b-instant"
+        elif self.provider == "openai_compatible":
+            default_model = os.getenv("OPENAI_COMPATIBLE_MODEL", "gpt-4o-mini")
 
         self.model = model or os.getenv(
-            "OLLAMA_MODEL" if self.provider == "ollama" else "GEMINI_MODEL",
+            "OLLAMA_MODEL" if self.provider == "ollama" else "GROQ_MODEL" if self.provider == "groq" else "GEMINI_MODEL",
             default_model
         )
-        raw_base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        if self.provider == "groq":
+            raw_base_url = base_url or os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+        elif self.provider == "openai_compatible":
+            raw_base_url = base_url or os.getenv("OPENAI_COMPATIBLE_BASE_URL", "https://api.cerebras.ai/v1")
+        else:
+            raw_base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
         
         # Ensure Ollama base_url includes /v1 for OpenAI-compatible API
-        if self.provider == "ollama" and raw_base_url:
+        if self.provider in ("ollama", "openai", "groq", "local") and raw_base_url:
             if not raw_base_url.rstrip("/").endswith("/v1"):
                 raw_base_url = raw_base_url.rstrip("/") + "/v1"
         
         self.base_url = raw_base_url
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        if self.provider == "groq":
+            self.api_key = api_key or os.getenv("GROQ_API_KEY")
+        elif self.provider == "openai":
+            self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        elif self.provider == "openai_compatible":
+            self.api_key = api_key or os.getenv("OPENAI_COMPATIBLE_API_KEY") or os.getenv("OPENAI_API_KEY")
+        else:
+            self.api_key = api_key or os.getenv("GEMINI_API_KEY")
 
         print(f"🔄 [LLMProvider] Reinitialized: {self.provider} | Model: {self.model} | URL: {self.base_url}", flush=True)
+
+    def _langchain_config(self, temperature: float = 0.7, **kwargs) -> LangChainConfig:
+        """Build a LangChain config from the current provider state."""
+        return LangChainConfig(
+            provider=self.provider,
+            model=self.model,
+            base_url=self.base_url,
+            api_key=self.api_key,
+            temperature=temperature,
+        )
+
+    def get_langchain_model(self, temperature: float = 0.7, **kwargs):
+        """
+        Return a LangChain chat model configured from the provider state.
+
+        This is used by structured planners like Magic Flow so we can keep the
+        orchestration logic in Esemble while delegating the model transport to
+        LangChain.
+        """
+        if not LANGCHAIN_AVAILABLE:
+            raise RuntimeError("LangChain is not available in this environment.")
+        return LangChainBridge.build_model(self._langchain_config(temperature=temperature, **kwargs))
+
+    async def _chat_langchain(self, messages: List[Dict[str, str]], agent_name: str = "Esemble specialist", **kwargs) -> Dict[str, Any]:
+        """Use LangChain/LangGraph-compatible model wrappers for standard chat calls."""
+        if not LANGCHAIN_AVAILABLE:
+            raise RuntimeError("LangChain is not available.")
+
+        agent_id = kwargs.get("agent_id", "")
+        system_prompt = load_skill_prompt(agent_id, agent_name)
+        refined = self._prepare_messages(messages)
+        lc_messages = LangChainBridge.build_messages(refined, system_prompt=system_prompt)
+        temperature = kwargs.get("temperature", 0.7)
+
+        config = self._langchain_config(temperature=temperature, **kwargs)
+        model = LangChainBridge.build_model(config)
+        response = await model.ainvoke(lc_messages)
+        text = LangChainBridge.extract_text(response).strip()
+
+        if not text:
+            return {"text": f"Error: No responses from {self.provider}.", "usage": {}}
+
+        return {
+            "text": text,
+            "usage": {},
+        }
 
     # -------------------------------------------------------------------------
     # Public API
     # -------------------------------------------------------------------------
-    async def chat(self, messages: List[Dict[str, str]], agent_name: str = "Ensemble specialist", **kwargs) -> Dict[str, Any]:
+    async def chat(self, messages: List[Dict[str, str]], agent_name: str = "Esemble specialist", **kwargs) -> Dict[str, Any]:
         """Standard chat completion call. Returns {'text': str, 'usage': dict}"""
+        if LANGCHAIN_AVAILABLE:
+            try:
+                return await self._chat_langchain(messages, agent_name=agent_name, **kwargs)
+            except Exception as e:
+                print(f"⚠️ [LLMProvider] LangChain fallback failed, reverting to legacy provider call: {e}", flush=True)
         if self.provider == "gemini":
             return await self._chat_gemini(messages, agent_name=agent_name, **kwargs)
-        elif self.provider in ["ollama", "openai", "local"]:
+        elif self.provider in ["ollama", "openai", "local", "groq", "openai_compatible"]:
             return await self._chat_openai_compatible(messages, agent_name=agent_name, **kwargs)
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
     
     async def chat_with_model(self, messages: List[Dict[str, str]], model_override: Dict[str, Any], 
-                              agent_name: str = "Ensemble specialist", **kwargs) -> Dict[str, Any]:
+                              agent_name: str = "Esemble specialist", **kwargs) -> Dict[str, Any]:
         """
         Chat with a specific model override (agent-level model configuration).
         
@@ -200,11 +350,19 @@ class LLMProvider:
                 self.api_key = override_api_key
             
             print(f"🎯 [LLMProvider] Using model override: {override_provider}/{override_model}", flush=True)
-            
-            # Make the chat call with overridden config
+
+            # Make the chat call with overridden config.
+            # Prefer LangChain-backed invocation for standard chat, then fall back
+            # to the legacy provider-specific transports if needed.
+            if LANGCHAIN_AVAILABLE:
+                try:
+                    return await self._chat_langchain(messages, agent_name=agent_name, **kwargs)
+                except Exception as e:
+                    print(f"⚠️ [LLMProvider] LangChain override failed, using legacy transport: {e}", flush=True)
+
             if self.provider == "gemini":
                 return await self._chat_gemini(messages, agent_name=agent_name, **kwargs)
-            elif self.provider in ["ollama", "openai", "local"]:
+            elif self.provider in ["ollama", "openai", "local", "groq", "openai_compatible"]:
                 return await self._chat_openai_compatible(messages, agent_name=agent_name, **kwargs)
             else:
                 # Fallback to original provider
@@ -225,12 +383,12 @@ class LLMProvider:
             self.base_url = original_base_url
             self.api_key = original_api_key
 
-    async def chat_stream(self, messages: List[Dict[str, str]], agent_name: str = "Ensemble specialist", **kwargs):
+    async def chat_stream(self, messages: List[Dict[str, str]], agent_name: str = "Esemble specialist", **kwargs):
         """Streaming chat completion. Yields text chunks."""
         if self.provider == "gemini":
             async for chunk in self._chat_gemini_stream(messages, agent_name=agent_name, **kwargs):
                 yield chunk
-        elif self.provider in ["ollama", "openai", "local"]:
+        elif self.provider in ["ollama", "openai", "local", "groq", "openai_compatible"]:
             async for chunk in self._chat_openai_compatible_stream(messages, agent_name=agent_name, **kwargs):
                 yield chunk
         else:
@@ -247,6 +405,8 @@ class LLMProvider:
             return 100_000
         if "llama" in self.model:
             return 6_400
+        if "groq" in self.provider or self.provider == "openai_compatible":
+            return 8_000
         return 4_000
 
     def _prepare_messages(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
@@ -330,13 +490,25 @@ class LLMProvider:
                 },
                 "required": ["url"]
             }
+        },
+        "analyse_text_for_requirements": {
+            "name": "analyse_text_for_requirements",
+            "description": "Analyzes raw text to extract structured product requirements (user stories, functional, non-functional, ambiguities). Returns JSON string conforming to RequirementAnalysisResult model.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The raw text to analyze for requirements."},
+                    "analysis_type": {"type": "string", "description": "Optional. Type of analysis: 'all', 'user_stories', 'functional', 'non_functional', 'ambiguities'. Defaults to 'all'."}
+                },
+                "required": ["text"]
+            }
         }
     }
 
     # -------------------------------------------------------------------------
     # Gemini implementation (with tool calling)
     # -------------------------------------------------------------------------
-    async def _chat_gemini(self, messages: List[Dict[str, str]], agent_name: str = "Ensemble specialist", **kwargs) -> Dict[str, Any]:
+    async def _chat_gemini(self, messages: List[Dict[str, str]], agent_name: str = "Esemble specialist", **kwargs) -> Dict[str, Any]:
         """Call Google Gemini API with tool support and auto-retry after tool execution."""
         headers = {
             "Content-Type": "application/json",
@@ -450,6 +622,10 @@ class LLMProvider:
                 "maxOutputTokens": kwargs.get("max_tokens", 32768)  # Increased for full HTML/code output
             }
         }
+        response_format = kwargs.get("response_format")
+        if response_format and isinstance(response_format, dict):
+            if response_format.get("type") == "json_object":
+                payload["generationConfig"]["responseMimeType"] = "application/json"
         
         # Only inject thinkingConfig if it's explicitly a reasoning model
         if "-thinking" in self.model:
@@ -544,7 +720,7 @@ class LLMProvider:
                     print(f"❌ [LLMProvider] Gemini API Error: {str(e)}", flush=True)
                     return {"text": f"Error calling Gemini: {str(e)}", "usage": {}}
 
-    async def _chat_gemini_stream(self, messages: List[Dict[str, str]], agent_name: str = "Ensemble specialist", **kwargs):
+    async def _chat_gemini_stream(self, messages: List[Dict[str, str]], agent_name: str = "Esemble specialist", **kwargs):
         """Stream chunks from Gemini (no tool calling in stream mode)."""
         headers = {"Content-Type": "application/json", "x-goog-api-key": self.api_key}
 
@@ -594,10 +770,14 @@ class LLMProvider:
     # -------------------------------------------------------------------------
     # OpenAI-compatible (Ollama, LocalAI, DeepSeek, etc.)
     # -------------------------------------------------------------------------
-    async def _chat_openai_compatible(self, messages: List[Dict[str, str]], agent_name: str = "Ensemble specialist", **kwargs) -> Dict[str, Any]:
+    async def _chat_openai_compatible(self, messages: List[Dict[str, str]], agent_name: str = "Esemble specialist", **kwargs) -> Dict[str, Any]:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        if self.provider == "openai_compatible" and "cerebras.ai" in (self.base_url or ""):
+            # Cerebras supports an OpenAI-compatible surface but also documents a
+            # version patch header for compatibility-sensitive requests.
+            headers["X-Cerebras-Version-Patch"] = "2"
 
         # Load skill-based prompt
         agent_id = kwargs.get("agent_id", "")
@@ -622,6 +802,9 @@ class LLMProvider:
             "temperature": kwargs.get("temperature", 0.7),
             "stream": False
         }
+        response_format = kwargs.get("response_format")
+        if response_format and isinstance(response_format, dict):
+            payload["response_format"] = response_format
 
         endpoint = self.base_url.rstrip("/")
         if not endpoint.endswith("/chat/completions"):
@@ -647,14 +830,41 @@ class LLMProvider:
                         "total_tokens": usage.get("total_tokens", 0)
                     }
                 }
+            except httpx.HTTPStatusError as e:
+                status_code = e.response.status_code if e.response else None
+                response_text = ""
+                try:
+                    response_text = e.response.text[:400] if e.response is not None else ""
+                except Exception:
+                    response_text = ""
+
+                if self.provider == "openai_compatible" and status_code in (401, 403):
+                    hint = (
+                        "Cerebras rejected the request. Confirm the API key is scoped to the right project, "
+                        "the base URL is https://api.cerebras.ai/v1, and the model id is exact "
+                        "(for example: zai-glm-4.7 or gpt-oss-120b)."
+                    )
+                    message = f"Error calling {self.provider}: {status_code} {e.response.reason_phrase}. {hint}"
+                    if response_text:
+                        message = f"{message} Provider response: {response_text}"
+                    print(f"❌ [LLMProvider] OpenAI-compatible error: {message}", flush=True)
+                    return {"text": message, "usage": {}}
+
+                message = f"Error calling {self.provider}: {status_code} {e.response.reason_phrase}"
+                if response_text:
+                    message = f"{message}: {response_text}"
+                print(f"❌ [LLMProvider] OpenAI-compatible error: {message}", flush=True)
+                return {"text": message, "usage": {}}
             except Exception as e:
                 print(f"❌ [LLMProvider] OpenAI-compatible error: {str(e)}", flush=True)
                 return {"text": f"Error calling {self.provider}: {str(e)}", "usage": {}}
 
-    async def _chat_openai_compatible_stream(self, messages: List[Dict[str, str]], agent_name: str = "Ensemble specialist", **kwargs):
+    async def _chat_openai_compatible_stream(self, messages: List[Dict[str, str]], agent_name: str = "Esemble specialist", **kwargs):
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        if self.provider == "openai_compatible" and "cerebras.ai" in (self.base_url or ""):
+            headers["X-Cerebras-Version-Patch"] = "2"
 
         # Load skill-based prompt
         agent_id = kwargs.get("agent_id", "")
@@ -679,6 +889,9 @@ class LLMProvider:
             "temperature": kwargs.get("temperature", 0.7),
             "stream": True
         }
+        response_format = kwargs.get("response_format")
+        if response_format and isinstance(response_format, dict):
+            payload["response_format"] = response_format
 
         endpoint = self.base_url.rstrip("/")
         if not endpoint.endswith("/chat/completions"):
@@ -686,6 +899,24 @@ class LLMProvider:
 
         async with httpx.AsyncClient(timeout=300.0) as client:
             async with client.stream("POST", endpoint, headers=headers, json=payload) as response:
+                if response.status_code >= 400:
+                    body = ""
+                    try:
+                        body = await response.aread()
+                        body = body.decode("utf-8", errors="ignore")[:400]
+                    except Exception:
+                        body = ""
+                    if self.provider == "openai_compatible" and response.status_code in (401, 403):
+                        raise RuntimeError(
+                            "Cerebras rejected the request. Confirm the API key is scoped to the right project, "
+                            "the base URL is https://api.cerebras.ai/v1, and the model id is exact "
+                            "(for example: zai-glm-4.7 or gpt-oss-120b)"
+                            + (f". Provider response: {body}" if body else "")
+                        )
+                    raise RuntimeError(
+                        f"Error calling {self.provider}: {response.status_code} {response.reason_phrase}"
+                        + (f": {body}" if body else "")
+                    )
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):
                         if line[6:] == "[DONE]":

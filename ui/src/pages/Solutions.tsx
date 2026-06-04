@@ -7,7 +7,7 @@ const Solutions = () => {
   const navigate = useNavigate();
 
   return (
-    <div className="w-full min-h-screen bg-background font-sans pt-32 pb-20">
+    <div className="w-full min-h-screen bg-[linear-gradient(180deg,#e8edf3_0%,#eef2f7_100%)] font-sans pt-32 pb-20 text-foreground">
       <div className="max-w-7xl mx-auto px-6">
         <div className="text-center max-w-3xl mx-auto mb-20">
           <motion.h1 
@@ -23,7 +23,7 @@ const Solutions = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
           >
-            Ensemble isn't just for developers. Our pre-trained agents map directly to your organizational structure, ready to take on department-specific workloads.
+            Esemble isn't just for developers. Our pre-trained agents map directly to your organizational structure, ready to take on department-specific workloads.
           </motion.p>
         </div>
 
@@ -35,7 +35,7 @@ const Solutions = () => {
             color="text-blue-400"
             bg="bg-blue-500/10"
             border="border-blue-500/20"
-            description="Accelerate your sprint velocity. Ensemble agents can review PRs, generate unit tests, architect system designs, and even monitor production logs."
+            description="Accelerate your sprint velocity. Esemble agents can review PRs, generate unit tests, architect system designs, and even monitor production logs."
             agents={["Senior Backend Architect", "Smart Contract Developer", "Site Reliability Engineer", "QA Automation Tester"]}
             image="https://images.unsplash.com/photo-1555066931-4365d14bab8c?auto=format&fit=crop&q=80&w=800"
             reverse={false}
@@ -69,7 +69,7 @@ const Solutions = () => {
         </div>
 
         <div className="mt-32 text-center">
-          <Button size="lg" className="rounded-full px-8 font-bold h-14" onClick={() => navigate('/auth')}>
+        <Button size="lg" className="rounded-full px-8 font-bold h-14 shadow-[0_12px_40px_rgba(15,23,42,0.08)]" onClick={() => navigate('/auth')}>
             Explore All 180+ Agents <ArrowRight className="w-5 h-5 ml-2" />
           </Button>
         </div>
@@ -104,9 +104,9 @@ const SolutionSection = ({ title, description, agents, image, reverse, icon: Ico
       </div>
     </div>
     <div className="flex-1 w-full">
-      <div className="aspect-[4/3] rounded-3xl overflow-hidden border border-white/10 relative group">
-        <div className="absolute inset-0 bg-background/20 group-hover:bg-transparent transition-colors z-10" />
-        <img src={image} alt={title} className="object-cover w-full h-full grayscale-[50%] group-hover:grayscale-0 transition-all duration-700 group-hover:scale-105" />
+      <div className="aspect-[4/3] rounded-3xl overflow-hidden border border-slate-200/80 relative group shadow-[0_12px_40px_rgba(15,23,42,0.06)]">
+        <div className="absolute inset-0 bg-white/10 group-hover:bg-transparent transition-colors z-10" />
+        <img src={image} alt={title} className="object-cover w-full h-full grayscale-[35%] group-hover:grayscale-0 transition-all duration-700 group-hover:scale-105" />
       </div>
     </div>
   </motion.div>

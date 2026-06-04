@@ -1,4 +1,4 @@
-# Ensemble Security Package
+# Esemble Security Package
 from .ast_guard import ASTSecurityAnalyzer, SecurityViolation, SecurityViolationError
 from .network_policy import NetworkPolicy
 from .recursion_guard import RecursionGuard, RecursionError

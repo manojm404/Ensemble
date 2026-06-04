@@ -312,7 +312,7 @@ export function ChatInput({ onSend, onAgentSwitch, disabled, selectedModelId, on
                       onClick={() => {
                         selectAgent(agent);
                       }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md hover:bg-primary/10 transition-colors text-left group"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md hover:bg-secondary/50 transition-colors text-left group"
                     >
                       <span className="text-base group-hover:scale-110 transition-transform">{agent.emoji}</span>
                       <div className="min-w-0 flex-1">
@@ -338,7 +338,7 @@ export function ChatInput({ onSend, onAgentSwitch, disabled, selectedModelId, on
           <div className="py-1 max-h-[240px] overflow-y-auto">
             {models.map((model: any, i) => (
               <button key={model.id} onClick={() => selectModel(model)} onMouseEnter={() => setMenuIndex(i)}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${i === menuIndex ? "bg-primary/10 text-foreground" : "hover:bg-muted/40 text-foreground"}`}>
+                className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${i === menuIndex ? "bg-primary/10 text-foreground" : "hover:bg-secondary/50 text-foreground"}`}>
                 <span className="text-base">{model.emoji || "🤖"}</span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium truncate">{model.name}</p>
@@ -362,7 +362,7 @@ export function ChatInput({ onSend, onAgentSwitch, disabled, selectedModelId, on
           <div className="py-1 max-h-[240px] overflow-y-auto">
             {QUICK_PHRASES.map((phrase, i) => (
               <button key={phrase.label} onClick={() => insertPhrase(phrase.text)} onMouseEnter={() => setMenuIndex(i)}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${i === menuIndex ? "bg-primary/10 text-foreground" : "hover:bg-muted/40 text-foreground"}`}>
+                className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${i === menuIndex ? "bg-primary/10 text-foreground" : "hover:bg-secondary/50 text-foreground"}`}>
                 <Zap className="h-3.5 w-3.5 text-primary/60 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium truncate">{phrase.label}</p>
@@ -384,7 +384,7 @@ export function ChatInput({ onSend, onAgentSwitch, disabled, selectedModelId, on
           <div className="py-1 max-h-[240px] overflow-y-auto">
             {KNOWLEDGE_BASES.map((kb, i) => (
               <button key={kb.id} onClick={() => attachKnowledge(kb)} onMouseEnter={() => setMenuIndex(i)}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${i === menuIndex ? "bg-primary/10 text-foreground" : "hover:bg-muted/40 text-foreground"}`}>
+                className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${i === menuIndex ? "bg-primary/10 text-foreground" : "hover:bg-secondary/50 text-foreground"}`}>
                 <span className="text-base">{kb.icon}</span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium truncate">{kb.name}</p>
@@ -460,7 +460,7 @@ export function ChatInput({ onSend, onAgentSwitch, disabled, selectedModelId, on
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={disabled}
-            placeholder={disabled ? "Ensemble is thinking..." : "Message... ( / agents  @ models )"}
+            placeholder={disabled ? "Esemble is thinking..." : "Message... ( / agents  @ models )"}
             className={`resize-none border-0 bg-transparent px-4 py-3 text-sm focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground ${expanded ? "min-h-[200px] max-h-[60vh]" : "min-h-[44px] max-h-[200px]"} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
             rows={expanded ? 8 : 1}
           />
@@ -528,7 +528,7 @@ export function ChatInput({ onSend, onAgentSwitch, disabled, selectedModelId, on
             {/* Send button — disabled when input empty, popup menu is open, or AI is generating */}
             <Button size="icon" className="h-8 w-8 rounded-lg" onClick={handleSend} disabled={!value.trim() || !!activeMenu || disabled}>
               {disabled ? (
-                <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <div className="h-4 w-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
               ) : (
                 <Send className="h-4 w-4" />
               )}

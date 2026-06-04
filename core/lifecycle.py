@@ -28,7 +28,7 @@ class LifecycleManager:
 
     async def on_startup(self):
         """Run startup health checks."""
-        logger.info("🚀 [Lifecycle] Starting Ensemble backend...")
+        logger.info("🚀 [Lifecycle] Starting Esemble backend...")
 
         # Verify Supabase connection
         try:

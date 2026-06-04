@@ -95,13 +95,13 @@ class SovereignScheduler:
                     workflow_id=workflow_id,
                     graph_json=wf_data["graph"],
                     initial_input=payload.get("input", f"Scheduled run: {name}"),
-                    company_id=payload.get("company_id", "company_alpha")
+                    company_id=payload.get("company_id", "user:anonymous")
                 ))
                 
                 # Notify Inbox
                 self.audit.notify(
-                    user_id=payload.get("user_id", "dev_user"),
-                    company_id=payload.get("company_id", "company_alpha"),
+                    user_id=payload.get("user_id"),
+                    company_id=payload.get("company_id", "user:anonymous"),
                     title=f"🕒 Scheduled Job Started: {name}",
                     preview=f"Workflow {workflow_id} is now executing in the background.",
                     content=f"Your scheduled Sovereign task '{name}' was triggered successfully at {datetime.utcnow().isoformat()}.",
