@@ -4,7 +4,7 @@ from core.rag import get_vector_store
 
 def search_memory(query: str, top_k: int = 5):
     """
-    Search the Ensemble long-term memory for semantic matches.
+    Search the 0101 long-term memory for semantic matches.
     Useful for recalling past decisions, artifact contents, or cross-project info.
     """
     try:

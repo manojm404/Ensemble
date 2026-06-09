@@ -4,7 +4,7 @@ from core.audit import AuditLogger
 
 def fetch_history(limit=5, offset=0, order="DESC", company_id="company_alpha"):
     """
-    Tool to fetch conversation history from the Ensemble Audit Logger.
+    Tool to fetch conversation history from the 0101 Audit Logger.
     
     Args:
         limit (int): Number of events to fetch.

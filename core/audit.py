@@ -1,5 +1,5 @@
 """
-core/audit.py - Audit Logging for Esemble (Phase 3: Multi-Tenant)
+core/audit.py - Audit Logging for 0101 (Phase 3: Multi-Tenant)
 
 Supports both SQLite (backward compatible) and Supabase (multi-tenant).
 When Supabase is configured, all audit events are written to the
@@ -337,7 +337,7 @@ class AuditLogger:
         title: str,
         preview: str,
         content: str,
-        from_name: str = "Esemble",
+        from_name: str = "0101",
         from_avatar: str = "🤖",
         category: str = "system",
         broadcast: bool = True

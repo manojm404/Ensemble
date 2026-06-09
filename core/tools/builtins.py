@@ -1,6 +1,6 @@
 """
 core/tools/builtins.py
-Built-in tools for Esemble agents, secured via DockerExecutor and SecurityGovernor.
+Built-in tools for 0101 agents, secured via DockerExecutor and SecurityGovernor.
 """
 import os
 import logging

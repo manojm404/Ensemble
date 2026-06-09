@@ -14,13 +14,13 @@
       "description": "Official agency-agents repository with 182 specialized agents across 77 plugins"
     },
     {
-      "id": "esemble-official",
-      "name": "Esemble Official Packs",
+      "id": "0101-official",
+      "name": "0101 Official Packs",
       "type": "local",
       "path": "data/marketplace/zips/",
       "manifest_path": "data/marketplace/packs.json",
       "enabled": true,
-      "description": "Curated official Esemble marketplace packs"
+      "description": "Curated official 0101 marketplace packs"
     }
   ],
   "settings": {

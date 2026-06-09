@@ -1,7 +1,7 @@
 """
 core/marketplace_sync.py
 Remote marketplace synchronization from GitHub repositories.
-Fetches agent packs from external sources and transforms them to Esemble format.
+Fetches agent packs from external sources and transforms them to 0101 format.
 """
 import os
 import json
@@ -58,7 +58,7 @@ class MarketplaceSource:
                 print(f"⚠️ [MarketplaceSync] No manifest found in {self.repo}")
                 return []
             
-            # Step 2: Transform plugins to Esemble pack format
+            # Step 2: Transform plugins to 0101 pack format
             packs = []
             plugins = manifest.get('plugins', [])
             
@@ -92,7 +92,7 @@ class MarketplaceSource:
             return None
     
     def _transform_plugin_to_pack(self, plugin: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Transform a plugin definition to Esemble pack format."""
+        """Transform a plugin definition to 0101 pack format."""
         try:
             plugin_name = plugin.get('name', '')
             plugin_source = plugin.get('source', '')

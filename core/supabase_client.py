@@ -1,7 +1,7 @@
 """
 core/supabase_client.py - Supabase Client Singleton
 
-Provides a thread-safe, lazily-initialized Supabase client for the Esemble backend.
+Provides a thread-safe, lazily-initialized Supabase client for the 0101 backend.
 Supports both the anon key (for client-side operations) and the service role key
 (for admin operations that bypass RLS).
 

@@ -250,7 +250,7 @@ class SecureDockerContainer:
     """Hardened Docker container for executing untrusted code.
 
     This class encapsulates all security hardening options for Docker
-    containers used in the Ensemble sandbox. It follows the principle
+    containers used in the 0101 sandbox. It follows the principle
     of least privilege and defense-in-depth.
 
     Security measures:

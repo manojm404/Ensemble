@@ -1,7 +1,7 @@
 """
 core/langchain_adapter.py
 
-Thin LangChain bridge for Esemble.
+Thin LangChain bridge for 0101.
 
 This keeps the product contract in our own runtime while delegating provider
 access and message normalization to LangChain/LangGraph-compatible models.

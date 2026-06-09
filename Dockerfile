@@ -1,5 +1,5 @@
 # ============================================================
-# Ensemble Backend - Production Dockerfile
+# 0101 Backend - Production Dockerfile
 # ============================================================
 # Multi-stage build for optimized image size
 # ============================================================
@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
-RUN groupadd -r ensemble && useradd -r -g ensemble ensemble
+RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 # Set working directory
 WORKDIR /app
@@ -43,14 +43,14 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 
 # Copy application code
-COPY --chown=ensemble:ensemble . .
+COPY --chown=appuser:appuser . .
 
 # Create data directories
-RUN mkdir -p data/ensemble_space data/workspace data/users && \
-    chown -R ensemble:ensemble data/
+RUN mkdir -p data/0101_space data/workspace data/users && \
+    chown -R appuser:appuser data/
 
 # Switch to non-root user
-USER ensemble
+USER appuser
 
 # Expose port
 EXPOSE 8088

@@ -1,5 +1,5 @@
 """
-LangGraph-backed execution runtime for Esemble workflows.
+LangGraph-backed execution runtime for 0101 workflows.
 
 This module keeps the public workflow contracts stable while moving the
 execution scheduler, checkpointing, and resumability onto LangGraph for the

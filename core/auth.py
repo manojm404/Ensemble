@@ -1,5 +1,5 @@
 """
-core/auth.py - Authentication Middleware for Esemble
+core/auth.py - Authentication Middleware for 0101
 
 Handles JWT validation via Supabase, user extraction from requests,
 and FastAPI dependency functions for route protection.

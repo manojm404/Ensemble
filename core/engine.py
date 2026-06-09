@@ -1,6 +1,6 @@
 """
 core/engine.py
-SOP Engine: FSM executor for Esemble workflows.
+SOP Engine: FSM executor for 0101 workflows.
 """
 import os
 import yaml

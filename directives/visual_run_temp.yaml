@@ -1,5 +1,5 @@
 name: Visual SOP Export
-description: Generated from Ensemble Studio Canvas
+description: Generated from 0101 Studio Canvas
 states:
   design_portfolio_card_description:
     role: content_creator

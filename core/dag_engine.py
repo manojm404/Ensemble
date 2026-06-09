@@ -1,6 +1,6 @@
 """
 core/dag_engine.py
-DAG-based Workflow Engine for Esemble V2.
+DAG-based Workflow Engine for 0101 V2.
 
 Executes workflows defined as directed acyclic graphs (DAGs) where:
 - Nodes = agents with roles, instructions, and capabilities
@@ -26,6 +26,7 @@ from core.audit import AuditLogger
 from core.llm_provider import LLMProvider
 from core.workflows.messages import AgentMessage, AgentMessageLedger, AgentMessageValidationError
 from core.langgraph_runtime import LangGraphWorkflowRunner, supports_langgraph_workflow
+import core.company_routes as company_routes
 
 
 def _model_provider(model: Optional[str]) -> Optional[str]:
@@ -1422,6 +1423,60 @@ class DAGWorkflowEngine:
                 conn.execute("UPDATE executions SET status = ? WHERE run_id = ?", (status, run_id))
             if status in {WorkflowState.COMPLETED.value, WorkflowState.FAILED.value}:
                 conn.execute("UPDATE executions SET completed_at = ? WHERE run_id = ?", (time.strftime("%Y-%m-%dT%H:%M:%SZ"), run_id))
+        if status in {WorkflowState.COMPLETED.value, WorkflowState.FAILED.value, "completed", "failed"}:
+            self._sync_company_task_status(run_id, status)
+
+    def _sync_company_task_status(self, run_id: str, status: str):
+        """Mirror workflow run terminal state back to the CEO task table."""
+        try:
+            task_status = "completed" if status in {WorkflowState.COMPLETED.value, "completed"} else "failed"
+            timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            with sqlite3.connect(company_routes.DB_PATH) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT company_id, assigned_agent_id, route_json
+                    FROM company_issues
+                    WHERE run_id = ?
+                    """,
+                    (run_id,),
+                ).fetchall()
+                conn.execute(
+                    """
+                    UPDATE company_issues
+                    SET status = ?, updated_at = ?
+                    WHERE run_id = ?
+                    """,
+                    (task_status, timestamp, run_id),
+                )
+                agent_pairs = []
+                for row in rows:
+                    company_id = row[0]
+                    if not company_id:
+                        continue
+                    agent_ids = {row[1]} if row[1] else set()
+                    try:
+                        route = json.loads(row[2] or "{}")
+                    except Exception:
+                        route = {}
+                    for stage in route.get("selected_agents") or []:
+                        agent_id = stage.get("company_agent_id") or stage.get("agent_id")
+                        if agent_id:
+                            agent_ids.add(agent_id)
+                    agent_pairs.extend((company_id, agent_id) for agent_id in agent_ids if agent_id)
+                for company_id, agent_id in agent_pairs:
+                    conn.execute(
+                        """
+                        UPDATE company_agents
+                        SET status = 'idle', last_activity_at = ?, updated_at = ?
+                        WHERE company_id = ? AND id = ? AND status = 'running'
+                        """,
+                        (timestamp, timestamp, company_id, agent_id),
+                    )
+                conn.commit()
+            if task_status == "completed":
+                company_routes.dispatch_task_report_for_run(run_id, self.gov.db_path)
+        except Exception as exc:
+            print(f"⚠️ [Task Sync] Failed to sync task status for {run_id}: {exc}", flush=True)
 
     def _update_node_status(self, run_id: str, node_id: str, status: str, output: Optional[str] = None):
         """Update individual node execution status."""
@@ -1725,12 +1780,12 @@ class DAGWorkflowEngine:
             # Ensure it's a git repo
             if not os.path.exists(os.path.join(repo_dir, ".git")):
                 subprocess.run(["git", "init"], cwd=repo_dir, check=True, capture_output=True)
-                subprocess.run(["git", "config", "user.name", "Esemble Engine"], cwd=repo_dir, check=True)
-                subprocess.run(["git", "config", "user.email", "engine@esemble.local"], cwd=repo_dir, check=True)
+                subprocess.run(["git", "config", "user.name", "0101 Engine"], cwd=repo_dir, check=True)
+                subprocess.run(["git", "config", "user.email", "engine@0101.local"], cwd=repo_dir, check=True)
                 
                 # Initial empty commit needed to branch
                 with open(os.path.join(repo_dir, ".ensemble_init"), "w") as f:
-                    f.write("Repository initialized by Esemble Engine.")
+                    f.write("Repository initialized by 0101 Engine.")
                 subprocess.run(["git", "add", "."], cwd=repo_dir, check=True)
                 subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=repo_dir, check=True)
 

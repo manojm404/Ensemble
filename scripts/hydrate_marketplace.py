@@ -75,7 +75,7 @@ create_pack(
     "Game Dev Pack",
     "Unity, Unreal, and Godot specialists for cross-engine workflows.",
     "🎮",
-    "Ensemble (from agency-agents)",
+    "0101 (from agency-agents)",
     [
         "game-development/unity/unity-architect.md",
         "game-development/unreal-engine/unreal-systems-engineer.md",
@@ -89,7 +89,7 @@ create_pack(
     "Paid Media Specialists",
     "Advanced PPC, Search Analysis, and Ad Creative Strategists.",
     "📈",
-    "Ensemble (from agency-agents)",
+    "0101 (from agency-agents)",
     [
         "paid-media/paid-media-ppc-strategist.md",
         "paid-media/paid-media-search-query-analyst.md",
@@ -103,7 +103,7 @@ create_pack(
     "Elite QA & Reliability",
     "Evidence collection, API testing, and reality checking specialists.",
     "🧪",
-    "Ensemble (from agency-agents)",
+    "0101 (from agency-agents)",
     [
         "testing/testing-evidence-collector.md",
         "testing/testing-reality-checker.md",
@@ -117,7 +117,7 @@ create_pack(
     "Spatial Computing Suite",
     "Meta Metal, visionOS, and XR Interface architects.",
     "🥽",
-    "Ensemble (from agency-agents)",
+    "0101 (from agency-agents)",
     [
         "spatial-computing/macos-spatial-metal-engineer.md",
         "spatial-computing/visionos-spatial-engineer.md",

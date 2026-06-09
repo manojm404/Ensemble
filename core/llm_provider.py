@@ -10,7 +10,7 @@ from core.langchain_adapter import LANGCHAIN_AVAILABLE, LangChainBridge, LangCha
 
 # Default fallback prompt for agents without skill files
 DEFAULT_AGENT_PROMPT = """
-You are {name}, a helpful AI assistant for the Esemble platform.
+You are {name}, a helpful AI assistant for the 0101 platform.
 
 Be warm, conversational, and genuinely helpful. Match the user's tone.
 When unsure about real-world facts, say so — then offer to search. NEVER fabricate information.
@@ -26,6 +26,34 @@ When unsure about real-world facts, say so — then offer to search. NEVER fabri
 - Keep responses concise. No filler like "I'd be happy to help!"
 - NEVER end responses with "Anything else?" or "How can I help further?"
 """
+
+
+def _offline_fallback_text(messages: List[Dict[str, str]], agent_name: str, provider: str, reason: str) -> str:
+    """Generate a deterministic local-dev response when the configured provider cannot be reached."""
+    last_user = ""
+    for message in reversed(messages or []):
+        if str(message.get("role") or "").lower() in {"user", "human"}:
+            last_user = str(message.get("content") or "").strip()
+            if last_user:
+                break
+
+    preview = " ".join(last_user.split())
+    if len(preview) > 240:
+        preview = f"{preview[:237].rstrip()}..."
+
+    request_line = preview or "No user request was supplied."
+    return (
+        f"# {agent_name} local fallback\n\n"
+        f"The configured {provider} provider could not be reached ({reason}). "
+        "0101 used a deterministic local fallback so the workflow can keep moving in development.\n\n"
+        "## Interpreted request\n"
+        f"{request_line}\n\n"
+        "## Output\n"
+        "- This step completed in fallback mode.\n"
+        "- Review the provider settings before using this workflow in production.\n\n"
+        "## Handoff\n"
+        "Continue to the next node using the current task context."
+    )
 
 
 def load_skill_prompt(agent_id: str, agent_name: str) -> str:
@@ -209,7 +237,10 @@ class LLMProvider:
     def reinitialize(self, provider: str = None, model: str = None, base_url: str = None, api_key: str = None):
         """Reload configuration from environment or provided overrides."""
         from dotenv import load_dotenv
-        load_dotenv(override=True)
+        # Preserve real shell / process credentials. The repo .env may contain
+        # placeholder values for local development, and those must not overwrite
+        # an already configured runtime key.
+        load_dotenv()
 
         self.provider = provider or os.getenv("LLM_PROVIDER", "gemini")
         # Default to stable Gemini 2.5 Flash (not deprecated)
@@ -266,14 +297,16 @@ class LLMProvider:
         Return a LangChain chat model configured from the provider state.
 
         This is used by structured planners like Magic Flow so we can keep the
-        orchestration logic in Esemble while delegating the model transport to
+        orchestration logic in 0101 while delegating the model transport to
         LangChain.
         """
         if not LANGCHAIN_AVAILABLE:
             raise RuntimeError("LangChain is not available in this environment.")
-        return LangChainBridge.build_model(self._langchain_config(temperature=temperature, **kwargs))
+        clean_kwargs = dict(kwargs)
+        clean_kwargs.pop("temperature", None)
+        return LangChainBridge.build_model(self._langchain_config(temperature=temperature, **clean_kwargs))
 
-    async def _chat_langchain(self, messages: List[Dict[str, str]], agent_name: str = "Esemble specialist", **kwargs) -> Dict[str, Any]:
+    async def _chat_langchain(self, messages: List[Dict[str, str]], agent_name: str = "0101 specialist", **kwargs) -> Dict[str, Any]:
         """Use LangChain/LangGraph-compatible model wrappers for standard chat calls."""
         if not LANGCHAIN_AVAILABLE:
             raise RuntimeError("LangChain is not available.")
@@ -282,9 +315,10 @@ class LLMProvider:
         system_prompt = load_skill_prompt(agent_id, agent_name)
         refined = self._prepare_messages(messages)
         lc_messages = LangChainBridge.build_messages(refined, system_prompt=system_prompt)
-        temperature = kwargs.get("temperature", 0.7)
+        clean_kwargs = dict(kwargs)
+        temperature = clean_kwargs.pop("temperature", 0.7)
 
-        config = self._langchain_config(temperature=temperature, **kwargs)
+        config = self._langchain_config(temperature=temperature, **clean_kwargs)
         model = LangChainBridge.build_model(config)
         response = await model.ainvoke(lc_messages)
         text = LangChainBridge.extract_text(response).strip()
@@ -300,7 +334,7 @@ class LLMProvider:
     # -------------------------------------------------------------------------
     # Public API
     # -------------------------------------------------------------------------
-    async def chat(self, messages: List[Dict[str, str]], agent_name: str = "Esemble specialist", **kwargs) -> Dict[str, Any]:
+    async def chat(self, messages: List[Dict[str, str]], agent_name: str = "0101 specialist", **kwargs) -> Dict[str, Any]:
         """Standard chat completion call. Returns {'text': str, 'usage': dict}"""
         if LANGCHAIN_AVAILABLE:
             try:
@@ -315,7 +349,7 @@ class LLMProvider:
             raise ValueError(f"Unsupported provider: {self.provider}")
     
     async def chat_with_model(self, messages: List[Dict[str, str]], model_override: Dict[str, Any], 
-                              agent_name: str = "Esemble specialist", **kwargs) -> Dict[str, Any]:
+                              agent_name: str = "0101 specialist", **kwargs) -> Dict[str, Any]:
         """
         Chat with a specific model override (agent-level model configuration).
         
@@ -383,7 +417,7 @@ class LLMProvider:
             self.base_url = original_base_url
             self.api_key = original_api_key
 
-    async def chat_stream(self, messages: List[Dict[str, str]], agent_name: str = "Esemble specialist", **kwargs):
+    async def chat_stream(self, messages: List[Dict[str, str]], agent_name: str = "0101 specialist", **kwargs):
         """Streaming chat completion. Yields text chunks."""
         if self.provider == "gemini":
             async for chunk in self._chat_gemini_stream(messages, agent_name=agent_name, **kwargs):
@@ -508,7 +542,7 @@ class LLMProvider:
     # -------------------------------------------------------------------------
     # Gemini implementation (with tool calling)
     # -------------------------------------------------------------------------
-    async def _chat_gemini(self, messages: List[Dict[str, str]], agent_name: str = "Esemble specialist", **kwargs) -> Dict[str, Any]:
+    async def _chat_gemini(self, messages: List[Dict[str, str]], agent_name: str = "0101 specialist", **kwargs) -> Dict[str, Any]:
         """Call Google Gemini API with tool support and auto-retry after tool execution."""
         headers = {
             "Content-Type": "application/json",
@@ -715,12 +749,16 @@ class LLMProvider:
                         
                     error_detail = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
                     print(f"❌ [LLMProvider] Gemini API Error: {error_detail}", flush=True)
+                    if os.getenv("ENFORCE_AUTH", "true").lower() in ("false", "0", "no"):
+                        return {"text": _offline_fallback_text(messages, agent_name, "gemini", error_detail), "usage": {}}
                     return {"text": f"Error calling Gemini: {error_detail}", "usage": {}}
                 except Exception as e:
                     print(f"❌ [LLMProvider] Gemini API Error: {str(e)}", flush=True)
+                    if os.getenv("ENFORCE_AUTH", "true").lower() in ("false", "0", "no"):
+                        return {"text": _offline_fallback_text(messages, agent_name, "gemini", str(e)), "usage": {}}
                     return {"text": f"Error calling Gemini: {str(e)}", "usage": {}}
 
-    async def _chat_gemini_stream(self, messages: List[Dict[str, str]], agent_name: str = "Esemble specialist", **kwargs):
+    async def _chat_gemini_stream(self, messages: List[Dict[str, str]], agent_name: str = "0101 specialist", **kwargs):
         """Stream chunks from Gemini (no tool calling in stream mode)."""
         headers = {"Content-Type": "application/json", "x-goog-api-key": self.api_key}
 
@@ -770,7 +808,7 @@ class LLMProvider:
     # -------------------------------------------------------------------------
     # OpenAI-compatible (Ollama, LocalAI, DeepSeek, etc.)
     # -------------------------------------------------------------------------
-    async def _chat_openai_compatible(self, messages: List[Dict[str, str]], agent_name: str = "Esemble specialist", **kwargs) -> Dict[str, Any]:
+    async def _chat_openai_compatible(self, messages: List[Dict[str, str]], agent_name: str = "0101 specialist", **kwargs) -> Dict[str, Any]:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -848,18 +886,24 @@ class LLMProvider:
                     if response_text:
                         message = f"{message} Provider response: {response_text}"
                     print(f"❌ [LLMProvider] OpenAI-compatible error: {message}", flush=True)
+                    if os.getenv("ENFORCE_AUTH", "true").lower() in ("false", "0", "no"):
+                        return {"text": _offline_fallback_text(messages, agent_name, self.provider, message), "usage": {}}
                     return {"text": message, "usage": {}}
 
                 message = f"Error calling {self.provider}: {status_code} {e.response.reason_phrase}"
                 if response_text:
                     message = f"{message}: {response_text}"
                 print(f"❌ [LLMProvider] OpenAI-compatible error: {message}", flush=True)
+                if os.getenv("ENFORCE_AUTH", "true").lower() in ("false", "0", "no"):
+                    return {"text": _offline_fallback_text(messages, agent_name, self.provider, message), "usage": {}}
                 return {"text": message, "usage": {}}
             except Exception as e:
                 print(f"❌ [LLMProvider] OpenAI-compatible error: {str(e)}", flush=True)
+                if os.getenv("ENFORCE_AUTH", "true").lower() in ("false", "0", "no"):
+                    return {"text": _offline_fallback_text(messages, agent_name, self.provider, str(e)), "usage": {}}
                 return {"text": f"Error calling {self.provider}: {str(e)}", "usage": {}}
 
-    async def _chat_openai_compatible_stream(self, messages: List[Dict[str, str]], agent_name: str = "Esemble specialist", **kwargs):
+    async def _chat_openai_compatible_stream(self, messages: List[Dict[str, str]], agent_name: str = "0101 specialist", **kwargs):
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"

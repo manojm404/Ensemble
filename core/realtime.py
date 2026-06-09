@@ -1,5 +1,5 @@
 """
-core/realtime.py - Supabase Realtime Subscriptions for Esemble
+core/realtime.py - Supabase Realtime Subscriptions for 0101
 
 Subscribes to Supabase Realtime events and broadcasts them
 to connected WebSocket clients. This provides live dashboard updates

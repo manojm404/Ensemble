@@ -1,5 +1,5 @@
 /* ==========================================
-   ENSEMBLE — Modern Premium Website
+   0101 — Modern Premium Website
    Premium Design System + Ultra-Classy Animations
    =========================================== */
 
@@ -310,29 +310,16 @@ button {
 .logo {
   display: flex;
   align-items: center;
-  gap: var(--space-md);
-  font-weight: 800;
-  font-size: 1.25rem;
-  letter-spacing: -0.5px;
+  min-width: 130px;
 }
 
-.logo-icon {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.logo-icon svg {
-  width: 100%;
-  height: 100%;
-  stroke: url(#gradient);
-  filter: drop-shadow(0 0 4px rgba(124, 58, 237, 0.3));
+.logo-lockup {
+  display: block;
+  width: 128px;
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.16));
+  user-select: none;
 }
 
 .nav-links {
@@ -644,10 +631,10 @@ button {
 }
 
 /* ==========================================
-   WHY ENSEMBLE SECTION
+   WHY 0101 SECTION
    =========================================== */
 
-.why-ensemble {
+.why-0101 {
   position: relative;
 }
 

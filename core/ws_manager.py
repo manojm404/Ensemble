@@ -1,5 +1,5 @@
 """
-core/ws_manager.py — WebSocket Manager for Esemble (Phase 5: Auth + Multi-Tenant)
+core/ws_manager.py — WebSocket Manager for 0101 (Phase 5: Auth + Multi-Tenant)
 
 Manages WebSocket connections with JWT authentication, user-scoped rooms,
 and real-time event broadcasting.
@@ -88,7 +88,7 @@ class WSManager:
                     "user_id": user_id,
                     "email": user.get("email"),
                     "tier": user.get("tier", "free"),
-                    "message": "Connected to Esemble real-time feed",
+                    "message": "Connected to 0101 real-time feed",
                 },
             })
         except Exception as e:

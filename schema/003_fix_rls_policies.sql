@@ -1,5 +1,5 @@
 -- =====================================================
--- Esemble Phase 3 Fix: Service Role RLS Bypass (v2)
+-- 0101 Phase 3 Fix: Service Role RLS Bypass (v2)
 -- =====================================================
 -- Supabase's Python client with service_role key DOES
 -- bypass RLS by default. But custom policies can block it.

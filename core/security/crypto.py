@@ -1,5 +1,5 @@
 """
-core/security/crypto.py - Encryption Utilities for Esemble
+core/security/crypto.py - Encryption Utilities for 0101
 
 Provides AES-256 encryption (via Fernet) for sensitive data storage:
 - LLM API keys

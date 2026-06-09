@@ -1,11 +1,11 @@
 name: "Direct Chat Proxy"
-description: "A single-state SOP for direct human-agent interaction via the Ensemble UI."
+description: "A single-state SOP for direct human-agent interaction via the 0101 UI."
 
 states:
   Synthesis:
     role: "Assistant"
     instruction: |
-      You are the Ensemble Corporate Assistant.
+      You are the 0101 Corporate Assistant.
       The user will provide a high-level goal or a simple question.
       Help them directly or suggest a more complex SOP if needed.
     transitions:

@@ -1,6 +1,6 @@
 """
 core/security/recursion_guard.py
-Thread-safe guard for LLM/agent call depth in the Ensemble platform.
+Thread-safe guard for LLM/agent call depth in the 0101 platform.
 
 Enforces a hard limit of 3 levels of agent-to-agent calls to prevent
 runaway recursion chains that waste tokens and money. Provides budget

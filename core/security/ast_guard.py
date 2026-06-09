@@ -4,7 +4,7 @@ Python AST-based security analyzer for untrusted LLM-generated code.
 
 Blocks dangerous imports, dangerous builtins, and obfuscation patterns.
 Returns a SecurityReport with a list of SecurityViolation objects.
-Designed to run as a pre-execution gate in the Ensemble sandbox pipeline.
+Designed to run as a pre-execution gate in the 0101 sandbox pipeline.
 
 Usage:
     from core.security.ast_guard import ASTSecurityAnalyzer, SecurityViolation

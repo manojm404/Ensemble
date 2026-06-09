@@ -17,7 +17,7 @@ def bundle():
     
     # Determine target name with architecture triplet for Tauri 2.0
     # Format: binary-name-target-triple
-    # Example: ensemble-backend-aarch64-apple-darwin
+    # Example: 0101-backend-aarch64-apple-darwin
     
     system = platform.system().lower()
     arch = platform.machine().lower()
@@ -37,7 +37,7 @@ def bundle():
     else:
         triplet = f"{triplet_arch}-unknown-linux-gnu"
         
-    binary_name = f"ensemble-backend-{triplet}"
+    binary_name = f"0101-backend-{triplet}"
     if system == "windows":
         binary_name += ".exe"
         

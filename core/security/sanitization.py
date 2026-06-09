@@ -1,5 +1,5 @@
 """
-core/security/sanitization.py - Input Sanitization for Esemble
+core/security/sanitization.py - Input Sanitization for 0101
 
 Protects against XSS and injection attacks by sanitizing user input
 before storage or rendering.

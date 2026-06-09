@@ -1,6 +1,6 @@
 """
 core/managed_agent.py
-Managed Agent for Esemble — secure, budget-aware agent wrapper.
+Managed Agent for 0101 — secure, budget-aware agent wrapper.
 
 Handles LLM execution with input limiting, recursion guards, budget enforcement,
 and timeout management.

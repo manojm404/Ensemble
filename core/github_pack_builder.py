@@ -63,7 +63,7 @@ class GitHubPackBuilder:
                 manifest = self._build_manifest(plugin_name, files)
                 zf.writestr("pack.json", manifest)
                 
-                # Add .pack_meta.json for Ensemble compatibility
+                # Add .pack_meta.json for 0101 compatibility
                 pack_meta = self._build_pack_meta(plugin_name)
                 zf.writestr(".pack_meta.json", pack_meta)
             
@@ -225,7 +225,7 @@ class GitHubPackBuilder:
         return json.dumps(manifest, indent=2)
     
     def _build_pack_meta(self, plugin_name: str) -> str:
-        """Generate .pack_meta.json for Ensemble compatibility."""
+        """Generate .pack_meta.json for 0101 compatibility."""
         import json
         
         meta = {
@@ -248,7 +248,7 @@ class GitHubPackBuilder:
         """Make HTTP request with optional authentication."""
         headers = {
             'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'Ensemble-Marketplace'
+            'User-Agent': '0101-Marketplace'
         }
         
         if self.token:

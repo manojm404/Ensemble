@@ -1,6 +1,6 @@
-"""Esemble Cost Control Components.
+"""0101 Cost Control Components.
 
-This package provides deterministic cost control primitives for the Esemble platform:
+This package provides deterministic cost control primitives for the 0101 platform:
 - Input token limiting and truncation
 - Execution timeout enforcement
 - Budget enforcement with escrow

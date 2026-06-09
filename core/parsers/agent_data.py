@@ -51,7 +51,7 @@ class AgentFormat(str, Enum):
 @dataclass
 class AgentData:
     """
-    Universal agent data model for the Ensemble platform.
+    Universal agent data model for the 0101 platform.
 
     This is the canonical representation of an agent, regardless of source format.
     All parsers produce AgentData objects.
@@ -177,7 +177,7 @@ class AgentData:
 
     def to_markdown(self) -> str:
         """
-        Convert agent to Ensemble .md format with YAML frontmatter.
+        Convert agent to 0101 .md format with YAML frontmatter.
         Ensures ALL agents can be chatted with regardless of source format.
         """
         if not yaml:

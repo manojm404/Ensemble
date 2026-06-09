@@ -1,5 +1,5 @@
 """
-core/settings.py - Settings Management for Esemble (Phase 3: Multi-Tenant)
+core/settings.py - Settings Management for 0101 (Phase 3: Multi-Tenant)
 
 Handles per-user settings stored in Supabase `user_settings` table.
 Falls back to local JSON file for single-user mode (no Supabase).
@@ -292,7 +292,7 @@ async def test_llm_connection(
             llm_instance.reinitialize(provider=provider, model=model, base_url=base_url)
         result = await llm_instance.chat(
             messages=[{"role": "user", "content": "Say 'Connection test successful' in 3 words or less."}],
-            agent_name="Esemble Connection Test",
+            agent_name="0101 Connection Test",
         )
         elapsed_ms = int((time.time() - start) * 1000)
         response_text = result.get("text", "")

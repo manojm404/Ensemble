@@ -1,5 +1,5 @@
 /**
- * Esemble Website - Modern Interactive Script
+ * 0101 Website - Modern Interactive Script
  * Premium animations, scroll effects, and user interactions
  */
 
@@ -93,7 +93,7 @@ faqTriggers.forEach(trigger => {
 document.querySelectorAll('.download-trigger').forEach(button => {
   button.addEventListener('click', (e) => {
     const os = e.currentTarget.dataset.os;
-    const filename = os === 'mac' ? 'Esemble-1.0.0.dmg' : 'Esemble-1.0.0.exe';
+    const filename = os === 'mac' ? '0101-1.0.0.dmg' : '0101-1.0.0.exe';
     
     // Visual feedback
     const originalText = button.textContent;
@@ -107,7 +107,7 @@ document.querySelectorAll('.download-trigger').forEach(button => {
       button.textContent = '📦 Starting Download...';
       
       // In production, this would redirect to actual download
-      // window.location.href = `https://github.com/manojm404/Ensemble/releases/download/v1.0.0/${filename}`;
+      // window.location.href = `https://github.com/manojm404/0101/releases/download/v1.0.0/${filename}`;
       
       setTimeout(() => {
         button.textContent = '✓ Download Started!';
@@ -354,7 +354,7 @@ const isTablet = window.innerWidth >= 768 && window.innerWidth < 1024;
 const isDesktop = window.innerWidth >= 1024;
 
 // Log for debugging
-console.log(`Esemble Website Loaded | Device: ${isDesktop ? 'Desktop' : isTablet ? 'Tablet' : 'Mobile'}`);
+console.log(`0101 Website Loaded | Device: ${isDesktop ? 'Desktop' : isTablet ? 'Tablet' : 'Mobile'}`);
 
 // ==========================================
 // PERFORMANCE: DEBOUNCE FOR RESIZE
@@ -403,5 +403,5 @@ document.querySelectorAll('.download-trigger').forEach(button => {
 // ==========================================
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('🎼 Esemble Website - Ready for Orchestration');
+  console.log('🎼 0101 Website - Ready for Orchestration');
 });

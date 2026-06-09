@@ -1,7 +1,7 @@
 name: Career Autopilot v1
 description: Detects Data Engineer job openings and prepares tailored resume for human approval.
 version: 1.0.0
-author: Ensemble Architect
+author: 0101 Architect
 
 # The Directive State Machine
 # Sequence: Search -> Extract -> Tailor -> Inbox Propose -> Final Apply

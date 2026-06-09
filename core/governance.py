@@ -1,6 +1,6 @@
 """
 core/governance.py
-Governance for Esemble: budgeting, heartbeats, org charts, and FastAPI endpoints.
+Governance for 0101: budgeting, heartbeats, org charts, and FastAPI endpoints.
 """
 import base64
 import hashlib
@@ -61,6 +61,7 @@ from core.scheduler import init_scheduler
 from core.supabase_client import supabase, supabase_admin, verify_connection
 from core.auth import get_current_user, require_auth, is_public_path, PUBLIC_PATHS
 from core.auth_routes import router as auth_router, health_router
+import core.company_routes as company_routes
 from core.company_routes import router as company_router
 from core.models.user import UserCreate, UserLogin, ProfileUpdate
 from core.models.api import HealthResponse
@@ -78,7 +79,7 @@ GOV_CONFIG = {
     "memory_turns": int(os.getenv("MEMORY_TURNS", 20))
 }
 
-app = FastAPI(title="Esemble Platform API")
+app = FastAPI(title="0101 Platform API")
 
 
 def _normalize_failure_text(value: Any, fallback: str = "Unknown failure") -> str:
@@ -116,7 +117,21 @@ def _normalize_failure_text(value: Any, fallback: str = "Unknown failure") -> st
 
 
 def _local_dev_user_for_request(request: Request) -> Dict[str, Any]:
-    """Derive a stable per-token local user scope when Supabase auth is unavailable."""
+    """Derive a stable local user scope when Supabase auth is unavailable."""
+    header_user_id = (request.headers.get("X-0101-User-Id") or "").strip()
+    header_email = (request.headers.get("X-0101-User-Email") or "").strip().lower()
+    account_key = header_user_id or header_email
+    if account_key:
+        digest = hashlib.sha256(account_key.encode("utf-8")).hexdigest()[:16]
+        return {
+            "id": f"local-account:{digest}",
+            "email": header_email or f"local-account-{digest}@0101.local",
+            "full_name": "Local Developer",
+            "tier": "free",
+            "is_authenticated": False,
+            "scope_source": "local-account",
+        }
+
     authorization = request.headers.get("Authorization", "")
     token = ""
     if authorization.startswith("Bearer "):
@@ -126,7 +141,7 @@ def _local_dev_user_for_request(request: Request) -> Dict[str, Any]:
         digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
         return {
             "id": f"local:{digest}",
-            "email": f"local-{digest}@esemble.local",
+            "email": f"local-{digest}@0101.local",
             "full_name": "Local Developer",
             "tier": "free",
             "is_authenticated": False,
@@ -312,9 +327,9 @@ async def startup_event():
         from core.scheduler import init_scheduler
         scheduler = init_scheduler(audit_logger, dag_engine)
         await scheduler.start()
-        print("🕒 [Esemble] Sovereign Scheduler active")
+        print("🕒 [0101] Sovereign Scheduler active")
     except Exception as e:
-        print(f"⚠️ [Esemble] Failed to start scheduler: {e}")
+        print(f"⚠️ [0101] Failed to start scheduler: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -322,7 +337,7 @@ async def shutdown_event():
     # Stop the Sovereign Scheduler
     if scheduler:
         await scheduler.stop()
-        print("👋 [Esemble] Scheduler stopped")
+        print("👋 [0101] Scheduler stopped")
 
     @app.exception_handler(RateLimitExceeded)
     async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
@@ -1103,7 +1118,7 @@ async def get_supported_formats():
     """List all supported agent formats for the Universal Importer."""
     return {
         "formats": [
-            {"id": "markdown", "name": "Markdown + Frontmatter", "description": "Native Esemble format"},
+            {"id": "markdown", "name": "Markdown + Frontmatter", "description": "Native 0101 format"},
             {"id": "python", "name": "Python Classes", "description": "MetaGPT/CrewAI roles"},
             {"id": "yaml", "name": "YAML Configs", "description": "LangChain/AutoGen configurations"},
             {"id": "json", "name": "JSON Manifests", "description": "SuperAGI/OpenAI manifests"},
@@ -1130,7 +1145,7 @@ async def trigger_panic():
 ## Status: SYSTEM_HALTED
 
 ### Snapshot Details
-The Esemble governance engine has intercepted a panic signal. All active agent API sessions have been terminated.
+The 0101 governance engine has intercepted a panic signal. All active agent API sessions have been terminated.
 - **Panic State**: ACTIVE
 - **Reason**: Manual Override (Panic Button 2.0)
 - **Active Approvals**: {len(gov_instance.pending_approvals)} cleared.
@@ -1168,13 +1183,13 @@ async def generate_chat_response_endpoint(request: Request, req: Dict[str, Any])
     effective_agent_id = agent_id or assistant_id
 
     # 🪪 Persona Resolution
-    agent_name = "Esemble AI Assistant"
+    agent_name = "0101 AI Assistant"
     system_instruction = None
 
     if use_skills and effective_agent_id:
         skill = skill_registry.get_skill(effective_agent_id)
         if skill:
-            agent_name = skill.get("name", "Esemble specialist")
+            agent_name = skill.get("name", "0101 specialist")
             system_instruction = f"Your specific mandate is: {skill.get('description', '')}."
 
     if system_instruction:
@@ -1633,7 +1648,7 @@ async def generate_sop(request: GenerateRequest):
     skills_text = "\n".join([f"- {s['name']}: {s['description']} (Role: {s['id']})" for s in skills])
     
     system_prompt = f"""
-You are the Esemble Architect. Your goal is to design a multi-agent workflow (SOP) based on a user's prompt.
+You are the 0101 Architect. Your goal is to design a multi-agent workflow (SOP) based on a user's prompt.
 You MUST respond with a raw JSON object only. No markdown, no triple backticks.
 
 AVAILABLE SKILLS (Roles):
@@ -2215,30 +2230,37 @@ def _format_activity_message(action_type, details, agent_id):
     return messages.get(action_type, f"{action_type} by {agent_id or 'system'}")
 
 
+def _resolve_execution_company_id(conn: sqlite3.Connection, run_id: str, scope_company_id: str) -> str:
+    """Prefer the current request scope, but fall back to the execution's stored company."""
+    row = conn.execute(
+        "SELECT company_id FROM executions WHERE run_id = ? AND company_id = ? LIMIT 1",
+        (run_id, scope_company_id),
+    ).fetchone()
+    if row and row[0]:
+        return str(row[0])
+
+    fallback = conn.execute(
+        "SELECT company_id FROM executions WHERE run_id = ? LIMIT 1",
+        (run_id,),
+    ).fetchone()
+    if fallback and fallback[0]:
+        return str(fallback[0])
+    return scope_company_id
+
+
 @app.get("/api/runs/{run_id}/timeline")
 async def get_run_timeline(run_id: str, request: Request):
     """Retrieve all execution snapshots for the scrub bar."""
     scope_company_id = _get_user_scope_company_id(request)
     with sqlite3.connect(gov_instance.db_path) as conn:
         resolved_run_id = run_id
+        resolved_company_id = _resolve_execution_company_id(conn, run_id, scope_company_id)
         run_exists = conn.execute(
             "SELECT 1 FROM executions WHERE run_id = ? AND company_id = ?",
-            (run_id, scope_company_id),
+            (run_id, resolved_company_id),
         ).fetchone()
         if not run_exists:
-            fallback = conn.execute(
-                """
-                SELECT run_id
-                FROM executions
-                WHERE workflow_id = ? AND company_id = ?
-                ORDER BY started_at DESC
-                LIMIT 1
-                """,
-                (run_id, scope_company_id),
-            ).fetchone()
-            if not fallback:
-                return []
-            resolved_run_id = fallback[0]
+            return []
 
         cursor = conn.execute("""
             SELECT s.id, s.node_id, s.artifact_hash, s.graph_state_compressed, s.status, s.created_at
@@ -2246,7 +2268,7 @@ async def get_run_timeline(run_id: str, request: Request):
             INNER JOIN executions e ON e.run_id = s.run_id
             WHERE s.run_id = ? AND e.company_id = ?
             ORDER BY s.created_at ASC
-        """, (resolved_run_id, scope_company_id))
+        """, (resolved_run_id, resolved_company_id))
         
         timeline = []
         for row in cursor.fetchall():
@@ -2273,12 +2295,13 @@ async def get_run_status(run_id: str, request: Request):
     """Return the live execution status for a workflow run."""
     scope_company_id = _get_user_scope_company_id(request)
     with sqlite3.connect(gov_instance.db_path) as conn:
+        resolved_company_id = _resolve_execution_company_id(conn, run_id, scope_company_id)
         cursor = conn.execute("""
             SELECT run_id, workflow_id, status, current_node, last_agent_id, started_at, current_iteration, max_iterations
             FROM executions
             WHERE run_id = ? AND company_id = ?
             LIMIT 1
-        """, (run_id, scope_company_id))
+        """, (run_id, resolved_company_id))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Run not found")
@@ -2287,7 +2310,7 @@ async def get_run_status(run_id: str, request: Request):
 
         graph_json = None
         workflow_name = None
-        cursor = conn.execute("SELECT name, graph_json FROM workflows WHERE id = ? AND company_id = ?", (workflow_id, scope_company_id))
+        cursor = conn.execute("SELECT name, graph_json FROM workflows WHERE id = ? AND company_id = ?", (workflow_id, resolved_company_id))
         wf_row = cursor.fetchone()
         if wf_row:
             workflow_name, graph_json = wf_row
@@ -2409,7 +2432,7 @@ async def get_run_events(run_id: str, request: Request):
     }
 
 @app.post("/api/runs/{run_id}/fork")
-async def fork_run(run_id: str, snapshot_id: int):
+async def fork_run(run_id: str, snapshot_id: Optional[int] = None):
     """Create a lineage-linked fork from a specific snapshot point."""
     new_run_id = f"fork_{uuid.uuid4().hex[:8]}"
     
@@ -2428,9 +2451,23 @@ async def fork_run(run_id: str, snapshot_id: int):
             VALUES (?, ?, ?, ?)
         """, (new_run_id, workflow_id, "idle", run_id))
         
-        # Clone graph state from snapshot to the new run's starting point
-        cursor = conn.execute("SELECT graph_state_compressed FROM snapshots WHERE id = ?", (snapshot_id,))
-        snap = cursor.fetchone()
+        # Clone graph state from the requested snapshot, or fall back to the latest snapshot.
+        snap = None
+        if snapshot_id is not None:
+            cursor = conn.execute("SELECT graph_state_compressed FROM snapshots WHERE id = ?", (snapshot_id,))
+            snap = cursor.fetchone()
+        if not snap:
+            cursor = conn.execute(
+                """
+                SELECT graph_state_compressed
+                FROM snapshots
+                WHERE run_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (run_id,),
+            )
+            snap = cursor.fetchone()
         if snap and snap[0]:
             conn.execute("""
                 INSERT INTO snapshots (run_id, node_id, graph_state_compressed, status)
@@ -2542,21 +2579,91 @@ async def update_security_policy(policy: Dict[str, Any]):
 
 # --- Workflow Execution Registry ---
 
+def _link_company_task_run(company_id: str, task_id: Optional[str], workflow_id: str, run_id: str, status: str) -> None:
+    if not task_id:
+        return
+    try:
+        with sqlite3.connect(company_routes.DB_PATH) as conn:
+            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            conn.execute(
+                """
+                UPDATE company_issues
+                SET workflow_id = ?, run_id = ?, status = ?, updated_at = ?
+                WHERE id = ? AND company_id = ?
+                """,
+                (workflow_id, run_id, status, now, task_id, company_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO company_activity (id, company_id, action_type, message, details_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"act-{uuid.uuid4().hex[:12]}",
+                    company_id,
+                    "task.run_started",
+                    f"Task {task_id} started as run {run_id}.",
+                    json.dumps({"task_id": task_id, "workflow_id": workflow_id, "run_id": run_id}),
+                    now,
+                ),
+            )
+            conn.commit()
+    except Exception as exc:
+        print(f"⚠️ [Task Link] Failed to link task {task_id} to run {run_id}: {exc}", flush=True)
+
+
+def _seed_execution_record(
+    workflow_id: str,
+    run_id: str,
+    company_id: str,
+    nodes: List[Dict[str, Any]],
+):
+    """Create the execution row immediately so the UI can track a live run."""
+    started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    current_node = nodes[0]["id"] if nodes and nodes[0].get("id") else None
+    with sqlite3.connect(gov_instance.db_path) as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO executions
+            (run_id, workflow_id, company_id, status, current_node, started_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (run_id, workflow_id, company_id, "running", current_node, started_at),
+        )
+        for index, node in enumerate(nodes):
+            node_id = node.get("id")
+            if not node_id:
+                continue
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO node_executions
+                (run_id, node_id, status, output, updated_at)
+                VALUES (?, ?, ?, NULL, ?)
+                """,
+                (run_id, node_id, "queued" if index == 0 else "idle", started_at),
+            )
+        conn.commit()
+
+
 @app.post("/api/workflows/run")
 async def run_workflow(request: Request):
     """
     Executes a multi-agent DAG workflow from the canvas.
-    Bridges the ReactFlow graph to the Esemble DAG Engine.
+    Bridges the ReactFlow graph to the 0101 DAG Engine.
     """
     try:
         data = await request.json()
         workflow_id = data.get("id") or str(uuid.uuid4())
-        nodes = data.get("nodes", [])
-        edges = data.get("edges", [])
-        metadata = data.get("metadata") or {}
-        initial_input = data.get("initialInput", "")
+        graph = data.get("graph") or {}
+        if not isinstance(graph, dict):
+            graph = {}
+        nodes = data.get("nodes") or graph.get("nodes") or []
+        edges = data.get("edges") or graph.get("edges") or []
+        metadata = data.get("metadata") or graph.get("metadata") or {}
+        task_id = data.get("task_id") or data.get("taskId") or metadata.get("task_id") or metadata.get("taskId")
+        initial_input = data.get("initialInput") or data.get("initial_input") or ""
         user_id = _get_user_id_from_request(request)
-        scope_company_id = _get_user_scope_company_id(request)
+        scope_company_id = data.get("company_id") or data.get("companyId") or _get_user_scope_company_id(request)
 
         if not nodes:
             raise HTTPException(status_code=400, detail="Workflow canvas is empty")
@@ -2603,6 +2710,8 @@ async def run_workflow(request: Request):
                 },
             }
             run_id = f"sim_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+            _seed_execution_record(workflow_id, run_id, scope_company_id, nodes)
+            _link_company_task_run(scope_company_id, task_id, workflow_id, run_id, "running")
             runner = SimulationRunner(
                 db_path=gov_instance.db_path,
                 workflow_id=workflow_id,
@@ -2634,10 +2743,22 @@ async def run_workflow(request: Request):
         env_key = _api_key_env_for_provider(provider)
         api_key = _get_saved_api_key_for_user(user_id, provider) or (os.getenv(env_key) if env_key else None)
         if _provider_requires_api_key(provider) and (not api_key or api_key == "your_key_here"):
-            raise HTTPException(
-                status_code=400,
-                detail=f"{provider} API key is not configured. Add a valid key in Settings > Model Provider and test it before running workflows.",
-            )
+            fallback = _fallback_provider_for_missing_key(provider, model, base_url)
+            if fallback:
+                provider = fallback["provider"]
+                model = fallback["model"]
+                base_url = fallback["base_url"]
+                api_key = fallback["api_key"]
+                logger.warning(
+                    "⚠️ [Workflow Execution] Falling back to %s because %s has no usable API key",
+                    provider,
+                    data.get("provider") or "saved provider",
+                )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{provider} API key is not configured. Add a valid key in Settings > Model Provider and test it before running workflows.",
+                )
 
         run_llm = LLMProvider(provider=provider, model=model, base_url=base_url, api_key=api_key)
 
@@ -2654,6 +2775,8 @@ async def run_workflow(request: Request):
         runtime_engine = "langgraph" if supports_langgraph_workflow(nodes, edges) else "custom_dag"
 
         run_id = f"run_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+        _seed_execution_record(workflow_id, run_id, scope_company_id, nodes)
+        _link_company_task_run(scope_company_id, task_id, workflow_id, run_id, "running")
 
         # Execute the workflow in the background
         asyncio.create_task(
@@ -3788,7 +3911,7 @@ async def export_to_zip(req: Dict[str, Any]):
                 "id": agent_id.replace("custom_", "").replace("native_", "exported_"),
                 "name": skill["name"],
                 "version": "1.0.0",
-                "author": "Esemble User",
+                "author": "0101 User",
                 "description": skill["description"],
                 "agent_files": [filename]
             }
@@ -3817,7 +3940,7 @@ async def export_to_zip(req: Dict[str, Any]):
                 "id": pack_id,
                 "name": local_meta.get("name", pack_id),
                 "version": local_meta.get("version", "1.0.0"),
-                "author": local_meta.get("author", "Esemble User"),
+                "author": local_meta.get("author", "0101 User"),
                 "description": local_meta.get("description", ""),
                 "agent_files": []
             }
@@ -4270,6 +4393,8 @@ async def get_workflow_output(workflow_id: str, request: Request, run_id: Option
         node_lookup: Dict[str, Dict[str, str]] = {}
         workflow_name = ""
         with sqlite3.connect(gov_instance.db_path) as conn:
+            if run_id:
+                scope_company_id = _resolve_execution_company_id(conn, run_id, scope_company_id)
             try:
                 cursor = conn.execute(
                     """
@@ -4758,6 +4883,39 @@ def _provider_requires_api_key(provider: str) -> bool:
     return (provider or "").strip().lower() not in {"ollama", "local"}
 
 
+def _fallback_provider_for_missing_key(provider: str, model: str, base_url: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Choose a local-dev safe provider when the saved provider lacks a usable key."""
+    normalized = (provider or "").strip().lower()
+    if normalized != "openai_compatible":
+        return None
+
+    if os.getenv("GROQ_API_KEY"):
+        return {
+            "provider": "groq",
+            "model": os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+            "base_url": os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+            "api_key": os.getenv("GROQ_API_KEY"),
+        }
+
+    if os.getenv("GEMINI_API_KEY"):
+        return {
+            "provider": "gemini",
+            "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            "base_url": None,
+            "api_key": os.getenv("GEMINI_API_KEY"),
+        }
+
+    if os.getenv("OLLAMA_BASE_URL"):
+        return {
+            "provider": "ollama",
+            "model": os.getenv("OLLAMA_MODEL", "llama3.2"),
+            "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+            "api_key": None,
+        }
+
+    return None
+
+
 def _api_key_env_for_provider(provider: str) -> Optional[str]:
     provider = (provider or "").strip().lower()
     if provider == "gemini":
@@ -4944,7 +5102,7 @@ async def run_org_task(org_id: str, task_id: str, request: Request):
             messages=[{"role": "user", "content": f"{task_title}\n\n{task_desc}\n\nPlease complete this task."}],
             model=data.get("model", "gemini-2.5-flash"),
             provider=data.get("provider", "gemini"),
-            agent_name=agent_id or "Esemble specialist"
+            agent_name=agent_id or "0101 specialist"
         )
 
         return {
@@ -6236,7 +6394,6 @@ def _classify_workflow_domain(prompt: str) -> Dict[str, Any]:
                     "categories": ["marketing", "writing", "product"],
                     "preferred_ids": [
                         "core_marketing-multi-platform-content-strategist",
-                        "core_marketing-thought-leadership-author",
                         "core_marketing-technical-seo-lead",
                         "seo-content-writer",
                         "content-marketer",
@@ -6394,7 +6551,6 @@ def _classify_workflow_domain(prompt: str) -> Dict[str, Any]:
                     "categories": ["marketing", "writing", "product"],
                     "preferred_ids": [
                         "core_marketing-multi-platform-content-strategist",
-                        "core_marketing-thought-leadership-author",
                         "core_marketing-technical-seo-lead",
                         "seo-content-writer",
                         "content-marketer",
@@ -6875,6 +7031,26 @@ def _compress_stage_plan(stages: List[Dict[str, Any]], desired_count: int, bluep
     desired_count = max(1, min(desired_count, 5))
     if desired_count == 1 or len(stages) == 1:
         return [_merge_stage_group(stages, blueprint_key=blueprint_key)]
+
+    if blueprint_key in {"local_business_web", "fitness_wellness_web"}:
+        if desired_count == 2 and len(stages) >= 4:
+            return [
+                _merge_stage_group(stages[:3], blueprint_key=blueprint_key, family_override="design"),
+                _merge_stage_group(stages[3:], blueprint_key=blueprint_key, family_override="engineering"),
+            ]
+        if desired_count == 3 and len(stages) >= 5:
+            return [
+                dict(stages[0]),
+                _merge_stage_group(stages[1:3], blueprint_key=blueprint_key, family_override="design"),
+                _merge_stage_group(stages[3:], blueprint_key=blueprint_key, family_override="engineering"),
+            ]
+        if desired_count == 4 and len(stages) >= 5:
+            return [
+                dict(stages[0]),
+                _merge_stage_group(stages[1:3], blueprint_key=blueprint_key, family_override="design"),
+                dict(stages[3]),
+                dict(stages[4]),
+            ]
 
     if desired_count == 2:
         if blueprint_key in {"news_article_content", "marketing_content"} and len(stages) >= 2:

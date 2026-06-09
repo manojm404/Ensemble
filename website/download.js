@@ -1,7 +1,7 @@
 document.querySelectorAll('.download-trigger').forEach(button => {
     button.addEventListener('click', (e) => {
         const os = e.currentTarget.dataset.os;
-        const filename = os === 'mac' ? 'Esemble-1.0.0.dmg' : 'Esemble-1.0.0.exe';
+        const filename = os === 'mac' ? '0101-1.0.0.dmg' : '0101-1.0.0.exe';
         
         // Visual feedback
         const originalText = button.textContent;
@@ -13,14 +13,14 @@ document.querySelectorAll('.download-trigger').forEach(button => {
             button.textContent = 'Starting Download...';
             
             // In a real V1, we would redirect to the actual binary:
-            // window.location.href = `https://github.com/manojm404/Ensemble/releases/download/v1.0.0/${filename}`;
+            // window.location.href = `https://github.com/manojm404/0101/releases/download/v1.0.0/${filename}`;
             
             // For this demo, let's just show a success state
             setTimeout(() => {
                 button.textContent = `Download Started!`;
                 button.style.background = 'linear-gradient(135deg, #10b981, #3b82f6)';
                 
-                alert(`🚀 Esemble V1.0.0 Release:\n\nIn a production environment, this would initiate the download of ${filename}.\n\nYour desktop app is ready for deployment.`);
+                alert(`🚀 0101 V1.0.0 Release:\n\nIn a production environment, this would initiate the download of ${filename}.\n\nYour desktop app is ready for deployment.`);
                 
                 setTimeout(() => {
                     button.textContent = originalText;

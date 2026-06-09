@@ -1,5 +1,5 @@
 # ============================================================
-# Ensemble - Docker Compose for Full Stack
+# 0101 - Docker Compose for Full Stack
 # ============================================================
 # Usage:
 #   docker compose up -d          # Start all services
@@ -14,31 +14,31 @@ services:
   # ----------------------------------------------------------
   # Backend: FastAPI + Uvicorn
   # ----------------------------------------------------------
-  ensemble-backend:
+  0101-backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ensemble-backend
+    container_name: 0101-backend
     ports:
       - "8088:8088"
     env_file:
       - .env
     environment:
-      - CORS_ORIGINS=http://localhost:3000,http://localhost:8080,http://ensemble-ui:3000
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:8080,http://0101-ui:3000
       - WORKSPACE_DIR=/app/data/workspace
     volumes:
       # Persist user data across container restarts
-      - ensemble-data:/app/data
+      - 0101-data:/app/data
       # Mount code for development (comment out for production)
       # - ./core:/app/core:ro
       # - ./execution:/app/execution:ro
       # - ./skills:/app/skills:ro
       # - ./directives:/app/directives:ro
     depends_on:
-      - ensemble-healthcheck
+      - 0101-healthcheck
     restart: unless-stopped
     networks:
-      - ensemble-network
+      - 0101-network
     # Resource limits
     deploy:
       resources:
@@ -52,21 +52,21 @@ services:
   # ----------------------------------------------------------
   # Frontend: React + Tauri (UI)
   # ----------------------------------------------------------
-  ensemble-ui:
+  0101-ui:
     build:
       context: ./ui
       dockerfile: Dockerfile.ui
-    container_name: ensemble-ui
+    container_name: 0101-ui
     ports:
       - "3000:3000"
     environment:
-      - VITE_API_URL=http://ensemble-backend:8088
-      - VITE_WS_URL=ws://ensemble-backend:8088
+      - VITE_API_URL=http://0101-backend:8088
+      - VITE_WS_URL=ws://0101-backend:8088
     depends_on:
-      - ensemble-backend
+      - 0101-backend
     restart: unless-stopped
     networks:
-      - ensemble-network
+      - 0101-network
     deploy:
       resources:
         limits:
@@ -76,14 +76,14 @@ services:
   # ----------------------------------------------------------
   # Healthcheck: Wait for backend to be ready
   # ----------------------------------------------------------
-  ensemble-healthcheck:
+  0101-healthcheck:
     image: alpine:3.18
-    container_name: ensemble-healthcheck
+    container_name: 0101-healthcheck
     command: >
       sh -c "
         echo 'Waiting for backend to be ready...' &&
         for i in $(seq 1 30); do
-          if wget -qO- http://ensemble-backend:8088/health 2>/dev/null; then
+          if wget -qO- http://0101-backend:8088/health 2>/dev/null; then
             echo 'Backend is ready!' &&
             exit 0
           fi
@@ -94,7 +94,7 @@ services:
         exit 1
       "
     networks:
-      - ensemble-network
+      - 0101-network
     profiles:
       - healthcheck
 
@@ -102,7 +102,7 @@ services:
 # Named volumes for persistent data
 # ----------------------------------------------------------
 volumes:
-  ensemble-data:
+  0101-data:
     driver: local
     driver_opts:
       type: none
@@ -113,6 +113,6 @@ volumes:
 # Networks
 # ----------------------------------------------------------
 networks:
-  ensemble-network:
+  0101-network:
     driver: bridge
-    name: ensemble-network
+    name: 0101-network

@@ -1,5 +1,5 @@
 """
-core/scheduler.py - Persistent background scheduler for Ensemble Sovereign workflows.
+core/scheduler.py - Persistent background scheduler for 0101 Sovereign workflows.
 
 Polls the 'scheduled_jobs' table in audit.db and executes workflows via DAGWorkflowEngine.
 Supports cron-like behavior (hourly, daily) and one-off tasks.

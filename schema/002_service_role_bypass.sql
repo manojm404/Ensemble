@@ -1,5 +1,5 @@
 -- =====================================================
--- Esemble Phase 3 Migration: Service Role Bypass Policies
+-- 0101 Phase 3 Migration: Service Role Bypass Policies
 -- =====================================================
 -- The service_role key needs to be able to insert/update
 -- on behalf of users. These policies allow the backend

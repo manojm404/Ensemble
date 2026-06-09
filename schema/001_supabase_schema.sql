@@ -1,5 +1,5 @@
 -- =====================================================
--- Ensemble v2.0 — Supabase Database Schema
+-- 0101 v2.0 — Supabase Database Schema
 -- =====================================================
 -- Purpose: Multi-tenant schema with Row Level Security (RLS)
 --          for user isolation, encrypted API keys, budget tracking,
@@ -41,7 +41,7 @@ CREATE TABLE public.profiles (
     CONSTRAINT tier_valid CHECK (tier IN ('free', 'pro', 'enterprise'))
 );
 
-COMMENT ON TABLE public.profiles IS 'Extends Supabase auth.users with Ensemble-specific profile data.';
+COMMENT ON TABLE public.profiles IS 'Extends Supabase auth.users with 0101-specific profile data.';
 COMMENT ON COLUMN public.profiles.tier IS 'Subscription tier: free (100 SOP runs/mo), pro, enterprise.';
 COMMENT ON COLUMN public.profiles.sop_run_count IS 'Tracks monthly SOP runs for free tier enforcement.';
 COMMENT ON COLUMN public.profiles.total_cost_usd IS 'Cumulative LLM API cost for this user.';
@@ -791,7 +791,7 @@ BEGIN
       AND routine_name NOT LIKE 'pg_%';
 
     RAISE NOTICE '========================================';
-    RAISE NOTICE 'Ensemble Schema Verification Complete';
+    RAISE NOTICE '0101 Schema Verification Complete';
     RAISE NOTICE '========================================';
     RAISE NOTICE 'Tables created:      %', table_count;
     RAISE NOTICE 'RLS policies created: %', policy_count;

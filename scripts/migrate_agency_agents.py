@@ -1,7 +1,7 @@
 """
 scripts/migrate_agency_agents.py
-Migration script to convert agency-agents repository to Ensemble format.
-Maps Anthropic model tiers to Ensemble providers and adds model overrides.
+Migration script to convert agency-agents repository to 0101 format.
+Maps Anthropic model tiers to 0101 providers and adds model overrides.
 """
 import os
 import yaml
@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any, List
 
-# Model tier mapping from agency-agents to Ensemble
+# Model tier mapping from agency-agents to 0101
 TIER_MAPPING = {
     # Tier 1: Opus 4.6 (Critical tasks) -> Gemini 2.5 Pro or GPT-4
     "opus": {
@@ -255,7 +255,7 @@ def main():
     """Run migration on agency-agents repository."""
     import argparse
     
-    parser = argparse.ArgumentParser(description="Migrate agency-agents to Ensemble format")
+    parser = argparse.ArgumentParser(description="Migrate agency-agents to 0101 format")
     parser.add_argument("repo_path", help="Path to agency-agents repository")
     parser.add_argument("--tier", choices=["opus", "sonnet", "haiku", "inherit"],
                        help="Force all agents to use specific tier")

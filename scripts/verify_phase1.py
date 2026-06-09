@@ -57,7 +57,7 @@ def section(title: str):
 # Verification
 # ============================================================
 
-print(f"\n{BOLD}Ensemble Phase 1 — Verification Script{RESET}")
+print(f"\n{BOLD}0101 Phase 1 — Verification Script{RESET}")
 print(f"{'─' * 60}")
 
 # --- 1. File Existence Checks ---
@@ -229,8 +229,8 @@ section("6. Docker Configuration")
 docker_compose = Path("docker-compose.yml")
 if docker_compose.exists():
     content = docker_compose.read_text()
-    check("docker-compose.yml defines ensemble-backend", "ensemble-backend" in content)
-    check("docker-compose.yml defines ensemble-ui", "ensemble-ui" in content)
+    check("docker-compose.yml defines 0101-backend", "0101-backend" in content)
+    check("docker-compose.yml defines 0101-ui", "0101-ui" in content)
     check("docker-compose.yml uses env_file", "env_file:" in content)
     check("docker-compose.yml defines volumes", "volumes:" in content)
     check("docker-compose.yml defines networks", "networks:" in content)

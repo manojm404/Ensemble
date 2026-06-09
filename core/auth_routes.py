@@ -1,5 +1,5 @@
 """
-core/auth_routes.py - Authentication Endpoints for Esemble
+core/auth_routes.py - Authentication Endpoints for 0101
 
 Registers all auth-related routes on the FastAPI app.
 Import and call `register_auth_routes(app)` during app initialization.
@@ -440,9 +440,15 @@ async def get_current_user_profile(user: UserInToken = Depends(get_current_user)
         result = supabase_admin.query("profiles", "select", columns="*", eq="id", eq_value=user.id)
 
         if not result.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User profile not found.",
+            logger.info("ℹ️ [Auth] Profile row missing for %s; returning token profile.", user.email)
+            return UserProfileResponse(
+                id=user.id,
+                email=user.email,
+                full_name=None,
+                avatar_url=None,
+                tier="free",
+                sop_run_count=0,
+                total_cost_usd=0.0,
             )
 
         profile = result.data[0]
@@ -495,13 +501,18 @@ async def update_current_user_profile(
                 detail="No fields to update.",
             )
 
-        result = supabase_admin.query("profiles", "update", data=update_data, eq="id", eq_value=user.id)
+        update_data["id"] = user.id
+        update_data["email"] = user.email
+
+        result = supabase_admin.query(
+            "profiles",
+            "upsert",
+            data=update_data,
+            on_conflict="id",
+        )
 
         if not result.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User profile not found.",
-            )
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save profile.")
 
         profile = result.data[0]
 

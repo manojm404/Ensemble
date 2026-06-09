@@ -4,7 +4,7 @@ core/workflow_planner.py
 LangChain-backed Magic Flow planner.
 
 This module turns a user prompt into a structured workflow plan, then lets
-Esemble's deterministic runtime map that plan onto the actual specialist
+0101's deterministic runtime map that plan onto the actual specialist
 registry and artifact/runtime contract.
 """
 
@@ -132,7 +132,7 @@ async def build_magicflow_plan(
         model = llm.get_langchain_model(temperature=0.2)
 
         system_prompt = (
-            "You are the Esemble Magic Flow planner.\n"
+            "You are the 0101 Magic Flow planner.\n"
             "Your job is to turn a user request into a clean, minimal, production-grade workflow plan.\n"
             "Rules:\n"
             "- Choose the minimum number of stages that still fully covers the request.\n"

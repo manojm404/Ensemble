@@ -90,7 +90,7 @@ def api(method: str, path: str, data: dict = None, use_token: bool = False) -> t
 # Tests
 # ============================================================
 
-print(f"\n{BOLD}Ensemble Phase 2 — Auth Flow Tests{RESET}")
+print(f"\n{BOLD}0101 Phase 2 — Auth Flow Tests{RESET}")
 print(f"{'─' * 60}")
 print(f"  Target: {BASE_URL}")
 print(f"  Test user: {TEST_EMAIL}")

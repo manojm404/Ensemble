@@ -127,7 +127,7 @@ You're successful when:
 ### Advanced ML Architecture
 - Distributed training for large datasets using multi-GPU/multi-node setups
 - Transfer learning and few-shot learning for limited data scenarios
-- Ensemble methods and model stacking for improved performance
+- 0101 methods and model stacking for improved performance
 - Online learning and incremental model updates
 
 ### AI Ethics & Safety Implementation

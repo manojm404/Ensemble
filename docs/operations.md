@@ -1,25 +1,18 @@
-# Esemble Operations Guide
+# 0101 Operations Guide
 
-This guide covers local setup, self-hosting, and release smoke tests.
+This guide covers local setup, environment variables, report email delivery, smoke tests, and common troubleshooting.
 
-## Local Quick Start
-
-### Prerequisites
-
-- Python 3.11+
-- Node.js 18+
-- npm
-- One model option:
-  - Gemini/OpenAI-compatible API key, or
-  - Ollama running locally
+## 1. Local Setup
 
 ### Backend
+
+Install Python dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Create `.env`:
+Create a local `.env`:
 
 ```env
 ENFORCE_AUTH=false
@@ -31,7 +24,7 @@ RATE_LIMIT_ENABLED=true
 RATE_LIMIT_PER_MINUTE=100
 ```
 
-For local Ollama:
+For Ollama:
 
 ```env
 ENFORCE_AUTH=false
@@ -40,19 +33,13 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.1
 ```
 
-Start backend:
+Start the backend:
 
 ```bash
-uvicorn core.governance:app --reload --port 8088
+python -m uvicorn core.governance:app --host 127.0.0.1 --port 8088
 ```
 
-Verify:
-
-```bash
-curl http://localhost:8088/health
-```
-
-### UI
+### Frontend
 
 ```bash
 cd ui
@@ -60,72 +47,101 @@ npm install
 npm run dev
 ```
 
-Open the URL printed by Vite.
-
-## Release Demo Flow
-
-1. Open Templates.
-2. Choose Governed Research Report.
-3. Enter a research question.
-4. Run the workflow.
-5. Watch the step timeline.
-6. Review final output.
-7. Review evaluation result.
-8. Export the audit package.
-
-Expected completed run:
-
-- workflow name and version,
-- agent step timeline,
-- artifacts produced,
-- cost/token usage,
-- approval decisions if any,
-- evaluation result,
-- audit export action.
-
-## Self-Hosting
-
-### Deployment Modes
-
-Local Team Mode:
-
-- Backend: FastAPI
-- UI: static/Vite build
-- Storage: SQLite + local CAS artifacts
-- Models: Ollama or configured cloud provider
-
-Managed Database Mode:
-
-- Backend: FastAPI
-- UI: static/Vite build
-- Storage: Supabase/Postgres
-- Artifacts: local CAS or mounted storage
-- Models: user-configured providers
-
-### Production Architecture
+Open:
 
 ```text
-Browser / Desktop
-  -> HTTPS reverse proxy
-  -> Esemble FastAPI backend
-  -> SQLite or Supabase metadata
-  -> CAS artifact storage
-  -> Model provider or local Ollama
+http://127.0.0.1:5173
 ```
 
-### Docker Compose
+## 2. Useful Checks
+
+Backend checks:
 
 ```bash
-cp .env.example .env
-docker compose up -d
-docker compose logs -f
+python -m pytest tests/test_company_routes.py
+python -m py_compile core/company_routes.py core/governance.py core/dag_engine.py
 ```
 
-Required environment:
+Frontend checks:
+
+```bash
+cd ui
+npm run build
+npm run lint
+```
+
+## 3. CEO Task Smoke Test
+
+Use this to verify the main product loop.
+
+1. Sign in locally.
+2. Create a company.
+3. Open Workforce.
+4. Hire at least one agent.
+5. Open Tasks.
+6. Enter a task prompt.
+7. Select a worker or leave it on auto-pick.
+8. Add a report email.
+9. Keep "Email the assigned agent report when the task completes" checked.
+10. Create the task.
+11. Run the task.
+12. Confirm the task card shows worker, run status, output link, and report delivery status.
+
+Expected behavior:
+
+- selected worker changes to `running` while work is active,
+- run creates node execution records,
+- task links to workflow id and run id,
+- completed task creates a report,
+- SMTP configured means email is sent,
+- SMTP missing means delivery is logged locally.
+
+## 4. SMTP Report Delivery
+
+0101 can email CEO task reports when runs complete.
+
+Configure:
+
+```env
+ENSEMBLE_SMTP_HOST=smtp.example.com
+ENSEMBLE_SMTP_PORT=587
+ENSEMBLE_SMTP_FROM=reports@yourdomain.com
+ENSEMBLE_SMTP_USERNAME=your-user
+ENSEMBLE_SMTP_PASSWORD=your-password
+ENSEMBLE_SMTP_USE_TLS=true
+```
+
+Fallback variable names are also supported:
+
+```env
+SMTP_HOST=
+SMTP_PORT=
+SMTP_FROM=
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_USE_TLS=
+```
+
+If SMTP is not configured, the backend does not fail the task. It records delivery status as `logged`, which is useful for local development.
+
+## 5. Local Data
+
+Default local databases:
+
+| File | Purpose |
+| --- | --- |
+| `data/ensemble_companies.db` | companies, departments, hired agents, tasks, report status |
+| `data/ensemble_governance.db` | workflows, executions, node executions, run events |
+| `data/ensemble_audit.db` | audit records |
+| `data/ensemble_space/` | content-addressable artifacts |
+
+## 6. Production Notes
+
+Minimum production settings:
 
 ```env
 ENFORCE_AUTH=true
-CORS_ORIGINS=https://ensemble.yourdomain.com
+CORS_ORIGINS=https://0101.yourdomain.com
 API_KEY_ENCRYPTION_KEY=generated-fernet-key
 APPROVAL_COST_THRESHOLD=0.01
 APPROVAL_TIMEOUT_SECONDS=300
@@ -133,7 +149,7 @@ RATE_LIMIT_ENABLED=true
 RATE_LIMIT_PER_MINUTE=100
 ```
 
-For Supabase mode:
+Supabase mode:
 
 ```env
 SUPABASE_URL=https://your-project.supabase.co
@@ -142,19 +158,31 @@ SUPABASE_SERVICE_ROLE_KEY=...
 JWT_SECRET=...
 ```
 
-For local model mode:
+## 7. Deployment Shape
 
-```env
-LLM_PROVIDER=ollama
-OLLAMA_BASE_URL=http://ollama:11434
-OLLAMA_MODEL=llama3.1
+```mermaid
+flowchart LR
+    Browser["Browser / desktop app"]
+    Proxy["HTTPS reverse proxy"]
+    API["0101 FastAPI backend"]
+    DB["SQLite or Supabase"]
+    Space["CAS artifact storage"]
+    Provider["Model provider or Ollama"]
+    SMTP["SMTP server"]
+
+    Browser --> Proxy
+    Proxy --> API
+    API --> DB
+    API --> Space
+    API --> Provider
+    API --> SMTP
 ```
 
-### Manual Backend Deployment
+## 8. Manual Backend Deployment
 
 ```bash
-python3.11 -m venv /opt/ensemble/venv
-source /opt/ensemble/venv/bin/activate
+python3.11 -m venv /opt/0101/venv
+source /opt/0101/venv/bin/activate
 pip install -r requirements.txt
 gunicorn core.governance:app \
   --bind 0.0.0.0:8088 \
@@ -163,15 +191,15 @@ gunicorn core.governance:app \
   --timeout 120
 ```
 
-### Reverse Proxy
+## 9. Reverse Proxy Example
 
 ```nginx
 server {
     listen 443 ssl;
-    server_name ensemble.yourdomain.com;
+    server_name 0101.yourdomain.com;
 
-    ssl_certificate /etc/letsencrypt/live/ensemble.yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/ensemble.yourdomain.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/0101.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/0101.yourdomain.com/privkey.pem;
 
     location / {
         proxy_pass http://localhost:8088;
@@ -186,55 +214,32 @@ server {
 }
 ```
 
-## Security Checklist
-
-- [ ] HTTPS enabled
-- [ ] `ENFORCE_AUTH=true` outside local development
-- [ ] API key encryption key configured
-- [ ] CORS restricted to known origins
-- [ ] Rate limiting enabled
-- [ ] Supabase RLS migrations applied if using Supabase
-- [ ] Artifact storage backed up
-- [ ] Audit database backed up
-- [ ] Provider keys rotated periodically
-- [ ] Approval threshold configured
-- [ ] Sensitive tools require approval
-
-## Operational Checklist
-
-- [ ] Health check monitored
-- [ ] Backend logs collected
-- [ ] Disk usage monitored for CAS artifacts
-- [ ] Failed run alerting configured
-- [ ] Audit export tested
-- [ ] Restore from backup tested
-- [ ] Provider connection tested
-- [ ] Template workflow smoke test passes
-
-## Troubleshooting
+## 10. Troubleshooting
 
 | Problem | Likely fix |
 | --- | --- |
-| Backend returns 401 | Set `ENFORCE_AUTH=false` for local development or configure Supabase auth |
-| Provider call fails | Check API key or Ollama model name |
-| UI cannot reach backend | Confirm backend is on port `8088` and CORS allows the UI origin |
-| Workflow runs but no output appears | Check backend logs and audit events |
-| Approval is stuck | Open Approval Center or lower approval threshold for local testing |
+| UI cannot reach backend | Confirm backend runs on `127.0.0.1:8088` and CORS includes the UI origin |
+| Login works but data disappears after restart | Check auth mode and local account headers; local mode should use stable `local-account:*` ownership |
+| Cannot hire an agent | Confirm `/api/skills` returns catalog entries and the backend has the latest company routes |
+| Task says `needs_hiring` | Hire an active agent that matches the task or explicitly choose a worker |
+| Report email says `logged` | SMTP is not configured; add SMTP environment variables |
+| Report email says `failed` | Check SMTP host, port, credentials, TLS, and sender policy |
+| Run output 404s | Confirm the task has a `run_id` and the execution exists in the governance database |
+| Provider call fails | Check model provider settings and API key |
 
-## Data Retention
+## 11. Release Checklist
 
-Recommended defaults:
-
-- Audit events: keep indefinitely unless customer policy requires deletion.
-- CAS artifacts: retain at least 90 days.
-- Failed run artifacts: retain at least 30 days.
-- Approval decisions: retain with audit events.
-- Provider API keys: encrypted, never exported in audit packages.
-
-## Backup Targets
-
-- SQLite database or Supabase database
-- `data/ensemble_space`
-- `data/workspace`
-- `.env` stored securely outside repo
-- generated audit exports if stored on disk
+- [ ] Backend starts cleanly
+- [ ] Frontend starts cleanly
+- [ ] Company can be created
+- [ ] Agent can be hired
+- [ ] Agent can be fired without losing old task history
+- [ ] CEO task can be assigned to a selected worker
+- [ ] CEO task can auto-route to hired agents
+- [ ] Task run links task, workflow, and run ids
+- [ ] Completed task creates report state
+- [ ] SMTP report delivery works or logs locally
+- [ ] Audit records are visible
+- [ ] `npm run build` passes
+- [ ] `npm run lint` has no errors
+- [ ] Backend tests pass

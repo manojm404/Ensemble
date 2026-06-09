@@ -1,39 +1,16 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" href="/favicon.png" type="image/png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Esemble — Collaborative OS for Multi-Agent Workflows</title>
-    <meta name="description" content="Esemble is a collaborative OS for building, managing, and orchestrating multi-agent AI workflows with a premium dark interface." />
-    <meta name="author" content="Esemble" />
-
-    <meta property="og:title" content="Esemble — Multi-Agent Workflow OS" />
-    <meta property="og:description" content="Build, manage, and orchestrate multi-agent AI workflows with a premium collaborative interface." />
-    <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
-    <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
-
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@Lovable" />
-    <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
-    
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-
-    <script>
-      (function() {
-        const theme = localStorage.getItem("ensemble-theme");
-        if (theme === "dark" || (!theme && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
-          document.documentElement.classList.add("dark");
-        } else {
-          document.documentElement.classList.remove("dark");
-        }
-      })();
-    </script>
+    <meta name="theme-color" content="#050608" />
+    <meta
+      name="description"
+      content="0101 is the control plane for AI agent workflows: design SOPs, run them safely, audit every step, and prove the cost."
+    />
+    <title>0101 — Govern the agents you ship</title>
+    <link rel="icon" type="image/png" href="/brand/0101-logo-icon.png" />
   </head>
-
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

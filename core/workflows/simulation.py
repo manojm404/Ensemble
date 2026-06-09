@@ -1,6 +1,6 @@
 """Logical-cycle simulation runtime for Workflow Studio 2.0.
 
-This runner is intentionally deterministic. It gives Esemble a governed
+This runner is intentionally deterministic. It gives 0101 a governed
 runtime for chaotic workflows without forcing every scenario through a linear
 DAG or spending LLM budget per simulated tick.
 """

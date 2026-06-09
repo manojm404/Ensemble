@@ -1,6 +1,6 @@
 """
 core/skill_registry.py
-Skill Registry for Esemble — discovers, parses, and manages agent definitions.
+Skill Registry for 0101 — discovers, parses, and manages agent definitions.
 
 Supports multiple formats: .md (primary), .py, .yaml, .json, .txt
 All marketplace packs are normalized to .md during import for consistency.
@@ -181,7 +181,7 @@ class SkillRegistry:
             "tools": meta.get("tools", ["search_web", "read_url"]),
             "emoji": meta.get("emoji", "🤖"),
             "color": meta.get("color", "#6366f1"),
-            "description": meta.get("description", "Esemble Agent"),
+            "description": meta.get("description", "0101 Agent"),
             "prompt_text": body.strip(),
             "filepath": filepath,
             "pack_id": pack_id,

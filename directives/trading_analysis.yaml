@@ -7,7 +7,7 @@
 # 3. Trader makes recommendation
 # 4. Risk team evaluates and Portfolio Manager decides
 #
-# Usage: Load this template in Ensemble's Workflow Studio
+# Usage: Load this template in 0101's Workflow Studio
 
 name: "Trading Analysis"
 description: "Comprehensive stock analysis using multi-agent team debate - produces Buy/Sell/Hold recommendation with reasoning"

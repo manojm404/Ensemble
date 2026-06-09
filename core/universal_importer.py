@@ -6,7 +6,7 @@ Handles the complete import pipeline:
 1. Clone GitHub repo to temp directory
 2. Run format detection on cloned repo
 3. Parse each file using appropriate parser
-4. Convert to Esemble internal format (AgentData)
+4. Convert to 0101 internal format (AgentData)
 5. Group into packs by category
 6. Create ZIP files for each pack
 7. Update marketplace manifest
@@ -515,7 +515,7 @@ class UniversalImporter:
         """
         headers = {
             "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "Esemble-Universal-Importer",
+            "User-Agent": "0101-Universal-Importer",
         }
         if self.github_token:
             headers["Authorization"] = f"token {self.github_token}"
